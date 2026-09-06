@@ -6,8 +6,11 @@ Description: >
 Parameters:
   GitHubRepo:
     Type: String
-    Default: maxbarz-prog/seedance25api
-    Description: GitHub repository (owner/name) allowed to assume the deploy role.
+    # GitHub's OIDC sub claim embeds owner and repo numeric ids
+    # (owner@id/repo@id), which pins trust to this exact repo even if the
+    # name is ever released and re-registered by someone else.
+    Default: maxbarz-prog@268589738/seedance25api@1357961617
+    Description: GitHub repository (owner@id/name@id) allowed to assume the deploy role.
 
 Resources:
   GitHubOidcProvider:
