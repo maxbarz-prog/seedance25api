@@ -1,4 +1,4 @@
-# Remerge — AI video at cost
+# Remerged — AI video at cost
 
 Members-only AI video generation: Seedance rendered at 480p and AI-upscaled to
 1080p (native 1080p available as a premium mode), sold at exactly our cost.

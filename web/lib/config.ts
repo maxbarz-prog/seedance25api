@@ -1,8 +1,9 @@
 // Central product configuration. Brand + plans are placeholders the owner can
 // rename in one place; money values are in USD, credits are $0.001 each.
 
-export const SITE_NAME = "Remerge";
+export const SITE_NAME = "Remerged";
 export const SITE_TAGLINE = "AI video at cost. Really.";
+export const SITE_DOMAIN = "remerged.app";
 
 export const CREDIT_USD = 0.001; // 1 credit = $0.001
 

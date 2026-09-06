@@ -8,7 +8,7 @@ export interface SessionData {
 }
 
 const sessionOptions = {
-  cookieName: "remerge_session",
+  cookieName: "remerged_session",
   password:
     process.env.SESSION_SECRET ||
     "dev-only-session-secret-change-me-32chars!!",
