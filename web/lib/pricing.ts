@@ -23,7 +23,9 @@ export function rates() {
     gen480PerSec: envNum("COST_GEN_480P_PER_SEC", 0.1028),
     // Provider: native 1080p generation, per output second (premium tier).
     gen1080PerSec: envNum("COST_GEN_1080P_PER_SEC", 0.5686),
-    // Provider: upscaler, per source second.
+    // Provider: upscaler, per source second. Defaults are conservative
+    // (aggregator rates); Topaz-direct is expected cheaper — update these
+    // envs after the validation run reads Topaz's own credit estimates.
     upscale2xPerSec: envNum("COST_UPSCALE_2X_PER_SEC", 0.044),
     upscale4xPerSec: envNum("COST_UPSCALE_4X_PER_SEC", 0.077),
     // Storage + CDN delivery allocation, per video.
