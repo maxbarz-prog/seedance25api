@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 interface Job {
   id: string;
   prompt: string;
+  model?: string;
   duration_s: number;
   aspect: string;
   mode: string;
@@ -69,8 +70,9 @@ export default function JobView({ id }: { id: string }) {
     <div className="py-10">
       <p className="text-sm text-muted">
         “{job.prompt.slice(0, 140)}
-        {job.prompt.length > 140 ? "…" : ""}” · {job.duration_s}s · {job.aspect} ·{" "}
-        ${(job.quote_credits / 1000).toFixed(2)}
+        {job.prompt.length > 140 ? "…" : ""}”
+        {job.model === "seedance-2.0" ? " · Seedance 2.0" : " · Seedance 2.5"} ·{" "}
+        {job.duration_s}s · {job.aspect} · ${(job.quote_credits / 1000).toFixed(2)}
       </p>
 
       {job.status === "failed" ? (

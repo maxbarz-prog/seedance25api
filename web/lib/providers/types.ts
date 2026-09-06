@@ -5,6 +5,7 @@
 
 export interface GenerationRequest {
   prompt: string;
+  model: string; // product model id, e.g. "seedance-2.5"
   durationS: number;
   aspect: string;
   audio: boolean;

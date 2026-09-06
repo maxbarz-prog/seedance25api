@@ -21,6 +21,7 @@ export interface Job {
   id: string;
   user_id: string;
   prompt: string;
+  model: string;
   duration_s: number;
   aspect: string;
   audio: number;

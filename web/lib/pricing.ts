@@ -1,12 +1,14 @@
-import { CREDIT_USD } from "./config";
+import { CREDIT_USD, ModelId } from "./config";
 
-// The at-cost pricing model. Every number here is a COST INPUT, never a
-// margin: provider rates for generation and upscaling, a delivery allocation
-// for storage/egress, and a payment-processing recovery factor. The public
-// pricing page renders the same formula this module computes with.
+// The pricing model. Every number here is a COST INPUT: provider rates per
+// model, a delivery allocation for storage/egress, an operations overhead
+// covering the fixed costs of running the service (hosting base, admin,
+// support), and a payment-processing recovery factor. The public pricing
+// page renders the same formula this module computes with.
 //
 // Rates are env-overridable so production can track upstream price changes
-// without a deploy. Defaults reflect verified provider pricing (Sep 2026).
+// without a deploy. Generation defaults are provisional until the validation
+// run reads real provider billing; they err on the high side.
 
 function envNum(name: string, fallback: number): number {
   const v = process.env[name];
@@ -19,23 +21,32 @@ export type UpscaleFactor = 2 | 4;
 
 export function rates() {
   return {
-    // Provider: 480p generation, per output second.
-    gen480PerSec: envNum("COST_GEN_480P_PER_SEC", 0.1028),
-    // Provider: native 1080p generation, per output second (premium tier).
-    gen1080PerSec: envNum("COST_GEN_1080P_PER_SEC", 0.5686),
-    // Provider: upscaler, per source second. Defaults are conservative
-    // (aggregator rates); Topaz-direct is expected cheaper — update these
-    // envs after the validation run reads Topaz's own credit estimates.
+    // Provider: generation per output second, by model and resolution.
+    gen: {
+      "seedance-2.5": {
+        p480: envNum("COST_SD25_480P_PER_SEC", 0.1028),
+        p1080: envNum("COST_SD25_1080P_PER_SEC", 0.5686),
+      },
+      "seedance-2.0": {
+        p480: envNum("COST_SD20_480P_PER_SEC", 0.06),
+        p1080: envNum("COST_SD20_1080P_PER_SEC", 0.3),
+      },
+    } satisfies Record<ModelId, { p480: number; p1080: number }>,
+    // Provider: upscaler, per source second (Topaz; verified at validation).
     upscale2xPerSec: envNum("COST_UPSCALE_2X_PER_SEC", 0.044),
     upscale4xPerSec: envNum("COST_UPSCALE_4X_PER_SEC", 0.077),
     // Storage + CDN delivery allocation, per video.
     deliveryPerVideo: envNum("COST_DELIVERY_PER_VIDEO", 0.01),
+    // Operations overhead: hosting base, admin, support — as a fraction of
+    // the direct cost.
+    overheadPct: envNum("COST_OVERHEAD_PCT", 0.1),
     // Payment processing recovery, as a fraction of the charged price.
     processingPct: envNum("COST_PROCESSING_PCT", 0.035),
   };
 }
 
 export interface QuoteInput {
+  model: ModelId;
   durationS: number;
   mode: "upscaled-1080p" | "native-1080p";
   upscaleFactor?: UpscaleFactor;
@@ -47,20 +58,22 @@ export interface Quote {
   perSecUsd: number;
 }
 
-// price = (provider costs + delivery) / (1 - processingPct), rounded up to a
-// whole credit. Dividing (not multiplying) makes the processing recovery
-// exact: fee is charged on the final price, not on the pre-fee cost.
+// price = (provider + delivery) x (1 + overhead) / (1 - processing), rounded
+// up to a whole credit. Processing divides (not multiplies) because the fee
+// is charged on the final price.
 export function quote(input: QuoteInput): Quote {
   const r = rates();
   const d = input.durationS;
+  const gen = r.gen[input.model];
   let providerUsd: number;
   if (input.mode === "native-1080p") {
-    providerUsd = r.gen1080PerSec * d;
+    providerUsd = gen.p1080 * d;
   } else {
     const up = input.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec;
-    providerUsd = (r.gen480PerSec + up) * d;
+    providerUsd = (gen.p480 + up) * d;
   }
-  const usd = (providerUsd + r.deliveryPerVideo) / (1 - r.processingPct);
+  const usd =
+    ((providerUsd + r.deliveryPerVideo) * (1 + r.overheadPct)) / (1 - r.processingPct);
   const credits = Math.ceil(usd / CREDIT_USD);
   return {
     credits,

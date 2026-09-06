@@ -126,7 +126,7 @@ export default function AccountPanel() {
           <>
             <p className="mt-2 text-sm text-muted">
               {joinNudge
-                ? "One step before your video: membership is what funds us — everything you generate after this is at cost."
+                ? "One step before your video: join to unlock credits and generation."
                 : "Membership is required to buy credits and generate."}
             </p>
             <div className="mt-4 flex flex-wrap gap-3">

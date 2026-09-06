@@ -2,7 +2,7 @@
 // rename in one place; money values are in USD, credits are $0.001 each.
 
 export const SITE_NAME = "Remerged";
-export const SITE_TAGLINE = "AI video at cost. Really.";
+export const SITE_TAGLINE = "AI video, priced at cost";
 export const SITE_DOMAIN = "remerged.app";
 
 export const CREDIT_USD = 0.001; // 1 credit = $0.001
@@ -14,14 +14,14 @@ export const PLANS = {
   monthly: {
     id: "monthly",
     label: "Monthly",
-    priceUsd: 8,
+    priceUsd: 19.99,
     interval: "month" as const,
     storageGb: 20,
   },
   annual: {
     id: "annual",
     label: "Annual",
-    priceUsd: 69,
+    priceUsd: 199,
     interval: "year" as const,
     storageGb: 50,
   },
@@ -29,9 +29,18 @@ export const PLANS = {
 
 export type PlanId = keyof typeof PLANS;
 
-// Generation limits mirror the upstream model contract (4-15s clips).
+// Generation models on offer. Duration ceilings mirror each model's contract.
+export const MODELS = {
+  "seedance-2.5": { id: "seedance-2.5", label: "Seedance 2.5", maxDurationS: 30 },
+  "seedance-2.0": { id: "seedance-2.0", label: "Seedance 2.0", maxDurationS: 15 },
+} as const;
+
+export type ModelId = keyof typeof MODELS;
+export const MODEL_IDS = Object.keys(MODELS) as ModelId[];
+export const DEFAULT_MODEL: ModelId = "seedance-2.5";
+
 export const MIN_DURATION_S = 4;
-export const MAX_DURATION_S = 15;
+export const MAX_DURATION_S = 30; // absolute ceiling (Seedance 2.5)
 export const DEFAULT_DURATION_S = 5;
 export const MAX_PROMPT_CHARS = 4000;
 

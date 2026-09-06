@@ -10,7 +10,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 export const metadata: Metadata = {
   title: `${SITE_NAME} — ${SITE_TAGLINE}`,
   description:
-    "Generate AI video with Seedance, upscaled to crisp 1080p. Members pay exactly what it costs us — our only revenue is the membership.",
+    "Generate Seedance video, upscaled to crisp 1080p. Members generate at our cost — the membership is the business model.",
 };
 
 export default function RootLayout({

@@ -76,6 +76,12 @@ export class SqliteStore implements DataStore {
       );
       CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
     `);
+    // Additive migration for databases created before the model column.
+    try {
+      d.exec(`ALTER TABLE jobs ADD COLUMN model TEXT NOT NULL DEFAULT 'seedance-2.5'`);
+    } catch {
+      // column already exists
+    }
   }
 
   async createUser(email: string, passwordHash: string): Promise<User> {
@@ -161,9 +167,9 @@ export class SqliteStore implements DataStore {
     const job: Job = { ...j, created_at: now, updated_at: now };
     this.db()
       .prepare(
-        `INSERT INTO jobs (id, user_id, prompt, duration_s, aspect, audio, mode, upscale_factor, status,
+        `INSERT INTO jobs (id, user_id, prompt, model, duration_s, aspect, audio, mode, upscale_factor, status,
                            quote_credits, provider_task_id, video_url, size_bytes, error, created_at, updated_at)
-         VALUES (@id, @user_id, @prompt, @duration_s, @aspect, @audio, @mode, @upscale_factor, @status,
+         VALUES (@id, @user_id, @prompt, @model, @duration_s, @aspect, @audio, @mode, @upscale_factor, @status,
                  @quote_credits, @provider_task_id, @video_url, @size_bytes, @error, @created_at, @updated_at)`
       )
       .run(job);

@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 import {
   ASPECT_RATIOS,
   DEFAULT_DURATION_S,
-  MAX_DURATION_S,
+  DEFAULT_MODEL,
   MAX_PROMPT_CHARS,
   MIN_DURATION_S,
+  MODELS,
+  ModelId,
 } from "@/lib/config";
 
 interface Quote {
@@ -21,6 +23,7 @@ const DRAFT_KEY = "remerged-draft";
 export default function Composer() {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState<ModelId>(DEFAULT_MODEL);
   const [durationS, setDurationS] = useState(DEFAULT_DURATION_S);
   const [aspect, setAspect] = useState<string>("16:9");
   const [audio, setAudio] = useState(false);
@@ -29,6 +32,8 @@ export default function Composer() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const maxDuration = MODELS[model].maxDurationS;
+
   // Draft survives the signup/membership/top-up detour.
   useEffect(() => {
     try {
@@ -36,6 +41,7 @@ export default function Composer() {
       if (raw) {
         const d = JSON.parse(raw);
         if (d.prompt) setPrompt(d.prompt);
+        if (d.model && d.model in MODELS) setModel(d.model);
         if (d.durationS) setDurationS(d.durationS);
         if (d.aspect) setAspect(d.aspect);
         if (typeof d.audio === "boolean") setAudio(d.audio);
@@ -47,19 +53,25 @@ export default function Composer() {
     try {
       localStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ prompt, durationS, aspect, audio, mode })
+        JSON.stringify({ prompt, model, durationS, aspect, audio, mode })
       );
     } catch {}
-  }, [prompt, durationS, aspect, audio, mode]);
+  }, [prompt, model, durationS, aspect, audio, mode]);
+
+  useEffect(() => {
+    if (durationS > maxDuration) setDurationS(maxDuration);
+  }, [durationS, maxDuration]);
 
   useEffect(() => {
     const ctl = new AbortController();
-    fetch(`/api/quote?duration=${durationS}&mode=${mode}`, { signal: ctl.signal })
+    fetch(`/api/quote?model=${model}&duration=${Math.min(durationS, maxDuration)}&mode=${mode}`, {
+      signal: ctl.signal,
+    })
       .then((r) => r.json())
       .then(setQ)
       .catch(() => {});
     return () => ctl.abort();
-  }, [durationS, mode]);
+  }, [model, durationS, mode, maxDuration]);
 
   async function generate() {
     setError(null);
@@ -74,6 +86,7 @@ export default function Composer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: prompt.trim(),
+          model,
           durationS,
           aspect,
           audio,
@@ -117,17 +130,31 @@ export default function Composer() {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+        <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
+          {(Object.values(MODELS) as (typeof MODELS)[ModelId][]).map((m) => (
+            <button
+              key={m.id}
+              onClick={() => setModel(m.id)}
+              className={`rounded-full px-3 py-1 ${
+                model === m.id ? "bg-accent text-accent-ink" : "text-muted"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+
         <label className="flex items-center gap-2">
           <span className="text-muted">Duration</span>
           <input
             type="range"
             min={MIN_DURATION_S}
-            max={MAX_DURATION_S}
-            value={durationS}
+            max={maxDuration}
+            value={Math.min(durationS, maxDuration)}
             onChange={(e) => setDurationS(Number(e.target.value))}
             className="accent-[var(--accent)]"
           />
-          <span className="w-8 font-medium">{durationS}s</span>
+          <span className="w-8 font-medium">{Math.min(durationS, maxDuration)}s</span>
         </label>
 
         <label className="flex items-center gap-2">
@@ -175,13 +202,12 @@ export default function Composer() {
 
       {mode === "upscaled-1080p" ? (
         <p className="mt-2 text-xs text-muted">
-          Rendered at 480p, AI-upscaled to 1080p — same length, sharp result, a
-          fraction of native cost.
+          Rendered at 480p, AI-upscaled to 1080p — same length, sharp result,
+          a fraction of native cost.
         </p>
       ) : (
         <p className="mt-2 text-xs text-muted">
-          Rendered natively at 1080p. Maximum fidelity, priced at what native
-          rendering costs.
+          Rendered natively at 1080p for maximum fidelity.
         </p>
       )}
 
@@ -193,7 +219,7 @@ export default function Composer() {
             <>
               This video:{" "}
               <span className="font-semibold text-ink">${q.usd.toFixed(2)}</span>{" "}
-              · {q.credits.toLocaleString()} credits — exactly our cost
+              · {q.credits.toLocaleString()} credits
             </>
           ) : (
             "…"

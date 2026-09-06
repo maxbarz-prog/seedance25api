@@ -132,7 +132,7 @@ export default function AdminPage() {
         <Tile
           label="Est. membership rev / mo"
           value={`$${t.estMonthlyMembershipUsd.toFixed(0)}`}
-          detail="the only margin line"
+          detail="memberships"
         />
         <Tile
           label="Credits purchased"

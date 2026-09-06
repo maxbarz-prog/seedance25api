@@ -12,7 +12,15 @@ import {
 const BASE =
   process.env.BYTEPLUS_API_BASE ||
   "https://ark.ap-southeast.bytepluses.com/api/v3";
-const MODEL = process.env.BYTEPLUS_SEEDANCE_MODEL || "dreamina-seedance-2-5-260628";
+
+// Product model id -> ModelArk model id (env-overridable; the 2.0 id is
+// confirmed during the validation run).
+function upstreamModel(productModel: string): string {
+  if (productModel === "seedance-2.0") {
+    return process.env.BYTEPLUS_SEEDANCE_20_MODEL || "seedance-2-0";
+  }
+  return process.env.BYTEPLUS_SEEDANCE_25_MODEL || "dreamina-seedance-2-5-260628";
+}
 
 function headers() {
   const key = process.env.BYTEPLUS_API_KEY;
@@ -26,7 +34,7 @@ function headers() {
 export class BytePlusGenerator implements VideoGenerator {
   async submitGeneration(req: GenerationRequest): Promise<string> {
     const body = {
-      model: MODEL,
+      model: upstreamModel(req.model),
       content: [
         {
           type: "text",

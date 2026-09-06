@@ -20,6 +20,7 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
     if (job.status === "queued") {
       const taskId = await generator().submitGeneration({
         prompt: job.prompt,
+        model: job.model,
         durationS: job.duration_s,
         aspect: job.aspect,
         audio: !!job.audio,
