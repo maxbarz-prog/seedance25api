@@ -1,0 +1,49 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Remerge bootstrap: lets GitHub Actions in maxbarz-prog/seedance25api deploy
+  to this AWS account via OIDC. No long-lived AWS keys exist anywhere.
+
+Parameters:
+  GitHubRepo:
+    Type: String
+    Default: maxbarz-prog/seedance25api
+    Description: GitHub repository (owner/name) allowed to assume the deploy role.
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        # GitHub's OIDC root CA thumbprint; AWS now verifies via trusted CAs,
+        # but the property is required. Value is GitHub's published thumbprint.
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: remerge-github-deploy
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Ref GitHubOidcProvider
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:*
+      # Broad to start (same call as the console admin user we replaced);
+      # scoped down to the deployed stacks' resources once they exist.
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+Outputs:
+  DeployRoleArn:
+    Description: Paste this ARN back to Claude (it is not a secret).
+    Value: !GetAtt DeployRole.Arn
