@@ -40,7 +40,7 @@ interface Overview {
 }
 
 function usd(credits: number) {
-  return `$${(credits / 1000).toFixed(2)}`;
+  return `$${(credits * 0.01).toFixed(2)}`;
 }
 
 function Tile({ label, value, detail }: { label: string; value: string; detail?: string }) {

@@ -160,7 +160,7 @@ export default function AccountPanel() {
       <section className="rounded-2xl border border-line bg-surface p-5">
         <h2 className="font-medium">Credits</h2>
         <p className="mt-2 text-3xl font-semibold">
-          ${(me.balanceCredits / 1000).toFixed(2)}
+          ${(me.balanceCredits * 0.01).toFixed(2)}
           <span className="ml-2 text-sm font-normal text-muted">
             {me.balanceCredits.toLocaleString()} credits
           </span>
@@ -221,7 +221,7 @@ export default function AccountPanel() {
                     }`}
                   >
                     {e.delta_credits >= 0 ? "+" : ""}
-                    {(e.delta_credits / 1000).toFixed(2)}
+                    {(e.delta_credits * 0.01).toFixed(2)}
                   </td>
                 </tr>
               ))}

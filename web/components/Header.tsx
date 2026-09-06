@@ -41,7 +41,7 @@ export default function Header() {
                 href="/account"
                 className="rounded-full border border-line px-3 py-1 hover:border-accent"
               >
-                {(me.balanceCredits / 1000).toLocaleString(undefined, {
+                {(me.balanceCredits * 0.01).toLocaleString(undefined, {
                   style: "currency",
                   currency: "USD",
                 })}{" "}

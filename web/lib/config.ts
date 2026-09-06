@@ -5,7 +5,7 @@ export const SITE_NAME = "Remerged";
 export const SITE_TAGLINE = "AI video, priced at cost";
 export const SITE_DOMAIN = "remerged.app";
 
-export const CREDIT_USD = 0.001; // 1 credit = $0.001
+export const CREDIT_USD = 0.01; // 1 credit = 1 cent
 
 export const MIN_TOPUP_USD = 10;
 export const TOPUP_PRESETS_USD = [10, 20, 50];
