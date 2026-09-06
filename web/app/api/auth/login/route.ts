@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
-  const user = userByEmail(parsed.data.email);
+  const user = await userByEmail(parsed.data.email);
   if (!user || !(await verifyPassword(parsed.data.password, user.password_hash))) {
     return NextResponse.json({ error: "Wrong email or password." }, { status: 401 });
   }

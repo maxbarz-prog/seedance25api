@@ -16,8 +16,8 @@ export async function POST(req: NextRequest) {
   if (!admin) return NextResponse.json({ error: "Not found." }, { status: 404 });
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
-  const target = userByEmail(parsed.data.email);
+  const target = await userByEmail(parsed.data.email);
   if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
-  applyMembership(target.id, parsed.data.plan);
+  await applyMembership(target.id, parsed.data.plan);
   return NextResponse.json({ ok: true });
 }

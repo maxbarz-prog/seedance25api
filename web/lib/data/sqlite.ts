@@ -1,0 +1,253 @@
+import type Database from "better-sqlite3";
+import { randomUUID } from "crypto";
+import fs from "fs";
+import path from "path";
+import {
+  AddLedgerOpts,
+  AdminData,
+  AdminJobRow,
+  AdminUserRow,
+  DataStore,
+  Job,
+  LedgerEntry,
+  Membership,
+  User,
+} from "./types";
+
+// Local-dev store: single SQLite file, zero services. The require() is lazy
+// so the native module is never loaded when the Dynamo backend is selected
+// (e.g. inside Lambda).
+
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+
+export class SqliteStore implements DataStore {
+  private _db: Database.Database | null = null;
+
+  private db(): Database.Database {
+    if (this._db) return this._db;
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const BetterSqlite3 = require("better-sqlite3") as typeof Database;
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    this._db = new BetterSqlite3(path.join(DATA_DIR, "app.db"));
+    this._db.pragma("journal_mode = WAL");
+    this.migrate(this._db);
+    return this._db;
+  }
+
+  private migrate(d: Database.Database) {
+    d.exec(`
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        membership TEXT NOT NULL DEFAULT 'none',
+        membership_renews_at INTEGER,
+        stripe_customer_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS ledger (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        delta_credits INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        job_id TEXT,
+        memo TEXT,
+        external_id TEXT UNIQUE,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_ledger_user ON ledger(user_id);
+      CREATE TABLE IF NOT EXISTS jobs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id),
+        prompt TEXT NOT NULL,
+        duration_s INTEGER NOT NULL,
+        aspect TEXT NOT NULL,
+        audio INTEGER NOT NULL DEFAULT 0,
+        mode TEXT NOT NULL DEFAULT 'upscaled-1080p',
+        upscale_factor INTEGER NOT NULL DEFAULT 2,
+        status TEXT NOT NULL DEFAULT 'queued',
+        quote_credits INTEGER NOT NULL,
+        provider_task_id TEXT,
+        video_url TEXT,
+        size_bytes INTEGER,
+        error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
+    `);
+  }
+
+  async createUser(email: string, passwordHash: string): Promise<User> {
+    const u: User = {
+      id: randomUUID(),
+      email: email.toLowerCase().trim(),
+      password_hash: passwordHash,
+      membership: "none",
+      membership_renews_at: null,
+      stripe_customer_id: null,
+      created_at: Date.now(),
+    };
+    this.db()
+      .prepare(
+        `INSERT INTO users (id, email, password_hash, membership, membership_renews_at, stripe_customer_id, created_at)
+         VALUES (@id, @email, @password_hash, @membership, @membership_renews_at, @stripe_customer_id, @created_at)`
+      )
+      .run(u);
+    return u;
+  }
+
+  async userByEmail(email: string): Promise<User | undefined> {
+    return this.db()
+      .prepare(`SELECT * FROM users WHERE email = ?`)
+      .get(email.toLowerCase().trim()) as User | undefined;
+  }
+
+  async userById(id: string): Promise<User | undefined> {
+    return this.db().prepare(`SELECT * FROM users WHERE id = ?`).get(id) as User | undefined;
+  }
+
+  async setMembership(userId: string, membership: Membership, renewsAt: number | null) {
+    this.db()
+      .prepare(`UPDATE users SET membership = ?, membership_renews_at = ? WHERE id = ?`)
+      .run(membership, renewsAt, userId);
+  }
+
+  async balance(userId: string): Promise<number> {
+    const row = this.db()
+      .prepare(`SELECT COALESCE(SUM(delta_credits), 0) AS bal FROM ledger WHERE user_id = ?`)
+      .get(userId) as { bal: number };
+    return row.bal;
+  }
+
+  async addLedger(
+    userId: string,
+    deltaCredits: number,
+    kind: string,
+    opts: AddLedgerOpts = {}
+  ): Promise<LedgerEntry | null> {
+    const e: LedgerEntry = {
+      id: randomUUID(),
+      user_id: userId,
+      delta_credits: Math.round(deltaCredits),
+      kind,
+      job_id: opts.jobId ?? null,
+      memo: opts.memo ?? null,
+      external_id: opts.externalId ?? null,
+      created_at: Date.now(),
+    };
+    try {
+      this.db()
+        .prepare(
+          `INSERT INTO ledger (id, user_id, delta_credits, kind, job_id, memo, external_id, created_at)
+           VALUES (@id, @user_id, @delta_credits, @kind, @job_id, @memo, @external_id, @created_at)`
+        )
+        .run(e);
+    } catch (err: unknown) {
+      if (String(err).includes("UNIQUE constraint failed: ledger.external_id")) return null;
+      throw err;
+    }
+    return e;
+  }
+
+  async ledgerFor(userId: string, limit = 50): Promise<LedgerEntry[]> {
+    return this.db()
+      .prepare(`SELECT * FROM ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`)
+      .all(userId, limit) as LedgerEntry[];
+  }
+
+  async createJob(j: Omit<Job, "created_at" | "updated_at">): Promise<Job> {
+    const now = Date.now();
+    const job: Job = { ...j, created_at: now, updated_at: now };
+    this.db()
+      .prepare(
+        `INSERT INTO jobs (id, user_id, prompt, duration_s, aspect, audio, mode, upscale_factor, status,
+                           quote_credits, provider_task_id, video_url, size_bytes, error, created_at, updated_at)
+         VALUES (@id, @user_id, @prompt, @duration_s, @aspect, @audio, @mode, @upscale_factor, @status,
+                 @quote_credits, @provider_task_id, @video_url, @size_bytes, @error, @created_at, @updated_at)`
+      )
+      .run(job);
+    return job;
+  }
+
+  async jobById(id: string): Promise<Job | undefined> {
+    return this.db().prepare(`SELECT * FROM jobs WHERE id = ?`).get(id) as Job | undefined;
+  }
+
+  async jobsFor(userId: string, limit = 100): Promise<Job[]> {
+    return this.db()
+      .prepare(`SELECT * FROM jobs WHERE user_id = ? ORDER BY created_at DESC LIMIT ?`)
+      .all(userId, limit) as Job[];
+  }
+
+  async updateJob(id: string, fields: Partial<Job>) {
+    const keys = Object.keys(fields).filter((k) => k !== "id");
+    if (keys.length === 0) return;
+    const sets = keys.map((k) => `${k} = @${k}`).join(", ");
+    this.db()
+      .prepare(`UPDATE jobs SET ${sets}, updated_at = @__now WHERE id = @id`)
+      .run({ ...fields, id, __now: Date.now() });
+  }
+
+  async storageUsedBytes(userId: string): Promise<number> {
+    const row = this.db()
+      .prepare(
+        `SELECT COALESCE(SUM(size_bytes), 0) AS used FROM jobs WHERE user_id = ? AND status = 'ready'`
+      )
+      .get(userId) as { used: number };
+    return row.used;
+  }
+
+  async adminData(): Promise<AdminData> {
+    const d = this.db();
+    const now = Date.now();
+    const count = (sql: string, ...args: unknown[]) =>
+      (d.prepare(sql).get(...args) as { n: number }).n;
+    const sum = (kind: string) =>
+      (
+        d
+          .prepare(`SELECT COALESCE(SUM(ABS(delta_credits)), 0) AS s FROM ledger WHERE kind = ?`)
+          .get(kind) as { s: number }
+      ).s;
+
+    const users = d
+      .prepare(
+        `SELECT u.id, u.email, u.membership, u.membership_renews_at, u.created_at,
+                COALESCE((SELECT SUM(delta_credits) FROM ledger WHERE user_id = u.id), 0) AS balance_credits,
+                (SELECT COUNT(*) FROM jobs WHERE user_id = u.id) AS jobs_count,
+                COALESCE((SELECT SUM(size_bytes) FROM jobs WHERE user_id = u.id AND status = 'ready'), 0) AS storage_bytes
+         FROM users u ORDER BY u.created_at DESC LIMIT 200`
+      )
+      .all() as AdminUserRow[];
+
+    const jobs = d
+      .prepare(
+        `SELECT j.id, u.email, j.prompt, j.duration_s, j.mode, j.status, j.quote_credits, j.created_at
+         FROM jobs j JOIN users u ON u.id = j.user_id
+         ORDER BY j.created_at DESC LIMIT 100`
+      )
+      .all() as AdminJobRow[];
+
+    return {
+      userCount: count(`SELECT COUNT(*) AS n FROM users`),
+      monthlyMembers: count(
+        `SELECT COUNT(*) AS n FROM users WHERE membership = 'monthly' AND membership_renews_at > ?`,
+        now
+      ),
+      annualMembers: count(
+        `SELECT COUNT(*) AS n FROM users WHERE membership = 'annual' AND membership_renews_at > ?`,
+        now
+      ),
+      creditsPurchased: sum("topup") + sum("adjustment"),
+      creditsSpent: sum("charge"),
+      creditsRefunded: sum("refund"),
+      jobsReady: count(`SELECT COUNT(*) AS n FROM jobs WHERE status = 'ready'`),
+      jobsFailed: count(`SELECT COUNT(*) AS n FROM jobs WHERE status = 'failed'`),
+      jobsInFlight: count(
+        `SELECT COUNT(*) AS n FROM jobs WHERE status IN ('queued','generating','upscaling')`
+      ),
+      users,
+      jobs,
+    };
+  }
+}

@@ -26,7 +26,7 @@ export async function session(): Promise<IronSession<SessionData>> {
 export async function currentUser(): Promise<User | null> {
   const s = await session();
   if (!s.userId) return null;
-  return userById(s.userId) ?? null;
+  return (await userById(s.userId)) ?? null;
 }
 
 // Admins are designated by email via the ADMIN_EMAILS env var

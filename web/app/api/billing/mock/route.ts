@@ -26,9 +26,9 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Invalid request." }, { status: 400 });
 
   if (parsed.data.kind === "topup") {
-    applyTopup(user.id, parsed.data.usd, `mock_${randomUUID()}`);
+    await applyTopup(user.id, parsed.data.usd, `mock_${randomUUID()}`);
   } else {
-    applyMembership(user.id, parsed.data.plan);
+    await applyMembership(user.id, parsed.data.plan);
   }
   return NextResponse.json({ ok: true });
 }

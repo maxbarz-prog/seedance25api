@@ -24,9 +24,9 @@ export async function POST(req: NextRequest) {
     const s = event.data.object as Stripe.Checkout.Session;
     const userId = s.metadata?.userId;
     if (userId && s.metadata?.kind === "topup") {
-      applyTopup(userId, Number(s.metadata.usd), s.id);
+      await applyTopup(userId, Number(s.metadata.usd), s.id);
     } else if (userId && s.metadata?.kind === "membership") {
-      applyMembership(userId, s.metadata.plan === "annual" ? "annual" : "monthly");
+      await applyMembership(userId, s.metadata.plan === "annual" ? "annual" : "monthly");
     }
   }
   // TODO(prod): handle invoice.paid / customer.subscription.deleted to renew

@@ -24,9 +24,9 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const target = userByEmail(parsed.data.email);
+  const target = await userByEmail(parsed.data.email);
   if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
-  addLedger(target.id, usdToCredits(parsed.data.usd), "adjustment", {
+  await addLedger(target.id, usdToCredits(parsed.data.usd), "adjustment", {
     memo: parsed.data.memo,
   });
   return NextResponse.json({ ok: true });

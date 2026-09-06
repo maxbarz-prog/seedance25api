@@ -1,0 +1,7 @@
+{
+  "name": "remerged-infra",
+  "private": true,
+  "devDependencies": {
+    "sst": "^3.17.0"
+  }
+}

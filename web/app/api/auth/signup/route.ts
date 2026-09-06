@@ -17,13 +17,13 @@ export async function POST(req: NextRequest) {
     );
   }
   const { email, password } = parsed.data;
-  if (userByEmail(email)) {
+  if (await userByEmail(email)) {
     return NextResponse.json(
       { error: "An account with this email already exists." },
       { status: 409 }
     );
   }
-  const user = createUser(email, await hashPassword(password));
+  const user = await createUser(email, await hashPassword(password));
   const s = await session();
   s.userId = user.id;
   await s.save();

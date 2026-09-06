@@ -75,16 +75,20 @@ export async function createMembershipCheckout(
   return { url: s.url! };
 }
 
-export function applyTopup(userId: string, usd: number, externalId: string): boolean {
-  const entry = addLedger(userId, usdToCredits(usd), "topup", {
+export async function applyTopup(
+  userId: string,
+  usd: number,
+  externalId: string
+): Promise<boolean> {
+  const entry = await addLedger(userId, usdToCredits(usd), "topup", {
     memo: `Top-up $${usd.toFixed(2)}`,
     externalId,
   });
   return entry !== null;
 }
 
-export function applyMembership(userId: string, planId: PlanId) {
+export async function applyMembership(userId: string, planId: PlanId) {
   const now = Date.now();
   const renewMs = planId === "annual" ? 365 * 24 * 3600e3 : 30 * 24 * 3600e3;
-  setMembership(userId, planId, now + renewMs);
+  await setMembership(userId, planId, now + renewMs);
 }

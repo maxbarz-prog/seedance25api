@@ -25,7 +25,7 @@ const Body = z.object({
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
-  return NextResponse.json({ jobs: jobsFor(user.id) });
+  return NextResponse.json({ jobs: await jobsFor(user.id) });
 }
 
 export async function POST(req: NextRequest) {
@@ -49,13 +49,14 @@ export async function POST(req: NextRequest) {
   const b = parsed.data;
 
   const q = quote({ durationS: b.durationS, mode: b.mode, upscaleFactor: b.upscaleFactor });
-  if (balance(user.id) < q.credits) {
+  const bal = await balance(user.id);
+  if (bal < q.credits) {
     return NextResponse.json(
       {
         error: "insufficient_credits",
         message: "Not enough credits for this video.",
         needed: q.credits,
-        balance: balance(user.id),
+        balance: bal,
       },
       { status: 402 }
     );
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest) {
 
   const plan = PLANS[user.membership as keyof typeof PLANS];
   const quotaBytes = plan.storageGb * 1e9;
-  const projectedBytes = storageUsedBytes(user.id) + b.durationS * 500_000;
+  const projectedBytes = (await storageUsedBytes(user.id)) + b.durationS * 500_000;
   if (projectedBytes > quotaBytes) {
     return NextResponse.json(
       { error: "storage_full", message: "Storage quota reached. Delete some videos first." },
@@ -71,7 +72,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const job = createJob({
+  const job = await createJob({
     id: randomUUID(),
     user_id: user.id,
     prompt: b.prompt,
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
     size_bytes: null,
     error: null,
   });
-  addLedger(user.id, -q.credits, "charge", {
+  await addLedger(user.id, -q.credits, "charge", {
     jobId: job.id,
     memo: `Video ${b.durationS}s (${b.mode === "native-1080p" ? "native 1080p" : "1080p upscaled"})`,
   });

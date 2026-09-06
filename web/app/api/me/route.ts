@@ -7,6 +7,11 @@ export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ user: null });
   const plan = user.membership !== "none" ? PLANS[user.membership as keyof typeof PLANS] : null;
+  const [bal, used, ledger] = await Promise.all([
+    balance(user.id),
+    storageUsedBytes(user.id),
+    ledgerFor(user.id, 25),
+  ]);
   return NextResponse.json({
     user: {
       email: user.email,
@@ -14,10 +19,10 @@ export async function GET() {
       membershipActive:
         user.membership !== "none" && (user.membership_renews_at ?? 0) > Date.now(),
       membershipRenewsAt: user.membership_renews_at,
-      balanceCredits: balance(user.id),
-      storageUsedBytes: storageUsedBytes(user.id),
+      balanceCredits: bal,
+      storageUsedBytes: used,
       storageQuotaBytes: plan ? plan.storageGb * 1e9 : 0,
-      ledger: ledgerFor(user.id, 25),
+      ledger,
     },
   });
 }

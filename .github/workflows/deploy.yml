@@ -1,0 +1,60 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/seedance-video-platform-9sp9cn
+    paths:
+      - "web/**"
+      - "sst.config.ts"
+      - "package.json"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load stage secrets from SSM
+        run: |
+          load() {
+            v=$(aws ssm get-parameter --name "/remerged/dev/$1" --with-decryption \
+                --query Parameter.Value --output text 2>/dev/null || true)
+            if [ -n "$v" ] && [ "$v" != "None" ]; then
+              echo "::add-mask::$v"
+              echo "$1=$v" >> "$GITHUB_ENV"
+            fi
+          }
+          for name in SESSION_SECRET ADMIN_EMAILS STRIPE_SECRET_KEY \
+                      STRIPE_WEBHOOK_SECRET BYTEPLUS_API_KEY TOPAZ_API_KEY \
+                      PROVIDER_MODE MOCK_BILLING; do
+            load "$name"
+          done
+
+      - name: Install dependencies
+        run: |
+          npm install
+          npm install --prefix web
+
+      - name: Deploy dev stage
+        run: npx sst deploy --stage dev
