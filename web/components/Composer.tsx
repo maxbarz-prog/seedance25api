@@ -16,7 +16,7 @@ interface Quote {
   perSecUsd: number;
 }
 
-const DRAFT_KEY = "parcut-draft";
+const DRAFT_KEY = "remerge-draft";
 
 export default function Composer() {
   const router = useRouter();
