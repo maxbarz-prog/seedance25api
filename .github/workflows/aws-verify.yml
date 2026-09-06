@@ -2,6 +2,11 @@ name: AWS access check
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - claude/seedance-video-platform-9sp9cn
+    paths:
+      - ".github/workflows/aws-verify.yml"
 
 permissions:
   id-token: write
