@@ -34,7 +34,9 @@ export interface Job {
   quote_credits: number;
   provider_task_id: string | null;
   video_url: string | null; // storage key (see lib/storage); resolved to a URL on read
-  image_keys?: string | null; // JSON array of reference-image storage keys
+  image_keys?: string | null; // JSON array of {key, role} for input images
+  seed?: number | null;
+  camera_fixed?: number | null;
   size_bytes: number | null;
   error: string | null;
   created_at: number;

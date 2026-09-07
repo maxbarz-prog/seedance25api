@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { currentUser } from "@/lib/auth";
+import { clerkEnabled, currentUser } from "@/lib/auth";
 import { balance, ledgerFor, storageUsedBytes } from "@/lib/db";
 import { PLANS } from "@/lib/config";
 
 export async function GET() {
   const user = await currentUser();
-  if (!user) return NextResponse.json({ user: null });
+  if (!user) return NextResponse.json({ user: null, auth: clerkEnabled() ? "clerk" : "builtin" });
   const plan = user.membership !== "none" ? PLANS[user.membership as keyof typeof PLANS] : null;
   const [bal, used, ledger] = await Promise.all([
     balance(user.id),
@@ -13,6 +13,7 @@ export async function GET() {
     ledgerFor(user.id, 25),
   ]);
   return NextResponse.json({
+    auth: clerkEnabled() ? "clerk" : "builtin",
     user: {
       email: user.email,
       membership: user.membership,

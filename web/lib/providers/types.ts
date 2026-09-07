@@ -10,8 +10,9 @@ export interface GenerationRequest {
   aspect: string;
   audio: boolean;
   resolution: "480p" | "1080p";
-  imageUrls?: string[]; // reference images (fetchable for ~1h)
+  images?: { url: string; role: "reference" | "first_frame" | "last_frame" }[]; // fetchable ~1h
   seed?: number;
+  cameraFixed?: boolean;
 }
 
 export type ProviderTaskStatus = "running" | "succeeded" | "failed";

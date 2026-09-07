@@ -31,10 +31,16 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
 
     if (job.status === "queued") {
       if (!(await claimJob(id, "queued", "generating"))) return jobById(id);
-      const imageKeys: string[] = job.image_keys ? JSON.parse(job.image_keys) : [];
-      const imageUrls = (await Promise.all(imageKeys.map((k) => readUrl(k)))).filter(
-        (u): u is string => !!u
-      );
+      const inputs: { key: string; role: "reference" | "first_frame" | "last_frame" }[] =
+        job.image_keys ? JSON.parse(job.image_keys) : [];
+      const images = (
+        await Promise.all(
+          inputs.map(async (i) => {
+            const url = await readUrl(i.key);
+            return url ? { url, role: i.role } : null;
+          })
+        )
+      ).filter((i): i is { url: string; role: "reference" | "first_frame" | "last_frame" } => !!i);
       const taskId = await generator().submitGeneration({
         prompt: job.prompt,
         model: job.model,
@@ -42,7 +48,9 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
         aspect: job.aspect,
         audio: !!job.audio,
         resolution: job.mode === "native-1080p" ? "1080p" : "480p",
-        imageUrls,
+        images,
+        seed: job.seed ?? undefined,
+        cameraFixed: !!job.camera_fixed,
       });
       await updateJob(id, { provider_task_id: taskId });
     } else if (job.status === "generating") {

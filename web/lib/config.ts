@@ -44,5 +44,9 @@ export const MAX_DURATION_S = 30; // absolute ceiling (Seedance 2.5)
 export const DEFAULT_DURATION_S = 5;
 export const MAX_PROMPT_CHARS = 4000;
 
-export const ASPECT_RATIOS = ["16:9", "9:16", "1:1", "21:9", "4:3"] as const;
+export const ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"] as const;
+export const MAX_VARIATIONS = 4;
+export const MAX_IMAGES = 4;
+export const IMAGE_ROLES = ["reference", "first_frame", "last_frame"] as const;
+export type ImageRole = (typeof IMAGE_ROLES)[number];
 export type AspectRatio = (typeof ASPECT_RATIOS)[number];

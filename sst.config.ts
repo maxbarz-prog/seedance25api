@@ -70,6 +70,8 @@ export default $config({
       BYTEPLUS_API_KEY: process.env.BYTEPLUS_API_KEY ?? "",
       TOPAZ_API_KEY: process.env.TOPAZ_API_KEY ?? "",
       MOCK_BILLING: process.env.MOCK_BILLING ?? "",
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "",
+      CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ?? "",
       COST_SD25_480P_PER_SEC: process.env.COST_SD25_480P_PER_SEC ?? "",
       COST_SD25_1080P_PER_SEC: process.env.COST_SD25_1080P_PER_SEC ?? "",
       COST_SD20_480P_PER_SEC: process.env.COST_SD20_480P_PER_SEC ?? "",

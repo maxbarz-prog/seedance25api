@@ -33,17 +33,26 @@ function headers() {
 
 export class BytePlusGenerator implements VideoGenerator {
   async submitGeneration(req: GenerationRequest): Promise<string> {
-    const content: Record<string, unknown>[] = [
-      {
-        type: "text",
-        text:
-          `${req.prompt} --resolution ${req.resolution} --duration ${req.durationS}` +
-          ` --ratio ${req.aspect}` +
-          (req.seed !== undefined ? ` --seed ${req.seed}` : ""),
-      },
+    // ModelArk takes generation controls as text flags appended to the
+    // prompt; images carry a role (first/last frame anchoring, or free
+    // reference).
+    const flags = [
+      `--resolution ${req.resolution}`,
+      `--duration ${req.durationS}`,
+      `--ratio ${req.aspect}`,
+      `--watermark false`,
+      ...(req.seed !== undefined ? [`--seed ${req.seed}`] : []),
+      ...(req.cameraFixed ? ["--camerafixed true"] : []),
     ];
-    for (const url of req.imageUrls ?? []) {
-      content.push({ type: "image_url", image_url: { url } });
+    const content: Record<string, unknown>[] = [
+      { type: "text", text: `${req.prompt} ${flags.join(" ")}` },
+    ];
+    for (const img of req.images ?? []) {
+      content.push({
+        type: "image_url",
+        image_url: { url: img.url },
+        role: img.role === "reference" ? "reference_image" : img.role,
+      });
     }
     const body = { model: upstreamModel(req.model), content };
     const res = await fetch(`${BASE}/contents/generations/tasks`, {

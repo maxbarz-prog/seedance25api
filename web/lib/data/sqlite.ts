@@ -81,6 +81,8 @@ export class SqliteStore implements DataStore {
     const adds = [
       `ALTER TABLE jobs ADD COLUMN model TEXT NOT NULL DEFAULT 'seedance-2.5'`,
       `ALTER TABLE jobs ADD COLUMN image_keys TEXT`,
+      `ALTER TABLE jobs ADD COLUMN seed INTEGER`,
+      `ALTER TABLE jobs ADD COLUMN camera_fixed INTEGER`,
       `ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT`,
       `ALTER TABLE users ADD COLUMN reset_token_hash TEXT`,
       `ALTER TABLE users ADD COLUMN reset_expires_at INTEGER`,
@@ -206,11 +208,11 @@ export class SqliteStore implements DataStore {
     this.db()
       .prepare(
         `INSERT INTO jobs (id, user_id, prompt, model, duration_s, aspect, audio, mode, upscale_factor, status,
-                           quote_credits, provider_task_id, video_url, image_keys, size_bytes, error, created_at, updated_at)
+                           quote_credits, provider_task_id, video_url, image_keys, seed, camera_fixed, size_bytes, error, created_at, updated_at)
          VALUES (@id, @user_id, @prompt, @model, @duration_s, @aspect, @audio, @mode, @upscale_factor, @status,
-                 @quote_credits, @provider_task_id, @video_url, @image_keys, @size_bytes, @error, @created_at, @updated_at)`
+                 @quote_credits, @provider_task_id, @video_url, @image_keys, @seed, @camera_fixed, @size_bytes, @error, @created_at, @updated_at)`
       )
-      .run({ image_keys: null, ...job });
+      .run({ image_keys: null, seed: null, camera_fixed: null, ...job });
     return job;
   }
 

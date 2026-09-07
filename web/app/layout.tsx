@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
 import Header from "@/components/Header";
+import Providers from "@/components/Providers";
 import { SITE_NAME, SITE_TAGLINE } from "@/lib/config";
 import { SUPPORT_EMAIL } from "@/lib/legal";
 
@@ -21,6 +22,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}>
+        <Providers>
         <Header />
         <main className="mx-auto max-w-5xl px-4 pb-24">{children}</main>
         <footer className="border-t border-line py-8 text-center text-sm text-muted">
@@ -37,6 +39,7 @@ export default function RootLayout({
             you choose native rendering.
           </p>
         </footer>
+        </Providers>
       </body>
     </html>
   );

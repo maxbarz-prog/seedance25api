@@ -6,11 +6,21 @@ import {
   ASPECT_RATIOS,
   DEFAULT_DURATION_S,
   DEFAULT_MODEL,
+  IMAGE_ROLES,
+  ImageRole,
+  MAX_IMAGES,
   MAX_PROMPT_CHARS,
+  MAX_VARIATIONS,
   MIN_DURATION_S,
   MODELS,
   ModelId,
 } from "@/lib/config";
+
+const ROLE_LABELS: Record<ImageRole, string> = {
+  reference: "Reference",
+  first_frame: "First frame",
+  last_frame: "Last frame",
+};
 
 interface Quote {
   credits: number;
@@ -32,8 +42,12 @@ export default function Composer() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadsEnabled, setUploadsEnabled] = useState(false);
-  const [images, setImages] = useState<{ key: string; preview: string }[]>([]);
+  const [images, setImages] = useState<{ key: string; preview: string; role: ImageRole }[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [advanced, setAdvanced] = useState(false);
+  const [seed, setSeed] = useState<string>("");
+  const [cameraFixed, setCameraFixed] = useState(false);
+  const [variations, setVariations] = useState(1);
 
   const maxDuration = MODELS[model].maxDurationS;
 
@@ -49,7 +63,7 @@ export default function Composer() {
     setError(null);
     setUploading(true);
     try {
-      for (const file of Array.from(files).slice(0, 4 - images.length)) {
+      for (const file of Array.from(files).slice(0, MAX_IMAGES - images.length)) {
         if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
           setError("Use JPEG, PNG or WebP images.");
           continue;
@@ -77,7 +91,16 @@ export default function Composer() {
           setError("Upload failed.");
           continue;
         }
-        setImages((prev) => [...prev, { key: p.key, preview: URL.createObjectURL(file) }]);
+        setImages((prev) => [
+          ...prev,
+          {
+            key: p.key,
+            preview: URL.createObjectURL(file),
+            // First image defaults to "first frame" (image-to-video); later
+            // ones are free references.
+            role: prev.length === 0 ? "first_frame" : "reference",
+          },
+        ]);
       }
     } finally {
       setUploading(false);
@@ -142,7 +165,10 @@ export default function Composer() {
           audio,
           mode,
           upscaleFactor: 2,
-          imageKeys: images.map((i) => i.key),
+          images: images.map((i) => ({ key: i.key, role: i.role })),
+          seed: seed.trim() === "" ? undefined : Number(seed),
+          cameraFixed,
+          variations,
         }),
       });
       const data = await res.json();
@@ -161,7 +187,7 @@ export default function Composer() {
       try {
         localStorage.removeItem(DRAFT_KEY);
       } catch {}
-      router.push(`/jobs/${data.id}`);
+      router.push(variations > 1 ? "/library" : `/jobs/${data.id}`);
     } finally {
       setBusy(false);
     }
@@ -178,7 +204,7 @@ export default function Composer() {
       />
       <div className="mt-1 flex items-center justify-between text-xs text-muted">
         <div className="flex items-center gap-2">
-          {uploadsEnabled && images.length < 4 && (
+          {uploadsEnabled && images.length < MAX_IMAGES && (
             <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
               {uploading ? "Uploading…" : "+ Reference image"}
               <input
@@ -191,13 +217,29 @@ export default function Composer() {
             </label>
           )}
           {images.map((img) => (
-            <span key={img.key} className="relative inline-block">
+            <span key={img.key} className="relative inline-flex items-center gap-1">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={img.preview} alt="" className="h-10 w-10 rounded-lg object-cover" />
+              <select
+                value={img.role}
+                onChange={(e) =>
+                  setImages((prev) =>
+                    prev.map((i) => (i.key === img.key ? { ...i, role: e.target.value as ImageRole } : i))
+                  )
+                }
+                className="rounded-lg border border-line bg-bg px-1 py-0.5 text-[11px]"
+                aria-label="Image role"
+              >
+                {IMAGE_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {ROLE_LABELS[r]}
+                  </option>
+                ))}
+              </select>
               <button
                 type="button"
                 onClick={() => setImages((prev) => prev.filter((i) => i.key !== img.key))}
-                className="absolute -right-1 -top-1 rounded-full bg-surface px-1 text-[10px] leading-none shadow"
+                className="absolute -left-1 -top-1 rounded-full bg-surface px-1 text-[10px] leading-none shadow"
                 aria-label="Remove image"
               >
                 ✕
@@ -292,15 +334,64 @@ export default function Composer() {
         </p>
       )}
 
+      <div className="mt-3 text-xs">
+        <button
+          type="button"
+          onClick={() => setAdvanced((v) => !v)}
+          className="text-muted underline-offset-2 hover:underline"
+        >
+          {advanced ? "Hide advanced" : "Advanced options"}
+        </button>
+        {advanced && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-6 gap-y-2">
+            <label className="flex items-center gap-2">
+              <span className="text-muted">Variations</span>
+              <select
+                value={variations}
+                onChange={(e) => setVariations(Number(e.target.value))}
+                className="rounded-lg border border-line bg-bg px-2 py-1"
+              >
+                {Array.from({ length: MAX_VARIATIONS }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="text-muted">Seed</span>
+              <input
+                type="number"
+                min={0}
+                placeholder="random"
+                value={seed}
+                onChange={(e) => setSeed(e.target.value)}
+                disabled={variations > 1}
+                className="w-28 rounded-lg border border-line bg-bg px-2 py-1 disabled:opacity-50"
+              />
+            </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={cameraFixed}
+                onChange={(e) => setCameraFixed(e.target.checked)}
+                className="accent-[var(--accent)]"
+              />
+              <span className="text-muted">Lock camera</span>
+            </label>
+          </div>
+        )}
+      </div>
+
       {error && <p className="mt-3 text-sm text-bad">{error}</p>}
 
       <div className="mt-4 flex items-center justify-between">
         <div className="text-sm text-muted">
           {q ? (
             <>
-              This video:{" "}
-              <span className="font-semibold text-ink">${q.usd.toFixed(2)}</span>{" "}
-              · {q.credits.toLocaleString()} credits
+              {variations > 1 ? `${variations} videos: ` : "This video: "}
+              <span className="font-semibold text-ink">${(q.usd * variations).toFixed(2)}</span>{" "}
+              · {(q.credits * variations).toLocaleString()} credits
             </>
           ) : (
             "…"

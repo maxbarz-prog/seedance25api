@@ -1,7 +1,14 @@
 import { getIronSession, IronSession } from "iron-session";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
-import { User, userById } from "./db";
+import { createUser, User, userByEmail, userById } from "./db";
+
+// Two auth modes, chosen by configuration:
+//   - Clerk (NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY set): Google + email sign-in,
+//     password reset, sessions all handled by Clerk. Our users table is keyed
+//     by email and rows are created on first sight of a Clerk identity.
+//   - Built-in (default): email + password with an iron-session cookie.
+// Everything downstream only ever calls currentUser().
 
 export interface SessionData {
   userId?: string;
@@ -19,11 +26,26 @@ const sessionOptions = {
   },
 };
 
+export function clerkEnabled(): boolean {
+  return !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+}
+
 export async function session(): Promise<IronSession<SessionData>> {
   return getIronSession<SessionData>(await cookies(), sessionOptions);
 }
 
 export async function currentUser(): Promise<User | null> {
+  if (clerkEnabled()) {
+    const { currentUser: clerkUser } = await import("@clerk/nextjs/server");
+    const cu = await clerkUser();
+    const email = cu?.primaryEmailAddress?.emailAddress ?? cu?.emailAddresses?.[0]?.emailAddress;
+    if (!cu || !email) return null;
+    const existing = await userByEmail(email);
+    if (existing) return existing;
+    // No password for Clerk-managed identities; the built-in login refuses
+    // to match this sentinel.
+    return createUser(email, "clerk");
+  }
   const s = await session();
   if (!s.userId) return null;
   return (await userById(s.userId)) ?? null;
@@ -50,5 +72,6 @@ export async function hashPassword(pw: string): Promise<string> {
 }
 
 export async function verifyPassword(pw: string, hash: string): Promise<boolean> {
+  if (hash === "clerk") return false;
   return bcrypt.compare(pw, hash);
 }

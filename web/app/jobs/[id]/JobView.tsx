@@ -94,6 +94,7 @@ export default function JobView({ id }: { id: string }) {
             loop
             className="w-full rounded-2xl border border-line bg-black"
           />
+          <p className="mt-2 text-xs text-muted">AI-generated video.</p>
           <div className="mt-4 flex gap-3">
             <a
               href={job.video_url}

@@ -26,13 +26,17 @@ interface Me {
 export default function AccountPanel() {
   const params = useSearchParams();
   const [me, setMe] = useState<Me | null>(null);
+  const [authMode, setAuthMode] = useState<"clerk" | "builtin">("builtin");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     fetch("/api/me")
       .then((r) => r.json())
-      .then((d) => setMe(d.user))
+      .then((d) => {
+        setMe(d.user);
+        if (d.auth) setAuthMode(d.auth);
+      })
       .catch(() => {});
   }, []);
   useEffect(refresh, [refresh]);
@@ -86,6 +90,10 @@ export default function AccountPanel() {
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
+    if (authMode === "clerk") {
+      const { default: SignOut } = await import("@/components/ClerkSignOut");
+      await SignOut();
+    }
     window.location.href = "/";
   }
 

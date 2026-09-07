@@ -7,8 +7,11 @@ import { quote } from "@/lib/pricing";
 import {
   ASPECT_RATIOS,
   DEFAULT_MODEL,
+  IMAGE_ROLES,
   MAX_DURATION_S,
+  MAX_IMAGES,
   MAX_PROMPT_CHARS,
+  MAX_VARIATIONS,
   MIN_DURATION_S,
   MODEL_IDS,
   MODELS,
@@ -16,8 +19,6 @@ import {
 } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
 import { presentJob } from "@/lib/present";
-
-const MAX_IMAGES = 4;
 
 const Body = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_CHARS),
@@ -27,7 +28,18 @@ const Body = z.object({
   audio: z.boolean().default(false),
   mode: z.enum(["upscaled-1080p", "native-1080p"]).default("upscaled-1080p"),
   upscaleFactor: z.union([z.literal(2), z.literal(4)]).default(2),
-  imageKeys: z.array(z.string().regex(/^uploads\/[^/]+\/[^/]+$/)).max(MAX_IMAGES).default([]),
+  images: z
+    .array(
+      z.object({
+        key: z.string().regex(/^uploads\/[^/]+\/[^/]+$/),
+        role: z.enum(IMAGE_ROLES).default("reference"),
+      })
+    )
+    .max(MAX_IMAGES)
+    .default([]),
+  seed: z.number().int().min(0).max(4294967295).optional(),
+  cameraFixed: z.boolean().default(false),
+  variations: z.number().int().min(1).max(MAX_VARIATIONS).default(1),
 });
 
 export async function GET() {
@@ -63,19 +75,34 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  // Uploaded images must belong to this member.
-  if (b.imageKeys.some((k) => !k.startsWith(`uploads/${user.id}/`))) {
+  if (b.images.some((i) => !i.key.startsWith(`uploads/${user.id}/`))) {
     return NextResponse.json({ error: "Invalid image reference." }, { status: 400 });
+  }
+  const firsts = b.images.filter((i) => i.role === "first_frame").length;
+  const lasts = b.images.filter((i) => i.role === "last_frame").length;
+  if (firsts > 1 || lasts > 1) {
+    return NextResponse.json(
+      { error: "Only one first-frame and one last-frame image are allowed." },
+      { status: 400 }
+    );
+  }
+  // A fixed seed with several variations would produce identical clips.
+  if (b.variations > 1 && b.seed !== undefined) {
+    return NextResponse.json(
+      { error: "Clear the seed to generate variations." },
+      { status: 400 }
+    );
   }
 
   const q = quote({ model, durationS: b.durationS, mode: b.mode, upscaleFactor: b.upscaleFactor });
+  const total = q.credits * b.variations;
   const bal = await balance(user.id);
-  if (bal < q.credits) {
+  if (bal < total) {
     return NextResponse.json(
       {
         error: "insufficient_credits",
-        message: "Not enough credits for this video.",
-        needed: q.credits,
+        message: "Not enough credits for this request.",
+        needed: total,
         balance: bal,
       },
       { status: 402 }
@@ -84,7 +111,8 @@ export async function POST(req: NextRequest) {
 
   const plan = PLANS[user.membership as keyof typeof PLANS];
   const quotaBytes = plan.storageGb * 1e9;
-  const projectedBytes = (await storageUsedBytes(user.id)) + b.durationS * 500_000;
+  const projectedBytes =
+    (await storageUsedBytes(user.id)) + b.durationS * 500_000 * b.variations;
   if (projectedBytes > quotaBytes) {
     return NextResponse.json(
       { error: "storage_full", message: "Storage quota reached. Delete some videos first." },
@@ -92,31 +120,39 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const job = await createJob({
-    id: randomUUID(),
-    user_id: user.id,
-    prompt: b.prompt,
-    model,
-    duration_s: b.durationS,
-    aspect: b.aspect,
-    audio: b.audio ? 1 : 0,
-    mode: b.mode,
-    upscale_factor: b.upscaleFactor,
-    status: "queued",
-    quote_credits: q.credits,
-    provider_task_id: null,
-    video_url: null,
-    image_keys: b.imageKeys.length ? JSON.stringify(b.imageKeys) : null,
-    size_bytes: null,
-    error: null,
-  });
-  await addLedger(user.id, -q.credits, "charge", {
-    jobId: job.id,
-    memo: `Video ${b.durationS}s (${b.mode === "native-1080p" ? "native 1080p" : "1080p upscaled"})`,
-  });
+  const ids: string[] = [];
+  for (let i = 0; i < b.variations; i++) {
+    const job = await createJob({
+      id: randomUUID(),
+      user_id: user.id,
+      prompt: b.prompt,
+      model,
+      duration_s: b.durationS,
+      aspect: b.aspect,
+      audio: b.audio ? 1 : 0,
+      mode: b.mode,
+      upscale_factor: b.upscaleFactor,
+      status: "queued",
+      quote_credits: q.credits,
+      provider_task_id: null,
+      video_url: null,
+      image_keys: b.images.length ? JSON.stringify(b.images) : null,
+      seed: b.seed ?? null,
+      camera_fixed: b.cameraFixed ? 1 : 0,
+      size_bytes: null,
+      error: null,
+    });
+    await addLedger(user.id, -q.credits, "charge", {
+      jobId: job.id,
+      memo:
+        `Video ${b.durationS}s (${b.mode === "native-1080p" ? "native 1080p" : "1080p upscaled"})` +
+        (b.variations > 1 ? ` · variation ${i + 1}/${b.variations}` : ""),
+    });
+    ids.push(job.id);
+  }
 
-  // Kick the first pipeline step immediately so the job leaves "queued".
-  await advanceJob(job.id);
+  // Kick the first pipeline step immediately so jobs leave "queued".
+  await Promise.all(ids.map((id) => advanceJob(id)));
 
-  return NextResponse.json({ id: job.id }, { status: 201 });
+  return NextResponse.json({ id: ids[0], ids }, { status: 201 });
 }
