@@ -32,9 +32,10 @@ export function rates() {
         p1080: envNum("COST_SD20_1080P_PER_SEC", 0.3),
       },
     } satisfies Record<ModelId, { p480: number; p1080: number }>,
-    // Provider: upscaler, per source second (Topaz; verified at validation).
-    upscale2xPerSec: envNum("COST_UPSCALE_2X_PER_SEC", 0.044),
-    upscale4xPerSec: envNum("COST_UPSCALE_4X_PER_SEC", 0.077),
+    // Provider: upscaler, per source second. ByteDance Video Upscaler via fal:
+    // $0.0072/s at 1080p (published); 4K tier provisional until validation.
+    upscale2xPerSec: envNum("COST_UPSCALE_2X_PER_SEC", 0.0072),
+    upscale4xPerSec: envNum("COST_UPSCALE_4X_PER_SEC", 0.02),
     // Storage + CDN delivery allocation, per video.
     deliveryPerVideo: envNum("COST_DELIVERY_PER_VIDEO", 0.01),
     // Operations overhead: hosting base, admin, support — as a fraction of
