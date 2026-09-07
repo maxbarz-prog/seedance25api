@@ -106,6 +106,70 @@ export default $config({
       },
     });
 
+    // Support mailbox: SES receives support@<domain>, stores to S3, and a
+    // forwarder re-sends to the private inbox. Receipt rules are account-
+    // global, so exactly one stage owns them (MAIL_STAGE, default dev until
+    // prod exists).
+    if ($app.stage === (process.env.MAIL_STAGE || "dev")) {
+      const mailDomain = "remerged.click";
+      const account = aws.getCallerIdentityOutput();
+      const zone = aws.route53.getZoneOutput({ name: mailDomain });
+      const inbound = new sst.aws.Bucket("Inbound");
+      new aws.s3.BucketPolicy("InboundSesPolicy", {
+        bucket: inbound.name,
+        policy: $jsonStringify({
+          Version: "2012-10-17",
+          Statement: [
+            {
+              Effect: "Allow",
+              Principal: { Service: "ses.amazonaws.com" },
+              Action: "s3:PutObject",
+              Resource: $interpolate`arn:aws:s3:::${inbound.name}/inbound/*`,
+              Condition: { StringEquals: { "aws:Referer": account.accountId } },
+            },
+          ],
+        }),
+      });
+      const forwarder = new sst.aws.Function("MailForwarder", {
+        handler: "functions/mail-forward.handler",
+        timeout: "30 seconds",
+        link: [inbound],
+        permissions: [{ actions: ["ses:SendEmail", "ses:SendRawEmail"], resources: ["*"] }],
+        environment: {
+          INBOUND_BUCKET: inbound.name,
+          INBOUND_PREFIX: "inbound/",
+          MAIL_FROM: `support@${mailDomain}`,
+          FORWARD_TO:
+            process.env.SUPPORT_FORWARD_TO ||
+            (process.env.ADMIN_EMAILS ?? "").split(",")[0].trim(),
+        },
+      });
+      new aws.lambda.Permission("MailForwarderSesInvoke", {
+        action: "lambda:InvokeFunction",
+        function: forwarder.name,
+        principal: "ses.amazonaws.com",
+        sourceAccount: account.accountId,
+      });
+      const ruleSet = new aws.ses.ReceiptRuleSet("MailRuleSet", { ruleSetName: "remerged" });
+      new aws.ses.ActiveReceiptRuleSet("MailRuleSetActive", { ruleSetName: ruleSet.ruleSetName });
+      new aws.ses.ReceiptRule("SupportRule", {
+        ruleSetName: ruleSet.ruleSetName,
+        name: "support",
+        recipients: [`support@${mailDomain}`],
+        enabled: true,
+        scanEnabled: true,
+        s3Actions: [{ bucketName: inbound.name, objectKeyPrefix: "inbound/", position: 1 }],
+        lambdaActions: [{ functionArn: forwarder.arn, invocationType: "Event", position: 2 }],
+      });
+      new aws.route53.Record("MailMx", {
+        zoneId: zone.zoneId,
+        name: mailDomain,
+        type: "MX",
+        ttl: 300,
+        records: ["10 inbound-smtp.us-east-1.amazonaws.com"],
+      });
+    }
+
     return { url: site.url, bucket: media.name };
   },
 });

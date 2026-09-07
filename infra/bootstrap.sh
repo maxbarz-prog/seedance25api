@@ -53,3 +53,28 @@ if [ -n "$TOKENS" ] && [ -n "$ZONE_ID" ]; then
 fi
 
 ensure_param EMAIL_FROM "no-reply@$DOMAIN"
+
+# SMTP credentials so the owner can "Send mail as" support@ from Gmail via
+# SES. Created once; username/password stored under /remerged/mail/*.
+if ! aws ssm get-parameter --name "/remerged/mail/SMTP_PASSWORD" --region "$REGION" >/dev/null 2>&1; then
+  USER_NAME="remerged-ses-smtp"
+  aws iam get-user --user-name "$USER_NAME" >/dev/null 2>&1 || aws iam create-user --user-name "$USER_NAME" >/dev/null
+  aws iam put-user-policy --user-name "$USER_NAME" --policy-name ses-send --policy-document \
+    '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["ses:SendRawEmail","ses:SendEmail"],"Resource":"*"}]}'
+  KEY_JSON=$(aws iam create-access-key --user-name "$USER_NAME")
+  AK=$(echo "$KEY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["AccessKey"]["AccessKeyId"])')
+  SK=$(echo "$KEY_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["AccessKey"]["SecretAccessKey"])')
+  SMTP_PW=$(python3 - "$SK" "$REGION" <<'PY'
+import hmac, hashlib, base64, sys
+secret, region = sys.argv[1], sys.argv[2]
+def sign(key, msg): return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+k = sign(("AWS4" + secret).encode("utf-8"), "11111111")
+k = sign(k, region); k = sign(k, "ses"); k = sign(k, "aws4_request"); k = sign(k, "SendRawEmail")
+print(base64.b64encode(b"\x04" + k).decode("utf-8"))
+PY
+)
+  aws ssm put-parameter --name "/remerged/mail/SMTP_USERNAME" --value "$AK" --type String --region "$REGION" >/dev/null
+  aws ssm put-parameter --name "/remerged/mail/SMTP_PASSWORD" --value "$SMTP_PW" --type SecureString --region "$REGION" >/dev/null
+  aws ssm put-parameter --name "/remerged/mail/SMTP_HOST" --value "email-smtp.$REGION.amazonaws.com" --type String --region "$REGION" >/dev/null
+  echo "created SES SMTP credentials"
+fi
