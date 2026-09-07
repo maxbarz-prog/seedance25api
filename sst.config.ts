@@ -69,6 +69,7 @@ export default $config({
       PROVIDER_MODE: process.env.PROVIDER_MODE ?? "",
       BYTEPLUS_API_KEY: process.env.BYTEPLUS_API_KEY ?? "",
       TOPAZ_API_KEY: process.env.TOPAZ_API_KEY ?? "",
+      FAL_KEY: process.env.FAL_KEY ?? "",
       MOCK_BILLING: process.env.MOCK_BILLING ?? "",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "",
       CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ?? "",
