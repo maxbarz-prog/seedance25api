@@ -10,7 +10,15 @@ export interface GenerationRequest {
   aspect: string;
   audio: boolean;
   resolution: "480p" | "1080p";
-  images?: { url: string; role: "reference" | "first_frame" | "last_frame" }[]; // fetchable ~1h
+  // Fetchable (~1h) input URLs: anchoring/reference images, reference
+  // video(s) for motion/style, reference audio for sync.
+  inputs?: {
+    url: string;
+    role: "reference" | "first_frame" | "last_frame" | "reference_video" | "reference_audio";
+  }[];
+  // When set, this is a continuation of an existing clip rather than a
+  // fresh generation; durationS is the length to add.
+  sourceVideoUrl?: string;
   seed?: number;
   cameraFixed?: boolean;
 }

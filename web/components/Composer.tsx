@@ -8,7 +8,10 @@ import {
   DEFAULT_MODEL,
   IMAGE_ROLES,
   ImageRole,
+  InputRole,
   MAX_IMAGES,
+  MAX_REF_AUDIOS,
+  MAX_REF_VIDEOS,
   MAX_PROMPT_CHARS,
   MAX_VARIATIONS,
   MIN_DURATION_S,
@@ -42,7 +45,9 @@ export default function Composer() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadsEnabled, setUploadsEnabled] = useState(false);
-  const [images, setImages] = useState<{ key: string; preview: string; role: ImageRole }[]>([]);
+  const [images, setImages] = useState<
+    { key: string; preview: string; role: InputRole; name: string }[]
+  >([]);
   const [uploading, setUploading] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [seed, setSeed] = useState<string>("");
@@ -58,14 +63,36 @@ export default function Composer() {
       .catch(() => {});
   }, []);
 
-  async function addImages(files: FileList | null) {
+  const imageCount = images.filter((i) => !i.role.startsWith("reference_")).length;
+  const videoCount = images.filter((i) => i.role === "reference_video").length;
+  const audioCount = images.filter((i) => i.role === "reference_audio").length;
+
+  async function addImages(files: FileList | null, kind: "image" | "video" | "audio" = "image") {
     if (!files || !files.length) return;
     setError(null);
     setUploading(true);
     try {
-      for (const file of Array.from(files).slice(0, MAX_IMAGES - images.length)) {
-        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-          setError("Use JPEG, PNG or WebP images.");
+      const room =
+        kind === "image"
+          ? MAX_IMAGES - imageCount
+          : kind === "video"
+            ? MAX_REF_VIDEOS - videoCount
+            : MAX_REF_AUDIOS - audioCount;
+      for (const file of Array.from(files).slice(0, Math.max(0, room))) {
+        const ok =
+          kind === "image"
+            ? ["image/jpeg", "image/png", "image/webp"].includes(file.type)
+            : kind === "video"
+              ? ["video/mp4", "video/quicktime"].includes(file.type)
+              : ["audio/mpeg", "audio/wav"].includes(file.type);
+        if (!ok) {
+          setError(
+            kind === "image"
+              ? "Use JPEG, PNG or WebP images."
+              : kind === "video"
+                ? "Use an MP4 or MOV video."
+                : "Use an MP3 or WAV file."
+          );
           continue;
         }
         const res = await fetch("/api/uploads", {
@@ -83,7 +110,7 @@ export default function Composer() {
           continue;
         }
         if (file.size > p.maxBytes) {
-          setError("Images must be under 10 MB.");
+          setError(`That file is too large (limit ${Math.round(p.maxBytes / 1e6)} MB).`);
           continue;
         }
         const put = await fetch(p.url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
@@ -95,10 +122,18 @@ export default function Composer() {
           ...prev,
           {
             key: p.key,
-            preview: URL.createObjectURL(file),
-            // First image defaults to "first frame" (image-to-video); later
-            // ones are free references.
-            role: prev.length === 0 ? "first_frame" : "reference",
+            preview: kind === "image" ? URL.createObjectURL(file) : "",
+            name: file.name,
+            role:
+              kind === "video"
+                ? "reference_video"
+                : kind === "audio"
+                  ? "reference_audio"
+                  : // First image defaults to "first frame" (image-to-video);
+                    // later ones are free references.
+                    prev.some((i) => !i.role.startsWith("reference_"))
+                    ? "reference"
+                    : "first_frame",
           },
         ]);
       }
@@ -204,38 +239,70 @@ export default function Composer() {
       />
       <div className="mt-1 flex items-center justify-between text-xs text-muted">
         <div className="flex items-center gap-2">
-          {uploadsEnabled && images.length < MAX_IMAGES && (
+          {uploadsEnabled && imageCount < MAX_IMAGES && (
             <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
-              {uploading ? "Uploading…" : "+ Reference image"}
+              {uploading ? "Uploading…" : "+ Image"}
               <input
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 multiple
                 className="hidden"
-                onChange={(e) => addImages(e.target.files)}
+                onChange={(e) => addImages(e.target.files, "image")}
+              />
+            </label>
+          )}
+          {uploadsEnabled && videoCount < MAX_REF_VIDEOS && (
+            <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
+              + Reference video
+              <input
+                type="file"
+                accept="video/mp4,video/quicktime"
+                className="hidden"
+                onChange={(e) => addImages(e.target.files, "video")}
+              />
+            </label>
+          )}
+          {uploadsEnabled && audioCount < MAX_REF_AUDIOS && (
+            <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
+              + Audio
+              <input
+                type="file"
+                accept="audio/mpeg,audio/wav"
+                className="hidden"
+                onChange={(e) => addImages(e.target.files, "audio")}
               />
             </label>
           )}
           {images.map((img) => (
             <span key={img.key} className="relative inline-flex items-center gap-1">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={img.preview} alt="" className="h-10 w-10 rounded-lg object-cover" />
-              <select
-                value={img.role}
-                onChange={(e) =>
-                  setImages((prev) =>
-                    prev.map((i) => (i.key === img.key ? { ...i, role: e.target.value as ImageRole } : i))
-                  )
-                }
-                className="rounded-lg border border-line bg-bg px-1 py-0.5 text-[11px]"
-                aria-label="Image role"
-              >
-                {IMAGE_ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {ROLE_LABELS[r]}
-                  </option>
-                ))}
-              </select>
+              {img.role.startsWith("reference_") ? (
+                <span className="rounded-lg border border-line bg-bg px-2 py-1 text-[11px]">
+                  {img.role === "reference_video" ? "🎬" : "🎵"} {img.name.slice(0, 18)}
+                </span>
+              ) : (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={img.preview} alt="" className="h-10 w-10 rounded-lg object-cover" />
+                  <select
+                    value={img.role}
+                    onChange={(e) =>
+                      setImages((prev) =>
+                        prev.map((i) =>
+                          i.key === img.key ? { ...i, role: e.target.value as ImageRole } : i
+                        )
+                      )
+                    }
+                    className="rounded-lg border border-line bg-bg px-1 py-0.5 text-[11px]"
+                    aria-label="Image role"
+                  >
+                    {IMAGE_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {ROLE_LABELS[r]}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
               <button
                 type="button"
                 onClick={() => setImages((prev) => prev.filter((i) => i.key !== img.key))}

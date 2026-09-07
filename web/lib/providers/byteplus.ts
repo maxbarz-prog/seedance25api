@@ -47,12 +47,24 @@ export class BytePlusGenerator implements VideoGenerator {
     const content: Record<string, unknown>[] = [
       { type: "text", text: `${req.prompt} ${flags.join(" ")}` },
     ];
-    for (const img of req.images ?? []) {
-      content.push({
-        type: "image_url",
-        image_url: { url: img.url },
-        role: img.role === "reference" ? "reference_image" : img.role,
-      });
+    // Continuation: the source clip goes in as the video to extend.
+    // TODO(validate): confirm the ModelArk role/field names for extend and
+    // reference inputs against a live key during the validation run.
+    if (req.sourceVideoUrl) {
+      content.push({ type: "video_url", video_url: { url: req.sourceVideoUrl }, role: "extend" });
+    }
+    for (const input of req.inputs ?? []) {
+      if (input.role === "reference_video") {
+        content.push({ type: "video_url", video_url: { url: input.url }, role: "reference_video" });
+      } else if (input.role === "reference_audio") {
+        content.push({ type: "audio_url", audio_url: { url: input.url }, role: "reference_audio" });
+      } else {
+        content.push({
+          type: "image_url",
+          image_url: { url: input.url },
+          role: input.role === "reference" ? "reference_image" : input.role,
+        });
+      }
     }
     const body = { model: upstreamModel(req.model), content };
     const res = await fetch(`${BASE}/contents/generations/tasks`, {

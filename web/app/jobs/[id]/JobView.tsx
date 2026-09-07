@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { EXTEND_MAX_S, EXTEND_MIN_S } from "@/lib/config";
 
 interface Job {
   id: string;
@@ -14,6 +16,8 @@ interface Job {
   quote_credits: number;
   video_url: string | null;
   error: string | null;
+  kind?: string | null;
+  source_job_id?: string | null;
 }
 
 const STEPS = ["queued", "generating", "upscaling", "ready"] as const;
@@ -25,8 +29,51 @@ const LABELS: Record<string, string> = {
 };
 
 export default function JobView({ id }: { id: string }) {
+  const router = useRouter();
   const [job, setJob] = useState<Job | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [extendOpen, setExtendOpen] = useState(false);
+  const [extendPrompt, setExtendPrompt] = useState("");
+  const [extendS, setExtendS] = useState(5);
+  const [extendQuote, setExtendQuote] = useState<number | null>(null);
+  const [extending, setExtending] = useState(false);
+  const [extendError, setExtendError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!job || !extendOpen) return;
+    const ctl = new AbortController();
+    fetch(`/api/quote?model=${job.model ?? "seedance-2.5"}&duration=${extendS}&mode=${job.mode}`, {
+      signal: ctl.signal,
+    })
+      .then((r) => r.json())
+      .then((q) => setExtendQuote(q.usd ?? null))
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [job, extendOpen, extendS]);
+
+  async function extend() {
+    setExtending(true);
+    setExtendError(null);
+    try {
+      const res = await fetch(`/api/jobs/${id}/extend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: extendPrompt, durationS: extendS }),
+      });
+      const data = await res.json();
+      if (res.status === 402) {
+        router.push(data.error === "membership_required" ? "/account?join=1" : "/account?topup=1");
+        return;
+      }
+      if (!res.ok) {
+        setExtendError(data.message || data.error || "Something went wrong.");
+        return;
+      }
+      router.push(`/jobs/${data.id}`);
+    } finally {
+      setExtending(false);
+    }
+  }
 
   useEffect(() => {
     let stop = false;
@@ -94,8 +141,25 @@ export default function JobView({ id }: { id: string }) {
             loop
             className="w-full rounded-2xl border border-line bg-black"
           />
-          <p className="mt-2 text-xs text-muted">AI-generated video.</p>
-          <div className="mt-4 flex gap-3">
+          <p className="mt-2 text-xs text-muted">
+            AI-generated video.
+            {job.kind === "extend" && job.source_job_id && (
+              <>
+                {" "}Continues{" "}
+                <Link href={`/jobs/${job.source_job_id}`} className="underline">
+                  this clip
+                </Link>
+                .
+              </>
+            )}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              onClick={() => setExtendOpen((v) => !v)}
+              className="rounded-full border border-accent px-6 py-2 text-sm hover:opacity-90"
+            >
+              Extend
+            </button>
             <a
               href={job.video_url}
               download
@@ -116,6 +180,43 @@ export default function JobView({ id }: { id: string }) {
               Library
             </Link>
           </div>
+          {extendOpen && (
+            <div className="mt-4 rounded-2xl border border-line bg-surface p-4">
+              <p className="text-sm font-medium">Continue this clip</p>
+              <textarea
+                value={extendPrompt}
+                onChange={(e) => setExtendPrompt(e.target.value)}
+                placeholder="What happens next? (optional — defaults to the original prompt)"
+                rows={2}
+                className="mt-2 w-full rounded-xl border border-line bg-bg p-3 text-sm outline-none focus:border-accent"
+              />
+              <div className="mt-2 flex flex-wrap items-center gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <span className="text-muted">Add</span>
+                  <input
+                    type="range"
+                    min={EXTEND_MIN_S}
+                    max={EXTEND_MAX_S}
+                    value={extendS}
+                    onChange={(e) => setExtendS(Number(e.target.value))}
+                    className="accent-[var(--accent)]"
+                  />
+                  <span className="w-8 font-medium">{extendS}s</span>
+                </label>
+                <span className="text-muted">
+                  {extendQuote !== null ? `$${extendQuote.toFixed(2)}` : "…"}
+                </span>
+                <button
+                  onClick={extend}
+                  disabled={extending}
+                  className="rounded-full bg-accent px-5 py-2 text-sm font-medium text-accent-ink disabled:opacity-50"
+                >
+                  {extending ? "Starting…" : "Extend"}
+                </button>
+              </div>
+              {extendError && <p className="mt-2 text-sm text-bad">{extendError}</p>}
+            </div>
+          )}
         </div>
       ) : (
         <div className="mt-8 rounded-2xl border border-line bg-surface p-8">

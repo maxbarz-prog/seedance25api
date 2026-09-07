@@ -11,7 +11,16 @@ import { Readable } from "stream";
 
 const BUCKET = process.env.VIDEO_BUCKET;
 const SIGNED_URL_TTL_S = 3600;
-const UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+const UPLOAD_LIMITS: Record<string, { ext: string; maxBytes: number }> = {
+  "image/jpeg": { ext: "jpg", maxBytes: 10 * 1024 * 1024 },
+  "image/png": { ext: "png", maxBytes: 10 * 1024 * 1024 },
+  "image/webp": { ext: "webp", maxBytes: 10 * 1024 * 1024 },
+  "video/mp4": { ext: "mp4", maxBytes: 50 * 1024 * 1024 },
+  "video/quicktime": { ext: "mov", maxBytes: 50 * 1024 * 1024 },
+  "audio/mpeg": { ext: "mp3", maxBytes: 15 * 1024 * 1024 },
+  "audio/wav": { ext: "wav", maxBytes: 15 * 1024 * 1024 },
+};
+export const UPLOAD_TYPES = Object.keys(UPLOAD_LIMITS);
 
 let _s3: S3Client | null = null;
 function s3(): S3Client {
@@ -62,6 +71,7 @@ export async function storeVideoFromUrl(
 export async function readUrl(key: string | null | undefined): Promise<string | null> {
   if (!key) return null;
   if (key.startsWith("url:")) return key.slice(4);
+  if (key.startsWith("http://") || key.startsWith("https://")) return key; // legacy rows
   if (!BUCKET) return null;
   return getSignedUrl(s3(), new GetObjectCommand({ Bucket: BUCKET, Key: key }), {
     expiresIn: SIGNED_URL_TTL_S,
@@ -73,18 +83,20 @@ export async function deleteObject(key: string | null | undefined): Promise<void
   await s3().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
 }
 
-// Presigned PUT for reference-image uploads straight from the browser.
-export async function presignImageUpload(
+// Presigned PUT for input uploads (images, reference video/audio) straight
+// from the browser.
+export async function presignUpload(
   userId: string,
   contentType: string
 ): Promise<{ key: string; url: string; maxBytes: number } | null> {
   if (!BUCKET) return null;
-  const ext = contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
-  const key = `uploads/${userId}/${crypto.randomUUID()}.${ext}`;
+  const limit = UPLOAD_LIMITS[contentType];
+  if (!limit) return null;
+  const key = `uploads/${userId}/${crypto.randomUUID()}.${limit.ext}`;
   const url = await getSignedUrl(
     s3(),
     new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType }),
     { expiresIn: 600 }
   );
-  return { key, url, maxBytes: UPLOAD_MAX_BYTES };
+  return { key, url, maxBytes: limit.maxBytes };
 }

@@ -47,6 +47,14 @@ export const MAX_PROMPT_CHARS = 4000;
 export const ASPECT_RATIOS = ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9", "adaptive"] as const;
 export const MAX_VARIATIONS = 4;
 export const MAX_IMAGES = 4;
+export const MAX_REF_VIDEOS = 2;
+export const MAX_REF_AUDIOS = 1;
 export const IMAGE_ROLES = ["reference", "first_frame", "last_frame"] as const;
 export type ImageRole = (typeof IMAGE_ROLES)[number];
+// All input roles a job can carry (images plus reference video/audio).
+export const INPUT_ROLES = [...IMAGE_ROLES, "reference_video", "reference_audio"] as const;
+export type InputRole = (typeof INPUT_ROLES)[number];
+// Extending an existing clip: how much can be added per step.
+export const EXTEND_MIN_S = 4;
+export const EXTEND_MAX_S = 15;
 export type AspectRatio = (typeof ASPECT_RATIOS)[number];

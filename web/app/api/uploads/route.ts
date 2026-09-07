@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
-import { presignImageUpload, storageEnabled } from "@/lib/storage";
+import { presignUpload, storageEnabled, UPLOAD_TYPES } from "@/lib/storage";
 
-// Presigned PUT for a reference image. The browser uploads straight to S3;
-// only the key comes back to us with the job.
+// Presigned PUT for an input file (image, reference video or audio). The
+// browser uploads straight to S3; only the key comes back with the job.
 
 const Body = z.object({
-  contentType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  contentType: z.enum(UPLOAD_TYPES as [string, ...string[]]),
 });
 
 export async function POST(req: NextRequest) {
@@ -18,9 +18,12 @@ export async function POST(req: NextRequest) {
   }
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "Use a JPEG, PNG or WebP image." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Use JPEG/PNG/WebP images, MP4/MOV video, or MP3/WAV audio." },
+      { status: 400 }
+    );
   }
-  const presigned = await presignImageUpload(user.id, parsed.data.contentType);
+  const presigned = await presignUpload(user.id, parsed.data.contentType);
   return NextResponse.json(presigned);
 }
 

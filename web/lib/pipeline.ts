@@ -31,16 +31,22 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
 
     if (job.status === "queued") {
       if (!(await claimJob(id, "queued", "generating"))) return jobById(id);
-      const inputs: { key: string; role: "reference" | "first_frame" | "last_frame" }[] =
-        job.image_keys ? JSON.parse(job.image_keys) : [];
-      const images = (
+      type Role = "reference" | "first_frame" | "last_frame" | "reference_video" | "reference_audio";
+      const declared: { key: string; role: Role }[] = job.image_keys ? JSON.parse(job.image_keys) : [];
+      const inputs = (
         await Promise.all(
-          inputs.map(async (i) => {
+          declared.map(async (i) => {
             const url = await readUrl(i.key);
             return url ? { url, role: i.role } : null;
           })
         )
-      ).filter((i): i is { url: string; role: "reference" | "first_frame" | "last_frame" } => !!i);
+      ).filter((i): i is { url: string; role: Role } => !!i);
+      let sourceVideoUrl: string | undefined;
+      if (job.kind === "extend" && job.source_job_id) {
+        const source = await jobById(job.source_job_id);
+        sourceVideoUrl = (await readUrl(source?.video_url)) ?? undefined;
+        if (!sourceVideoUrl) throw new Error("extend: source video unavailable");
+      }
       const taskId = await generator().submitGeneration({
         prompt: job.prompt,
         model: job.model,
@@ -48,7 +54,8 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
         aspect: job.aspect,
         audio: !!job.audio,
         resolution: job.mode === "native-1080p" ? "1080p" : "480p",
-        images,
+        inputs,
+        sourceVideoUrl,
         seed: job.seed ?? undefined,
         cameraFixed: !!job.camera_fixed,
       });

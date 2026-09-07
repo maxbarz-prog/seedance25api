@@ -34,7 +34,9 @@ export interface Job {
   quote_credits: number;
   provider_task_id: string | null;
   video_url: string | null; // storage key (see lib/storage); resolved to a URL on read
-  image_keys?: string | null; // JSON array of {key, role} for input images
+  image_keys?: string | null; // JSON array of {key, role} for all inputs (images, ref video/audio)
+  kind?: "generate" | "extend" | null;
+  source_job_id?: string | null; // for kind=extend: the clip being continued
   seed?: number | null;
   camera_fixed?: number | null;
   size_bytes: number | null;

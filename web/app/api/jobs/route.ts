@@ -7,9 +7,11 @@ import { quote } from "@/lib/pricing";
 import {
   ASPECT_RATIOS,
   DEFAULT_MODEL,
-  IMAGE_ROLES,
+  INPUT_ROLES,
   MAX_DURATION_S,
   MAX_IMAGES,
+  MAX_REF_AUDIOS,
+  MAX_REF_VIDEOS,
   MAX_PROMPT_CHARS,
   MAX_VARIATIONS,
   MIN_DURATION_S,
@@ -32,10 +34,10 @@ const Body = z.object({
     .array(
       z.object({
         key: z.string().regex(/^uploads\/[^/]+\/[^/]+$/),
-        role: z.enum(IMAGE_ROLES).default("reference"),
+        role: z.enum(INPUT_ROLES).default("reference"),
       })
     )
-    .max(MAX_IMAGES)
+    .max(MAX_IMAGES + MAX_REF_VIDEOS + MAX_REF_AUDIOS)
     .default([]),
   seed: z.number().int().min(0).max(4294967295).optional(),
   cameraFixed: z.boolean().default(false),
@@ -78,11 +80,25 @@ export async function POST(req: NextRequest) {
   if (b.images.some((i) => !i.key.startsWith(`uploads/${user.id}/`))) {
     return NextResponse.json({ error: "Invalid image reference." }, { status: 400 });
   }
-  const firsts = b.images.filter((i) => i.role === "first_frame").length;
-  const lasts = b.images.filter((i) => i.role === "last_frame").length;
-  if (firsts > 1 || lasts > 1) {
+  const count = (role: string) => b.images.filter((i) => i.role === role).length;
+  const imageCount = b.images.filter(
+    (i) => i.role !== "reference_video" && i.role !== "reference_audio"
+  ).length;
+  if (count("first_frame") > 1 || count("last_frame") > 1) {
     return NextResponse.json(
       { error: "Only one first-frame and one last-frame image are allowed." },
+      { status: 400 }
+    );
+  }
+  if (
+    imageCount > MAX_IMAGES ||
+    count("reference_video") > MAX_REF_VIDEOS ||
+    count("reference_audio") > MAX_REF_AUDIOS
+  ) {
+    return NextResponse.json(
+      {
+        error: `Up to ${MAX_IMAGES} images, ${MAX_REF_VIDEOS} reference videos and ${MAX_REF_AUDIOS} audio track.`,
+      },
       { status: 400 }
     );
   }
@@ -137,6 +153,8 @@ export async function POST(req: NextRequest) {
       provider_task_id: null,
       video_url: null,
       image_keys: b.images.length ? JSON.stringify(b.images) : null,
+      kind: "generate",
+      source_job_id: null,
       seed: b.seed ?? null,
       camera_fixed: b.cameraFixed ? 1 : 0,
       size_bytes: null,
