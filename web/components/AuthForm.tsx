@@ -84,6 +84,10 @@ export default function AuthForm({ kind }: { kind: "login" | "signup" }) {
             <Link className="underline" href="/signup">
               Create an account
             </Link>
+            {" · "}
+            <Link className="underline" href="/forgot">
+              Forgot password?
+            </Link>
           </>
         )}
       </p>

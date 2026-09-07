@@ -1,5 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
+  DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
@@ -16,13 +17,16 @@ import {
   AdminUserRow,
   DataStore,
   Job,
+  JobStatus,
   LedgerEntry,
   Membership,
   User,
 } from "./types";
 
 // AWS store. Tables (created by sst.config.ts):
-//   users:  pk id;               GSI "email"  (hashKey email)
+//   users:  pk id;               GSI "email"  (hashKey email),
+//                                GSI "stripe" (hashKey stripe_customer_id),
+//                                GSI "reset"  (hashKey reset_token_hash)
 //   ledger: pk pk, sk sk         (pk = user id, sk = createdAt#id;
 //                                 idempotency guards live at pk = ext#<id>)
 //   jobs:   pk id;               GSI "user"   (hashKey user_id, rangeKey created_at)
@@ -80,6 +84,67 @@ export class DynamoStore implements DataStore {
         Key: { id: userId },
         UpdateExpression: "SET membership = :m, membership_renews_at = :r",
         ExpressionAttributeValues: { ":m": membership, ":r": renewsAt },
+      })
+    );
+  }
+
+  async setStripeIds(userId: string, customerId: string | null, subscriptionId: string | null) {
+    await this.doc.send(
+      new UpdateCommand({
+        TableName: USERS,
+        Key: { id: userId },
+        UpdateExpression: "SET stripe_customer_id = :c, stripe_subscription_id = :s",
+        ExpressionAttributeValues: { ":c": customerId, ":s": subscriptionId },
+      })
+    );
+  }
+
+  async userByStripeCustomer(customerId: string): Promise<User | undefined> {
+    const r = await this.doc.send(
+      new QueryCommand({
+        TableName: USERS,
+        IndexName: "stripe",
+        KeyConditionExpression: "stripe_customer_id = :c",
+        ExpressionAttributeValues: { ":c": customerId },
+        Limit: 1,
+      })
+    );
+    return r.Items?.[0] as User | undefined;
+  }
+
+  async setResetToken(userId: string, tokenHash: string | null, expiresAt: number | null) {
+    await this.doc.send(
+      new UpdateCommand({
+        TableName: USERS,
+        Key: { id: userId },
+        UpdateExpression: tokenHash
+          ? "SET reset_token_hash = :h, reset_expires_at = :e"
+          : "REMOVE reset_token_hash, reset_expires_at",
+        ExpressionAttributeValues: tokenHash ? { ":h": tokenHash, ":e": expiresAt } : undefined,
+      })
+    );
+  }
+
+  async userByResetToken(tokenHash: string): Promise<User | undefined> {
+    const r = await this.doc.send(
+      new QueryCommand({
+        TableName: USERS,
+        IndexName: "reset",
+        KeyConditionExpression: "reset_token_hash = :h",
+        ExpressionAttributeValues: { ":h": tokenHash },
+        Limit: 1,
+      })
+    );
+    return r.Items?.[0] as User | undefined;
+  }
+
+  async setPassword(userId: string, passwordHash: string) {
+    await this.doc.send(
+      new UpdateCommand({
+        TableName: USERS,
+        Key: { id: userId },
+        UpdateExpression: "SET password_hash = :p",
+        ExpressionAttributeValues: { ":p": passwordHash },
       })
     );
   }
@@ -203,6 +268,48 @@ export class DynamoStore implements DataStore {
         ExpressionAttributeValues: values,
       })
     );
+  }
+
+  async claimJob(id: string, from: JobStatus, to: JobStatus): Promise<boolean> {
+    try {
+      await this.doc.send(
+        new UpdateCommand({
+          TableName: JOBS,
+          Key: { id },
+          UpdateExpression: "SET #s = :to, updated_at = :now",
+          ConditionExpression: "#s = :from",
+          ExpressionAttributeNames: { "#s": "status" },
+          ExpressionAttributeValues: { ":to": to, ":from": from, ":now": Date.now() },
+        })
+      );
+      return true;
+    } catch (err: unknown) {
+      if (String(err).includes("ConditionalCheckFailed")) return false;
+      throw err;
+    }
+  }
+
+  async jobsInFlight(limit = 200): Promise<Job[]> {
+    const items: Job[] = [];
+    let lastKey: Record<string, unknown> | undefined;
+    do {
+      const r = await this.doc.send(
+        new ScanCommand({
+          TableName: JOBS,
+          FilterExpression: "#s IN (:q, :g, :u)",
+          ExpressionAttributeNames: { "#s": "status" },
+          ExpressionAttributeValues: { ":q": "queued", ":g": "generating", ":u": "upscaling" },
+          ExclusiveStartKey: lastKey,
+        })
+      );
+      items.push(...((r.Items ?? []) as Job[]));
+      lastKey = r.LastEvaluatedKey;
+    } while (lastKey && items.length < limit);
+    return items.sort((a, b) => a.created_at - b.created_at).slice(0, limit);
+  }
+
+  async deleteJob(id: string) {
+    await this.doc.send(new DeleteCommand({ TableName: JOBS, Key: { id } }));
   }
 
   async storageUsedBytes(userId: string): Promise<number> {

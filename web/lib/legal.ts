@@ -1,0 +1,32 @@
+import { SITE_NAME, SITE_DOMAIN } from "./config";
+
+export const SUPPORT_EMAIL = `support@${SITE_DOMAIN}`;
+export const LEGAL_UPDATED = "September 2026";
+
+export const TERMS = [
+  ["Service", `${SITE_NAME} is a members-only service for generating short videos from text and image prompts using third-party AI models, delivered through our website. You must be at least 18 to use it.`],
+  ["Membership and credits", `Generation requires an active membership, billed monthly or annually via our payment processor, and prepaid credits purchased in top-ups. Credits are consumed at the price quoted before each generation, are non-transferable, and do not expire. Membership fees are non-refundable except as described in our Refund Policy.`],
+  ["Acceptable use", `You may not use the service to create content that is unlawful, sexual involving minors, non-consensual intimate imagery, deceptive impersonation of real people, harassment, or that infringes others' intellectual property. Prompts and outputs pass automated moderation; rejected generations are refunded. We may suspend accounts that violate this section.`],
+  ["Your content", `You retain rights to the prompts and images you upload and to the videos generated for you, subject to the terms of the underlying model providers. You grant us the limited licence needed to process, store and deliver your content. We do not use your prompts or outputs to train models.`],
+  ["Storage", `Generated videos are stored while your membership is active, up to your plan's quota. If your membership lapses, stored videos may be deleted after 30 days.`],
+  ["Availability", `Generation depends on third-party providers and is offered as-is. Failed generations are refunded automatically. We are not liable for indirect or consequential losses; our total liability is limited to the amount you paid us in the preceding three months.`],
+  ["Changes", `We may update these terms; material changes will be announced on the site. Continued use after a change constitutes acceptance.`],
+  ["Contact", `Questions: ${SUPPORT_EMAIL}.`],
+];
+
+export const PRIVACY = [
+  ["What we collect", `Your email address and a hashed password; payment details are handled entirely by our payment processor (Stripe) and never touch our servers; the prompts, reference images and videos you create; and standard server logs.`],
+  ["How we use it", `To run the service: authenticating you, processing generations with our AI providers, billing, delivering your videos, and support. Prompts and images are sent to the AI providers strictly to fulfil your request.`],
+  ["Sharing", `We share data only with the processors needed to operate: our payment processor, cloud hosting (Amazon Web Services), email delivery, and the AI model providers that generate your videos. We do not sell personal data.`],
+  ["Retention", `Account data is kept while your account exists. Videos are kept per the storage terms. You can delete videos at any time and request account deletion via ${SUPPORT_EMAIL}.`],
+  ["Cookies", `We use a single session cookie to keep you signed in. No advertising trackers.`],
+  ["Your rights", `You may access, correct or delete your personal data by contacting ${SUPPORT_EMAIL}. Depending on your jurisdiction you may have further rights under applicable data-protection law.`],
+  ["Contact", `${SUPPORT_EMAIL}.`],
+];
+
+export const REFUNDS = [
+  ["Failed generations", `If a generation fails for any reason, the credits are returned to your balance automatically — no request needed.`],
+  ["Credits", `Unused credits do not expire. Credit purchases are refundable to the original payment method within 14 days if none of the purchased credits have been used; contact ${SUPPORT_EMAIL}.`],
+  ["Membership", `You can cancel at any time from your account page; access continues until the end of the paid period. We do not prorate partial periods, except where required by law. If you were charged in error, contact us within 14 days for a full refund.`],
+  ["Quality", `Generated video is probabilistic: an output you dislike is not a failure and isn't refundable, but if a result is clearly broken (corrupt file, wrong length) contact ${SUPPORT_EMAIL} and we'll put it right.`],
+];

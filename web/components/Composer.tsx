@@ -31,8 +31,58 @@ export default function Composer() {
   const [q, setQ] = useState<Quote | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [uploadsEnabled, setUploadsEnabled] = useState(false);
+  const [images, setImages] = useState<{ key: string; preview: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
 
   const maxDuration = MODELS[model].maxDurationS;
+
+  useEffect(() => {
+    fetch("/api/uploads")
+      .then((r) => r.json())
+      .then((d) => setUploadsEnabled(!!d.enabled))
+      .catch(() => {});
+  }, []);
+
+  async function addImages(files: FileList | null) {
+    if (!files || !files.length) return;
+    setError(null);
+    setUploading(true);
+    try {
+      for (const file of Array.from(files).slice(0, 4 - images.length)) {
+        if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+          setError("Use JPEG, PNG or WebP images.");
+          continue;
+        }
+        const res = await fetch("/api/uploads", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contentType: file.type }),
+        });
+        if (res.status === 401) {
+          router.push("/signup?next=/");
+          return;
+        }
+        const p = await res.json();
+        if (!res.ok) {
+          setError(p.error || "Upload failed.");
+          continue;
+        }
+        if (file.size > p.maxBytes) {
+          setError("Images must be under 10 MB.");
+          continue;
+        }
+        const put = await fetch(p.url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });
+        if (!put.ok) {
+          setError("Upload failed.");
+          continue;
+        }
+        setImages((prev) => [...prev, { key: p.key, preview: URL.createObjectURL(file) }]);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
 
   // Draft survives the signup/membership/top-up detour.
   useEffect(() => {
@@ -92,6 +142,7 @@ export default function Composer() {
           audio,
           mode,
           upscaleFactor: 2,
+          imageKeys: images.map((i) => i.key),
         }),
       });
       const data = await res.json();
@@ -125,8 +176,38 @@ export default function Composer() {
         rows={4}
         className="w-full resize-y rounded-xl border border-line bg-bg p-4 text-base outline-none focus:border-accent"
       />
-      <div className="mt-1 text-right text-xs text-muted">
-        {prompt.length}/{MAX_PROMPT_CHARS}
+      <div className="mt-1 flex items-center justify-between text-xs text-muted">
+        <div className="flex items-center gap-2">
+          {uploadsEnabled && images.length < 4 && (
+            <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
+              {uploading ? "Uploading…" : "+ Reference image"}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                multiple
+                className="hidden"
+                onChange={(e) => addImages(e.target.files)}
+              />
+            </label>
+          )}
+          {images.map((img) => (
+            <span key={img.key} className="relative inline-block">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={img.preview} alt="" className="h-10 w-10 rounded-lg object-cover" />
+              <button
+                type="button"
+                onClick={() => setImages((prev) => prev.filter((i) => i.key !== img.key))}
+                className="absolute -right-1 -top-1 rounded-full bg-surface px-1 text-[10px] leading-none shadow"
+                aria-label="Remove image"
+              >
+                ✕
+              </button>
+            </span>
+          ))}
+        </div>
+        <span>
+          {prompt.length}/{MAX_PROMPT_CHARS}
+        </span>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">

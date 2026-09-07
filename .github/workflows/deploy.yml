@@ -7,21 +7,27 @@ on:
       - claude/seedance-video-platform-9sp9cn
     paths:
       - "web/**"
+      - "functions/**"
       - "sst.config.ts"
       - "package.json"
       - ".github/workflows/deploy.yml"
+    tags:
+      - "prod-*"
 
 permissions:
   id-token: write
   contents: read
 
+# Branch pushes deploy `dev`; pushing a tag like prod-2026-09-07 deploys `prod`.
 concurrency:
-  group: deploy-dev
+  group: deploy-${{ startsWith(github.ref, 'refs/tags/prod-') && 'prod' || 'dev' }}
   cancel-in-progress: false
 
 jobs:
-  deploy-dev:
+  deploy:
     runs-on: ubuntu-latest
+    env:
+      STAGE: ${{ startsWith(github.ref, 'refs/tags/prod-') && 'prod' || 'dev' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -35,19 +41,25 @@ jobs:
           role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
           aws-region: us-east-1
 
+      - name: Bootstrap stage (secrets, SES identity)
+        run: ./infra/bootstrap.sh "$STAGE"
+
       - name: Load stage secrets from SSM
         run: |
           load() {
-            v=$(aws ssm get-parameter --name "/remerged/dev/$1" --with-decryption \
+            v=$(aws ssm get-parameter --name "/remerged/$STAGE/$1" --with-decryption \
                 --query Parameter.Value --output text 2>/dev/null || true)
             if [ -n "$v" ] && [ "$v" != "None" ]; then
               echo "::add-mask::$v"
               echo "$1=$v" >> "$GITHUB_ENV"
             fi
           }
-          for name in SESSION_SECRET ADMIN_EMAILS STRIPE_SECRET_KEY \
-                      STRIPE_WEBHOOK_SECRET BYTEPLUS_API_KEY TOPAZ_API_KEY \
-                      PROVIDER_MODE MOCK_BILLING; do
+          for name in SESSION_SECRET CRON_SECRET ADMIN_EMAILS EMAIL_FROM \
+                      STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET \
+                      BYTEPLUS_API_KEY TOPAZ_API_KEY PROVIDER_MODE MOCK_BILLING \
+                      COST_SD25_480P_PER_SEC COST_SD25_1080P_PER_SEC \
+                      COST_SD20_480P_PER_SEC COST_SD20_1080P_PER_SEC \
+                      COST_UPSCALE_2X_PER_SEC COST_UPSCALE_4X_PER_SEC; do
             load "$name"
           done
 
@@ -56,5 +68,5 @@ jobs:
           npm install
           npm install --prefix web
 
-      - name: Deploy dev stage
-        run: npx sst deploy --stage dev
+      - name: Deploy ${{ env.STAGE }} stage
+        run: npx sst deploy --stage "$STAGE"

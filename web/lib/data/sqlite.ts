@@ -9,6 +9,7 @@ import {
   AdminUserRow,
   DataStore,
   Job,
+  JobStatus,
   LedgerEntry,
   Membership,
   User,
@@ -77,10 +78,19 @@ export class SqliteStore implements DataStore {
       CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
     `);
     // Additive migration for databases created before the model column.
-    try {
-      d.exec(`ALTER TABLE jobs ADD COLUMN model TEXT NOT NULL DEFAULT 'seedance-2.5'`);
-    } catch {
-      // column already exists
+    const adds = [
+      `ALTER TABLE jobs ADD COLUMN model TEXT NOT NULL DEFAULT 'seedance-2.5'`,
+      `ALTER TABLE jobs ADD COLUMN image_keys TEXT`,
+      `ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT`,
+      `ALTER TABLE users ADD COLUMN reset_token_hash TEXT`,
+      `ALTER TABLE users ADD COLUMN reset_expires_at INTEGER`,
+    ];
+    for (const sql of adds) {
+      try {
+        d.exec(sql);
+      } catch {
+        // column already exists
+      }
     }
   }
 
@@ -117,6 +127,34 @@ export class SqliteStore implements DataStore {
     this.db()
       .prepare(`UPDATE users SET membership = ?, membership_renews_at = ? WHERE id = ?`)
       .run(membership, renewsAt, userId);
+  }
+
+  async setStripeIds(userId: string, customerId: string | null, subscriptionId: string | null) {
+    this.db()
+      .prepare(`UPDATE users SET stripe_customer_id = ?, stripe_subscription_id = ? WHERE id = ?`)
+      .run(customerId, subscriptionId, userId);
+  }
+
+  async userByStripeCustomer(customerId: string): Promise<User | undefined> {
+    return this.db()
+      .prepare(`SELECT * FROM users WHERE stripe_customer_id = ?`)
+      .get(customerId) as User | undefined;
+  }
+
+  async setResetToken(userId: string, tokenHash: string | null, expiresAt: number | null) {
+    this.db()
+      .prepare(`UPDATE users SET reset_token_hash = ?, reset_expires_at = ? WHERE id = ?`)
+      .run(tokenHash, expiresAt, userId);
+  }
+
+  async userByResetToken(tokenHash: string): Promise<User | undefined> {
+    return this.db()
+      .prepare(`SELECT * FROM users WHERE reset_token_hash = ?`)
+      .get(tokenHash) as User | undefined;
+  }
+
+  async setPassword(userId: string, passwordHash: string) {
+    this.db().prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(passwordHash, userId);
   }
 
   async balance(userId: string): Promise<number> {
@@ -168,11 +206,11 @@ export class SqliteStore implements DataStore {
     this.db()
       .prepare(
         `INSERT INTO jobs (id, user_id, prompt, model, duration_s, aspect, audio, mode, upscale_factor, status,
-                           quote_credits, provider_task_id, video_url, size_bytes, error, created_at, updated_at)
+                           quote_credits, provider_task_id, video_url, image_keys, size_bytes, error, created_at, updated_at)
          VALUES (@id, @user_id, @prompt, @model, @duration_s, @aspect, @audio, @mode, @upscale_factor, @status,
-                 @quote_credits, @provider_task_id, @video_url, @size_bytes, @error, @created_at, @updated_at)`
+                 @quote_credits, @provider_task_id, @video_url, @image_keys, @size_bytes, @error, @created_at, @updated_at)`
       )
-      .run(job);
+      .run({ image_keys: null, ...job });
     return job;
   }
 
@@ -193,6 +231,26 @@ export class SqliteStore implements DataStore {
     this.db()
       .prepare(`UPDATE jobs SET ${sets}, updated_at = @__now WHERE id = @id`)
       .run({ ...fields, id, __now: Date.now() });
+  }
+
+  async claimJob(id: string, from: JobStatus, to: JobStatus): Promise<boolean> {
+    const r = this.db()
+      .prepare(`UPDATE jobs SET status = ?, updated_at = ? WHERE id = ? AND status = ?`)
+      .run(to, Date.now(), id, from);
+    return r.changes === 1;
+  }
+
+  async jobsInFlight(limit = 200): Promise<Job[]> {
+    return this.db()
+      .prepare(
+        `SELECT * FROM jobs WHERE status IN ('queued','generating','upscaling')
+         ORDER BY created_at ASC LIMIT ?`
+      )
+      .all(limit) as Job[];
+  }
+
+  async deleteJob(id: string) {
+    this.db().prepare(`DELETE FROM jobs WHERE id = ?`).run(id);
   }
 
   async storageUsedBytes(userId: string): Promise<number> {

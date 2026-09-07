@@ -33,18 +33,19 @@ function headers() {
 
 export class BytePlusGenerator implements VideoGenerator {
   async submitGeneration(req: GenerationRequest): Promise<string> {
-    const body = {
-      model: upstreamModel(req.model),
-      content: [
-        {
-          type: "text",
-          text:
-            `${req.prompt} --resolution ${req.resolution} --duration ${req.durationS}` +
-            ` --ratio ${req.aspect}` +
-            (req.seed !== undefined ? ` --seed ${req.seed}` : ""),
-        },
-      ],
-    };
+    const content: Record<string, unknown>[] = [
+      {
+        type: "text",
+        text:
+          `${req.prompt} --resolution ${req.resolution} --duration ${req.durationS}` +
+          ` --ratio ${req.aspect}` +
+          (req.seed !== undefined ? ` --seed ${req.seed}` : ""),
+      },
+    ];
+    for (const url of req.imageUrls ?? []) {
+      content.push({ type: "image_url", image_url: { url } });
+    }
+    const body = { model: upstreamModel(req.model), content };
     const res = await fetch(`${BASE}/contents/generations/tasks`, {
       method: "POST",
       headers: headers(),

@@ -79,6 +79,11 @@ export default function AccountPanel() {
     }
   }
 
+  async function portal() {
+    const data = await post("/api/billing/portal", {}, "portal");
+    if (data?.url) window.location.href = data.url;
+  }
+
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/";
@@ -120,7 +125,10 @@ export default function AccountPanel() {
             <span className="font-medium text-good">Active</span> —{" "}
             {PLANS[me.membership as "monthly" | "annual"].label} plan, renews{" "}
             {new Date(me.membershipRenewsAt!).toLocaleDateString()}. Storage
-            included: {quotaGb.toFixed(0)} GB.
+            included: {quotaGb.toFixed(0)} GB.{" "}
+            <button onClick={portal} className="underline hover:text-ink">
+              Manage subscription
+            </button>
           </p>
         ) : (
           <>

@@ -29,6 +29,12 @@ export default function LibraryPage() {
       .catch(() => setJobs([]));
   }, []);
 
+  async function remove(id: string) {
+    if (!confirm("Delete this video? This frees its storage and can't be undone.")) return;
+    const res = await fetch(`/api/jobs/${id}`, { method: "DELETE" });
+    if (res.ok) setJobs((prev) => (prev ?? []).filter((j) => j.id !== id));
+  }
+
   if (unauthed) {
     return (
       <div className="py-16 text-center text-muted">
@@ -55,11 +61,19 @@ export default function LibraryPage() {
       ) : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {jobs.map((j) => (
-            <Link
+            <div
               key={j.id}
-              href={`/jobs/${j.id}`}
-              className="group overflow-hidden rounded-2xl border border-line bg-surface hover:border-accent"
+              className="group relative overflow-hidden rounded-2xl border border-line bg-surface hover:border-accent"
             >
+            {(j.status === "ready" || j.status === "failed") && (
+              <button
+                onClick={() => remove(j.id)}
+                className="absolute right-2 top-2 z-10 rounded-full bg-surface/90 px-2 py-1 text-xs text-muted opacity-0 shadow group-hover:opacity-100 hover:text-bad"
+              >
+                Delete
+              </button>
+            )}
+            <Link href={`/jobs/${j.id}`} className="block">
               {j.status === "ready" && j.video_url ? (
                 <video src={j.video_url} muted loop playsInline className="aspect-video w-full object-cover" />
               ) : (
@@ -74,6 +88,7 @@ export default function LibraryPage() {
                 </p>
               </div>
             </Link>
+            </div>
           ))}
         </div>
       )}

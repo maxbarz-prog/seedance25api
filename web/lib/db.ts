@@ -36,6 +36,13 @@ export const createUser: DataStore["createUser"] = (...a) => store().createUser(
 export const userByEmail: DataStore["userByEmail"] = (...a) => store().userByEmail(...a);
 export const userById: DataStore["userById"] = (...a) => store().userById(...a);
 export const setMembership: DataStore["setMembership"] = (...a) => store().setMembership(...a);
+export const setStripeIds: DataStore["setStripeIds"] = (...a) => store().setStripeIds(...a);
+export const userByStripeCustomer: DataStore["userByStripeCustomer"] = (...a) =>
+  store().userByStripeCustomer(...a);
+export const setResetToken: DataStore["setResetToken"] = (...a) => store().setResetToken(...a);
+export const userByResetToken: DataStore["userByResetToken"] = (...a) =>
+  store().userByResetToken(...a);
+export const setPassword: DataStore["setPassword"] = (...a) => store().setPassword(...a);
 export const balance: DataStore["balance"] = (...a) => store().balance(...a);
 export const addLedger: DataStore["addLedger"] = (...a) => store().addLedger(...a);
 export const ledgerFor: DataStore["ledgerFor"] = (...a) => store().ledgerFor(...a);
@@ -43,6 +50,9 @@ export const createJob: DataStore["createJob"] = (...a) => store().createJob(...
 export const jobById: DataStore["jobById"] = (...a) => store().jobById(...a);
 export const jobsFor: DataStore["jobsFor"] = (...a) => store().jobsFor(...a);
 export const updateJob: DataStore["updateJob"] = (...a) => store().updateJob(...a);
+export const claimJob: DataStore["claimJob"] = (...a) => store().claimJob(...a);
+export const jobsInFlight: DataStore["jobsInFlight"] = (...a) => store().jobsInFlight(...a);
+export const deleteJob: DataStore["deleteJob"] = (...a) => store().deleteJob(...a);
 export const storageUsedBytes: DataStore["storageUsedBytes"] = (...a) =>
   store().storageUsedBytes(...a);
 export const adminData: DataStore["adminData"] = () => store().adminData();

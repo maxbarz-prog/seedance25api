@@ -14,6 +14,9 @@ export interface User {
   membership: Membership;
   membership_renews_at: number | null;
   stripe_customer_id: string | null;
+  stripe_subscription_id?: string | null;
+  reset_token_hash?: string | null;
+  reset_expires_at?: number | null;
   created_at: number;
 }
 
@@ -30,7 +33,8 @@ export interface Job {
   status: JobStatus;
   quote_credits: number;
   provider_task_id: string | null;
-  video_url: string | null;
+  video_url: string | null; // storage key (see lib/storage); resolved to a URL on read
+  image_keys?: string | null; // JSON array of reference-image storage keys
   size_bytes: number | null;
   error: string | null;
   created_at: number;
@@ -95,6 +99,11 @@ export interface DataStore {
   userByEmail(email: string): Promise<User | undefined>;
   userById(id: string): Promise<User | undefined>;
   setMembership(userId: string, membership: Membership, renewsAt: number | null): Promise<void>;
+  setStripeIds(userId: string, customerId: string | null, subscriptionId: string | null): Promise<void>;
+  userByStripeCustomer(customerId: string): Promise<User | undefined>;
+  setResetToken(userId: string, tokenHash: string | null, expiresAt: number | null): Promise<void>;
+  userByResetToken(tokenHash: string): Promise<User | undefined>;
+  setPassword(userId: string, passwordHash: string): Promise<void>;
 
   balance(userId: string): Promise<number>;
   addLedger(
@@ -109,6 +118,11 @@ export interface DataStore {
   jobById(id: string): Promise<Job | undefined>;
   jobsFor(userId: string, limit?: number): Promise<Job[]>;
   updateJob(id: string, fields: Partial<Job>): Promise<void>;
+  // Atomically move a job from one status to another; false if someone else
+  // already did (guards double-submission between user polls and the cron).
+  claimJob(id: string, from: JobStatus, to: JobStatus): Promise<boolean>;
+  jobsInFlight(limit?: number): Promise<Job[]>;
+  deleteJob(id: string): Promise<void>;
   storageUsedBytes(userId: string): Promise<number>;
 
   adminData(): Promise<AdminData>;

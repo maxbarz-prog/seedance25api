@@ -10,6 +10,7 @@ export interface GenerationRequest {
   aspect: string;
   audio: boolean;
   resolution: "480p" | "1080p";
+  imageUrls?: string[]; // reference images (fetchable for ~1h)
   seed?: number;
 }
 

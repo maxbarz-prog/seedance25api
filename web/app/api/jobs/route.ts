@@ -15,6 +15,9 @@ import {
   PLANS,
 } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
+import { presentJob } from "@/lib/present";
+
+const MAX_IMAGES = 4;
 
 const Body = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_CHARS),
@@ -24,12 +27,14 @@ const Body = z.object({
   audio: z.boolean().default(false),
   mode: z.enum(["upscaled-1080p", "native-1080p"]).default("upscaled-1080p"),
   upscaleFactor: z.union([z.literal(2), z.literal(4)]).default(2),
+  imageKeys: z.array(z.string().regex(/^uploads\/[^/]+\/[^/]+$/)).max(MAX_IMAGES).default([]),
 });
 
 export async function GET() {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
-  return NextResponse.json({ jobs: await jobsFor(user.id) });
+  const jobs = await jobsFor(user.id);
+  return NextResponse.json({ jobs: await Promise.all(jobs.map(presentJob)) });
 }
 
 export async function POST(req: NextRequest) {
@@ -57,6 +62,10 @@ export async function POST(req: NextRequest) {
       { error: `${MODELS[model].label} supports up to ${MODELS[model].maxDurationS}s.` },
       { status: 400 }
     );
+  }
+  // Uploaded images must belong to this member.
+  if (b.imageKeys.some((k) => !k.startsWith(`uploads/${user.id}/`))) {
+    return NextResponse.json({ error: "Invalid image reference." }, { status: 400 });
   }
 
   const q = quote({ model, durationS: b.durationS, mode: b.mode, upscaleFactor: b.upscaleFactor });
@@ -97,6 +106,7 @@ export async function POST(req: NextRequest) {
     quote_credits: q.credits,
     provider_task_id: null,
     video_url: null,
+    image_keys: b.imageKeys.length ? JSON.stringify(b.imageKeys) : null,
     size_bytes: null,
     error: null,
   });
