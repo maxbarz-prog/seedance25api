@@ -115,16 +115,25 @@ export default $config({
       const account = aws.getCallerIdentityOutput();
       const zone = aws.route53.getZoneOutput({ name: mailDomain });
       const inbound = new sst.aws.Bucket("Inbound", {
-        policy: [
-          {
-            actions: ["s3:PutObject"],
-            principals: [{ type: "Service", identifiers: ["ses.amazonaws.com"] }],
-            paths: ["inbound/*"],
-            conditions: [
-              { test: "StringEquals", variable: "aws:Referer", values: [account.accountId] },
-            ],
+        transform: {
+          // Let SES write received messages into inbound/ (appended to the
+          // policy SST already manages for the bucket).
+          policy: (args) => {
+            args.policy = $resolve([args.policy, args.bucket, account.accountId]).apply(
+              ([policy, bucket, acct]) => {
+                const doc = JSON.parse(String(policy));
+                doc.Statement.push({
+                  Effect: "Allow",
+                  Principal: { Service: "ses.amazonaws.com" },
+                  Action: "s3:PutObject",
+                  Resource: `arn:aws:s3:::${bucket}/inbound/*`,
+                  Condition: { StringEquals: { "aws:Referer": acct } },
+                });
+                return JSON.stringify(doc);
+              }
+            );
           },
-        ],
+        },
       });
       const forwarder = new sst.aws.Function("MailForwarder", {
         handler: "functions/mail-forward.handler",
