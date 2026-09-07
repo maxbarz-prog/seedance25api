@@ -114,21 +114,17 @@ export default $config({
       const mailDomain = "remerged.click";
       const account = aws.getCallerIdentityOutput();
       const zone = aws.route53.getZoneOutput({ name: mailDomain });
-      const inbound = new sst.aws.Bucket("Inbound");
-      new aws.s3.BucketPolicy("InboundSesPolicy", {
-        bucket: inbound.name,
-        policy: $jsonStringify({
-          Version: "2012-10-17",
-          Statement: [
-            {
-              Effect: "Allow",
-              Principal: { Service: "ses.amazonaws.com" },
-              Action: "s3:PutObject",
-              Resource: $interpolate`arn:aws:s3:::${inbound.name}/inbound/*`,
-              Condition: { StringEquals: { "aws:Referer": account.accountId } },
-            },
-          ],
-        }),
+      const inbound = new sst.aws.Bucket("Inbound", {
+        policy: [
+          {
+            actions: ["s3:PutObject"],
+            principals: [{ type: "Service", identifiers: ["ses.amazonaws.com"] }],
+            paths: ["inbound/*"],
+            conditions: [
+              { test: "StringEquals", variable: "aws:Referer", values: [account.accountId] },
+            ],
+          },
+        ],
       });
       const forwarder = new sst.aws.Function("MailForwarder", {
         handler: "functions/mail-forward.handler",
