@@ -17,9 +17,19 @@ first.
   `load` loop in `deploy.yml` for the exact parameter list.
 - Providers run in mock mode until `PROVIDER_MODE=live` is set in SSM.
 - The AWS connector (`https://aws-mcp.us-east-1.api.aws/mcp`) must be
-  connected and enabled for the session. Its OAuth token expires; if AWS
-  tools error with "requires re-authorization", reconnect it in claude.ai
-  Settings → Connectors and start a new session.
+  connected and enabled for the session. It authenticates with OAuth via
+  AWS Sign-in using your IAM identity, not with access keys: the access
+  token lasts 1 hour and the refresh token at most 12 hours, after which
+  AWS refuses to renew and the connector is dead until you sign in again.
+  claude.ai keeps showing it as "Connected" in that state (the badge is
+  the install record; the org-level state is `needs_reconnect`) and there
+  is no refresh button, so: Settings → Connectors → AWS → **Disconnect**,
+  then **Connect** again and complete the AWS Sign-in consent page, then
+  start a new session within 12 hours. Symptom in-session: every AWS tool
+  call returns `MCP server "AWS" requires re-authorization (token expired)`.
+  The `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` in the session env are
+  proxy placeholders (STS rejects them with `InvalidClientTokenId`), so
+  boto3 or the CLI cannot be used as a fallback. Verified 2026-09-08.
 
 ## Provider request shapes (confirmed 2026-09-08 from the ModelArk schema)
 
