@@ -149,9 +149,32 @@ async function main() {
   page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url().slice(0, 200)} -> ${r.failure()?.errorText}`));
   page.on("response", (r) => { if (r.status() >= 400) failedRequests.push(`${r.request().method()} ${r.url().slice(0, 200)} -> HTTP ${r.status()}`); });
   try {
-    // 2. Sign in through the real <SignIn/> page consuming the ticket.
+    // 2. Sign in on the real /sign-in page, consuming the ticket through
+    // Clerk's own JS API (the documented "ticket" strategy). Driving it
+    // directly rather than relying on <SignIn/> to pick the param out of the
+    // URL makes the step deterministic and gives a real error when it fails.
     await page.goto(`${BASE}/sign-in?__clerk_ticket=${encodeURIComponent(token.token)}`);
-    await page.waitForURL((u) => !u.pathname.startsWith("/sign-in"), { timeout: 60_000 });
+    await page
+      .waitForFunction(() => window.Clerk?.loaded === true, { timeout: 60_000 })
+      .catch(() => {});
+    const ticketResult = await page.evaluate(async (ticket) => {
+      if (!window.Clerk) return { error: "Clerk did not load" };
+      try {
+        if (window.Clerk.session) return { alreadySignedIn: window.Clerk.session.id };
+        const attempt = await window.Clerk.client.signIn.create({ strategy: "ticket", ticket });
+        if (attempt.status !== "complete") return { status: attempt.status };
+        await window.Clerk.setActive({ session: attempt.createdSessionId });
+        return { sessionId: attempt.createdSessionId };
+      } catch (e) {
+        return { error: String(e?.errors?.[0]?.longMessage || e?.message || e).slice(0, 300) };
+      }
+    }, token.token);
+    step("ticket", ticketResult);
+    if (ticketResult.error || ticketResult.status) {
+      throw new Error(`ticket sign-in failed: ${JSON.stringify(ticketResult)}`);
+    }
+    // setActive writes the session cookie; land on a normal page with it.
+    await page.goto(`${BASE}/account`);
     await page.screenshot({ path: `${OUT}/signed-in.png`, fullPage: true });
     const me = await waitFor("session", async () => {
       const r = await api(ctx, "GET", "/api/me");
@@ -221,6 +244,21 @@ async function main() {
       url: page.url(),
       title: await page.title().catch(() => null),
       bodyText: await page.evaluate(() => document.body?.innerText?.slice(0, 1500)).catch(() => null),
+      clerk: await page
+        .evaluate(() => ({
+          loaded: !!window.Clerk?.loaded,
+          userId: window.Clerk?.user?.id ?? null,
+          sessionId: window.Clerk?.session?.id ?? null,
+          frontendApi: window.Clerk?.frontendApi ?? null,
+        }))
+        .catch(() => null),
+      cookies: await ctx
+        .cookies()
+        .then((cs) => cs.map((c) => `${c.name}@${c.domain}`))
+        .catch(() => null),
+      apiMe: await api(ctx, "GET", "/api/me")
+        .then((r) => ({ status: r.status, json: r.json }))
+        .catch((e) => String(e)),
     };
     log("FAILED", summary.error);
   } finally {
