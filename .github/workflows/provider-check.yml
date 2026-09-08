@@ -4,6 +4,15 @@ name: Provider check
 # (which can reach Stripe, Clerk, ModelArk and fal). See scripts/provider-check.mjs.
 
 on:
+  # The push trigger only registers the workflow with GitHub (a workflow with
+  # no push-triggered run cannot be dispatched); the job itself is gated to
+  # manual runs so a push never spends provider credit.
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+      - claude/seedance-video-platform-9sp9cn
+    paths:
+      - ".github/workflows/provider-check.yml"
   workflow_dispatch:
     inputs:
       mode:
@@ -27,6 +36,7 @@ permissions:
 
 jobs:
   check:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
