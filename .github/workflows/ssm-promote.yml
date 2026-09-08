@@ -1,0 +1,63 @@
+name: Promote SSM parameters
+
+# Copies a fixed, named set of parameters from one stage to another under
+# /remerged/. Used to move the Clerk production-instance keys into prod
+# without either of us pasting secrets around. Values are never printed.
+
+on:
+  # Push trigger only registers the workflow with GitHub; runs are manual.
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+      - claude/seedance-video-platform-9sp9cn
+    paths:
+      - ".github/workflows/ssm-promote.yml"
+  workflow_dispatch:
+    inputs:
+      from_stage:
+        description: "Source stage"
+        type: string
+        default: dev
+      to_stage:
+        description: "Destination stage"
+        type: string
+        default: prod
+      params:
+        description: "Space-separated parameter names to copy"
+        type: string
+        default: CLERK_SECRET_KEY NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  promote:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Copy parameters
+        env:
+          FROM: ${{ inputs.from_stage }}
+          TO: ${{ inputs.to_stage }}
+          PARAMS: ${{ inputs.params }}
+        run: |
+          set -euo pipefail
+          for name in $PARAMS; do
+            src="/remerged/$FROM/$name"
+            dst="/remerged/$TO/$name"
+            type=$(aws ssm get-parameter --name "$src" --query Parameter.Type --output text)
+            value=$(aws ssm get-parameter --name "$src" --with-decryption --query Parameter.Value --output text)
+            echo "::add-mask::$value"
+            aws ssm put-parameter --name "$dst" --value "$value" --type "$type" --overwrite >/dev/null
+            # Fingerprint only: enough to confirm both sides match, reveals nothing.
+            fp=$(printf '%s' "$value" | sha256sum | cut -c1-12)
+            echo "copied $src -> $dst  (type=$type, sha256:$fp, ${#value} chars)" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
