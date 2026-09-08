@@ -1,0 +1,73 @@
+name: Provider check
+
+# Live validation of the provider keys held in SSM, run from a GitHub runner
+# (which can reach Stripe, Clerk, ModelArk and fal). See scripts/provider-check.mjs.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "validate = one minimal call per provider; full = three-way cost test + probes"
+        type: choice
+        options: [validate, full]
+        default: validate
+      stage:
+        description: "SSM stage prefix (/remerged/<stage>/)"
+        type: string
+        default: dev
+      webhook:
+        description: "Stripe webhook endpoint: none, create (skip if exists), recreate (rotate secret)"
+        type: choice
+        options: [none, create, recreate]
+        default: none
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      STAGE: ${{ inputs.stage }}
+      MODE: ${{ inputs.mode }}
+      WEBHOOK: ${{ inputs.webhook }}
+      AWS_REGION: us-east-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load provider keys from SSM
+        run: |
+          load() {
+            v=$(aws ssm get-parameter --name "/remerged/$STAGE/$1" --with-decryption \
+                --query Parameter.Value --output text 2>/dev/null || true)
+            if [ -n "$v" ] && [ "$v" != "None" ]; then
+              echo "::add-mask::$v"
+              echo "$1=$v" >> "$GITHUB_ENV"
+            else
+              echo "::warning::/remerged/$STAGE/$1 is not set"
+            fi
+          }
+          for name in STRIPE_SECRET_KEY CLERK_SECRET_KEY BYTEPLUS_API_KEY FAL_KEY; do
+            load "$name"
+          done
+          host=$([ "$STAGE" = prod ] && echo remerged.click || echo "$STAGE.remerged.click")
+          echo "WEBHOOK_URL=https://$host/api/billing/webhook" >> "$GITHUB_ENV"
+          echo "WEBHOOK_PARAM=/remerged/$STAGE/STRIPE_WEBHOOK_SECRET" >> "$GITHUB_ENV"
+
+      - name: Tooling
+        run: ffmpeg -version | head -1 && ffprobe -version | head -1 && node --version
+
+      - name: Run checks
+        run: node scripts/provider-check.mjs
