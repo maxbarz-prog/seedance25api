@@ -39,6 +39,102 @@ interface Overview {
   }[];
 }
 
+interface Health {
+  ok: boolean;
+  dbBackend: string;
+  storage: boolean;
+  ffmpeg: boolean;
+  providerMode: string;
+  generator: string;
+  upscaler: string;
+  auth: string;
+  billing: boolean;
+  webhookSecret: boolean;
+}
+
+type Level = "good" | "warn" | "bad";
+
+// Each check reports its own light plus a plain-language note, so the panel
+// says what a colour actually means for the product rather than just echoing
+// the raw value. Amber is "works, but not what production should look like".
+function checks(h: Health): { label: string; value: string; level: Level; note: string }[] {
+  const live = h.providerMode === "live";
+  return [
+    {
+      label: "Database",
+      value: h.dbBackend,
+      level: h.dbBackend === "dynamo" ? "good" : "warn",
+      note: h.dbBackend === "dynamo" ? "DynamoDB" : "local SQLite — not durable on Lambda",
+    },
+    {
+      label: "Video storage",
+      value: h.storage ? "S3 bucket" : "none",
+      level: h.storage ? "good" : "bad",
+      note: h.storage
+        ? "outputs copied to our bucket, served by presigned URL"
+        : "provider URLs would be exposed to users",
+    },
+    {
+      label: "ffmpeg",
+      value: h.ffmpeg ? "available" : "missing",
+      level: h.ffmpeg ? "good" : "warn",
+      note: h.ffmpeg
+        ? "extensions trim the source to the last few seconds"
+        : "extensions fall back to sending the whole source clip, which costs more",
+    },
+    {
+      label: "Provider mode",
+      value: h.providerMode,
+      level: live ? "good" : "warn",
+      note: live ? "real generations, real cost" : "mock clips, nothing billed",
+    },
+    {
+      label: "Generator",
+      value: h.generator,
+      level: h.generator === "mock" ? "warn" : "good",
+      note: h.generator === "mock" ? "sample clip returned" : "BytePlus ModelArk",
+    },
+    {
+      label: "Upscaler",
+      value: h.upscaler,
+      level: h.upscaler === "mock" ? "warn" : "good",
+      note: h.upscaler === "mock" ? "no upscale step" : "ByteDance upscaler via fal",
+    },
+    {
+      label: "Auth",
+      value: h.auth,
+      level: "good",
+      note: h.auth === "clerk" ? "Clerk sign-in" : "built-in email and password",
+    },
+    {
+      label: "Billing",
+      value: h.billing ? "Stripe" : "mock",
+      level: h.billing ? "good" : "bad",
+      note: h.billing ? "Stripe keys configured" : "no Stripe key — payments cannot be taken",
+    },
+    {
+      label: "Webhook secret",
+      value: h.webhookSecret ? "set" : "missing",
+      level: h.webhookSecret ? "good" : "bad",
+      note: h.webhookSecret
+        ? "payments can be confirmed"
+        : "payments would never credit an account",
+    },
+  ];
+}
+
+// The panel's one-line verdict: the least healthy light wins.
+function worst(h: Health): Level {
+  const levels = checks(h).map((c) => c.level);
+  return levels.includes("bad") ? "bad" : levels.includes("warn") ? "warn" : "good";
+}
+
+const DOT: Record<Level, string> = {
+  good: "bg-good",
+  warn: "bg-warn",
+  bad: "bg-bad",
+};
+
 function usd(credits: number) {
   return `$${(credits * 0.01).toFixed(2)}`;
 }
@@ -55,6 +151,7 @@ function Tile({ label, value, detail }: { label: string; value: string; detail?:
 
 export default function AdminPage() {
   const [data, setData] = useState<Overview | null>(null);
+  const [health, setHealth] = useState<Health | null>(null);
   const [denied, setDenied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [grant, setGrant] = useState({ email: "", usd: "", memo: "" });
@@ -67,6 +164,10 @@ export default function AdminPage() {
       }
       setData(await r.json());
     });
+    fetch("/api/health")
+      .then((r) => r.json())
+      .then(setHealth)
+      .catch(() => setHealth(null));
   }, []);
   useEffect(refresh, [refresh]);
 
@@ -121,6 +222,43 @@ export default function AdminPage() {
   return (
     <div className="space-y-8 py-10">
       <h1 className="text-2xl font-semibold">Admin</h1>
+
+      <section className="rounded-2xl border border-line bg-surface p-5">
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-medium">System status</h2>
+          {health && (
+            <span className="text-xs text-muted">
+              {worst(health) === "good"
+                ? "All systems configured for production"
+                : worst(health) === "warn"
+                  ? "Running, with non-production settings"
+                  : "Something is broken"}
+            </span>
+          )}
+        </div>
+        {!health ? (
+          <p className="mt-3 text-sm text-bad">
+            Status unavailable — /api/health did not respond.
+          </p>
+        ) : (
+          <ul className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+            {checks(health).map((c) => (
+              <li key={c.label} className="flex items-start gap-2.5 text-sm">
+                <span
+                  aria-hidden
+                  className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${DOT[c.level]}`}
+                />
+                <span>
+                  <span className="text-muted">{c.label}: </span>
+                  <span className="font-medium">{c.value}</span>
+                  <span className="sr-only"> — {c.level}</span>
+                  <span className="block text-xs text-muted">{c.note}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Tile label="Users" value={String(t.users)} />

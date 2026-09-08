@@ -9,6 +9,7 @@
   --accent: #4f46e5;
   --accent-ink: #ffffff;
   --good: #059669;
+  --warn: #b45309;
   --bad: #dc2626;
 }
 
@@ -22,6 +23,7 @@
     --accent: #6d64f5;
     --accent-ink: #ffffff;
     --good: #34d399;
+    --warn: #fbbf24;
     --bad: #f87171;
   }
 }
@@ -35,6 +37,7 @@
   --color-accent: var(--accent);
   --color-accent-ink: var(--accent-ink);
   --color-good: var(--good);
+  --color-warn: var(--warn);
   --color-bad: var(--bad);
 }
 
