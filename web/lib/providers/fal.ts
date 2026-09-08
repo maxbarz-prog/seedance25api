@@ -3,8 +3,11 @@ import { ProviderTaskResult, VideoUpscaler } from "./types";
 // ByteDance Video Upscaler (vCube) hosted on fal.ai — ByteDance's own
 // production super-resolution model, pay-per-use, commercially licensed via
 // fal. Queue API: submit -> poll status -> fetch result.
-// TODO(validate): confirm input field names (upscale_factor / target
-// resolution) against the live endpoint during the validation run.
+//
+// Input schema (fal model page, fal-ai/bytedance-upscaler/upscale/video):
+// `video_url` (mp4/mov/webm/m4v/gif) and `target_resolution` in
+// "1080p" | "2K" | "4K". Published price per source second at 30fps:
+// 1080p $0.0072, 2K $0.0144, 4K $0.0288 (60fps doubles each).
 
 const MODEL = process.env.FAL_UPSCALER_MODEL || "fal-ai/bytedance-upscaler/upscale/video";
 const QUEUE = "https://queue.fal.run";
@@ -15,6 +18,10 @@ function headers() {
   return { Authorization: `Key ${key}`, "Content-Type": "application/json" };
 }
 
+export function targetResolution(factor: 2 | 4): "1080p" | "4K" {
+  return factor === 4 ? "4K" : "1080p";
+}
+
 export class FalUpscaler implements VideoUpscaler {
   async submitUpscale(videoUrl: string, factor: 2 | 4): Promise<string> {
     const res = await fetch(`${QUEUE}/${MODEL}`, {
@@ -22,8 +29,7 @@ export class FalUpscaler implements VideoUpscaler {
       headers: headers(),
       body: JSON.stringify({
         video_url: videoUrl,
-        upscale_factor: factor,
-        target_resolution: factor === 4 ? "4k" : "1080p",
+        target_resolution: targetResolution(factor),
       }),
     });
     if (!res.ok) {

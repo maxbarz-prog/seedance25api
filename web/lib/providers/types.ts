@@ -28,6 +28,11 @@ export type ProviderTaskStatus = "running" | "succeeded" | "failed";
 export interface ProviderTaskResult {
   status: ProviderTaskStatus;
   videoUrl?: string;
+  // Final frame of the output, when the provider can return it (chaining).
+  lastFrameUrl?: string;
+  // Provider-reported billing units for the task (ModelArk: tokens), used
+  // to reconcile measured cost per second.
+  tokens?: number;
   error?: string;
 }
 
