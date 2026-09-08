@@ -141,6 +141,13 @@ async function main() {
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await ctx.newPage();
+  // Diagnostics that survive without the screenshot artifact: console errors
+  // and failed requests, plus where the page ended up on failure.
+  const consoleErrors = [];
+  const failedRequests = [];
+  page.on("console", (m) => { if (m.type() === "error" || m.type() === "warning") consoleErrors.push(`${m.type()}: ${m.text().slice(0, 300)}`); });
+  page.on("requestfailed", (r) => failedRequests.push(`${r.method()} ${r.url().slice(0, 200)} -> ${r.failure()?.errorText}`));
+  page.on("response", (r) => { if (r.status() >= 400) failedRequests.push(`${r.request().method()} ${r.url().slice(0, 200)} -> HTTP ${r.status()}`); });
   try {
     // 2. Sign in through the real <SignIn/> page consuming the ticket.
     await page.goto(`${BASE}/sign-in?__clerk_ticket=${encodeURIComponent(token.token)}`);
@@ -210,8 +217,15 @@ async function main() {
     summary.ok = false;
     summary.error = String(e);
     await page.screenshot({ path: `${OUT}/failure.png`, fullPage: true }).catch(() => {});
+    summary.failurePage = {
+      url: page.url(),
+      title: await page.title().catch(() => null),
+      bodyText: await page.evaluate(() => document.body?.innerText?.slice(0, 1500)).catch(() => null),
+    };
     log("FAILED", summary.error);
   } finally {
+    summary.consoleErrors = consoleErrors.slice(0, 30);
+    summary.failedRequests = failedRequests.slice(0, 30);
     await browser.close();
   }
   console.log("\n===== SUMMARY =====\n" + JSON.stringify(summary, null, 2));
