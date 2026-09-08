@@ -22,10 +22,12 @@ on:
         type: string
         default: ""
       generate:
+        # Quoted: unquoted no/yes are YAML booleans, which GitHub then rejects
+        # as choice values.
         description: "Run the generate/extend/download steps? These call the real providers and COST MONEY (~$0.45 a run at 4s). 'no' stops after billing."
         type: choice
-        options: [no, yes]
-        default: no
+        options: ["no", "yes"]
+        default: "no"
 
 permissions:
   id-token: write
