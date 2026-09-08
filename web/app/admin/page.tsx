@@ -39,100 +39,50 @@ interface Overview {
   }[];
 }
 
-interface Health {
-  ok: boolean;
-  dbBackend: string;
-  storage: boolean;
-  ffmpeg: boolean;
-  providerMode: string;
-  generator: string;
-  upscaler: string;
-  auth: string;
-  billing: boolean;
-  webhookSecret: boolean;
+type Level = "good" | "warn" | "bad" | "unknown";
+type Group = "config" | "internal" | "dependency" | "vendor" | "deprecation";
+
+interface Check {
+  key: string;
+  group: Group;
+  label: string;
+  value: string;
+  level: Level;
+  note: string;
+  ms?: number;
+  blame?: "us" | "them" | "unclear";
+  link?: string;
 }
 
-type Level = "good" | "warn" | "bad";
-
-// Each check reports its own light plus a plain-language note, so the panel
-// says what a colour actually means for the product rather than just echoing
-// the raw value. Amber is "works, but not what production should look like".
-function checks(h: Health): { label: string; value: string; level: Level; note: string }[] {
-  const live = h.providerMode === "live";
-  return [
-    {
-      label: "Database",
-      value: h.dbBackend,
-      level: h.dbBackend === "dynamo" ? "good" : "warn",
-      note: h.dbBackend === "dynamo" ? "DynamoDB" : "local SQLite — not durable on Lambda",
-    },
-    {
-      label: "Video storage",
-      value: h.storage ? "S3 bucket" : "none",
-      level: h.storage ? "good" : "bad",
-      note: h.storage
-        ? "outputs copied to our bucket, served by presigned URL"
-        : "provider URLs would be exposed to users",
-    },
-    {
-      label: "ffmpeg",
-      value: h.ffmpeg ? "available" : "missing",
-      level: h.ffmpeg ? "good" : "warn",
-      note: h.ffmpeg
-        ? "extensions trim the source to the last few seconds"
-        : "extensions fall back to sending the whole source clip, which costs more",
-    },
-    {
-      label: "Provider mode",
-      value: h.providerMode,
-      level: live ? "good" : "warn",
-      note: live ? "real generations, real cost" : "mock clips, nothing billed",
-    },
-    {
-      label: "Generator",
-      value: h.generator,
-      level: h.generator === "mock" ? "warn" : "good",
-      note: h.generator === "mock" ? "sample clip returned" : "BytePlus ModelArk",
-    },
-    {
-      label: "Upscaler",
-      value: h.upscaler,
-      level: h.upscaler === "mock" ? "warn" : "good",
-      note: h.upscaler === "mock" ? "no upscale step" : "ByteDance upscaler via fal",
-    },
-    {
-      label: "Auth",
-      value: h.auth,
-      level: "good",
-      note: h.auth === "clerk" ? "Clerk sign-in" : "built-in email and password",
-    },
-    {
-      label: "Billing",
-      value: h.billing ? "Stripe" : "mock",
-      level: h.billing ? "good" : "bad",
-      note: h.billing ? "Stripe keys configured" : "no Stripe key — payments cannot be taken",
-    },
-    {
-      label: "Webhook secret",
-      value: h.webhookSecret ? "set" : "missing",
-      level: h.webhookSecret ? "good" : "bad",
-      note: h.webhookSecret
-        ? "payments can be confirmed"
-        : "payments would never credit an account",
-    },
-  ];
-}
-
-// The panel's one-line verdict: the least healthy light wins.
-function worst(h: Health): Level {
-  const levels = checks(h).map((c) => c.level);
-  return levels.includes("bad") ? "bad" : levels.includes("warn") ? "warn" : "good";
+interface Status {
+  checkedAt: number;
+  stage: string;
+  overall: Level;
+  checks: Check[];
 }
 
 const DOT: Record<Level, string> = {
   good: "bg-good",
   warn: "bg-warn",
   bad: "bg-bad",
+  unknown: "bg-muted",
+};
+
+// Ordered so the panel reads the way you diagnose: how is this stage set up,
+// are our own pieces working, can we reach each vendor, is the vendor saying
+// anything, and is anything we depend on going away.
+const GROUPS: { key: Group; title: string; blurb: string }[] = [
+  { key: "config", title: "Configuration", blurb: "how this stage is wired" },
+  { key: "internal", title: "Our systems", blurb: "database, storage and the job pipeline" },
+  { key: "dependency", title: "Vendor access", blurb: "can we reach them right now, with our keys" },
+  { key: "vendor", title: "Vendor incidents", blurb: "what they are telling the world" },
+  { key: "deprecation", title: "Deprecation", blurb: "are the models we pin still offered" },
+];
+
+const BLAME: Record<string, string> = {
+  us: "our side",
+  them: "their side",
+  unclear: "unclear",
 };
 
 function usd(credits: number) {
@@ -151,10 +101,20 @@ function Tile({ label, value, detail }: { label: string; value: string; detail?:
 
 export default function AdminPage() {
   const [data, setData] = useState<Overview | null>(null);
-  const [health, setHealth] = useState<Health | null>(null);
+  const [status, setStatus] = useState<Status | null>(null);
+  const [statusBusy, setStatusBusy] = useState(false);
   const [denied, setDenied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [grant, setGrant] = useState({ email: "", usd: "", memo: "" });
+
+  const loadStatus = useCallback((force: boolean) => {
+    setStatusBusy(true);
+    fetch(`/api/admin/status${force ? "?force=1" : ""}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setStatus)
+      .catch(() => setStatus(null))
+      .finally(() => setStatusBusy(false));
+  }, []);
 
   const refresh = useCallback(() => {
     fetch("/api/admin/overview").then(async (r) => {
@@ -164,11 +124,8 @@ export default function AdminPage() {
       }
       setData(await r.json());
     });
-    fetch("/api/health")
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => setHealth(null));
-  }, []);
+    loadStatus(false);
+  }, [loadStatus]);
   useEffect(refresh, [refresh]);
 
   async function submitGrant(e: React.FormEvent) {
@@ -224,39 +181,89 @@ export default function AdminPage() {
       <h1 className="text-2xl font-semibold">Admin</h1>
 
       <section className="rounded-2xl border border-line bg-surface p-5">
-        <div className="flex items-baseline justify-between">
-          <h2 className="font-medium">System status</h2>
-          {health && (
-            <span className="text-xs text-muted">
-              {worst(health) === "good"
-                ? "All systems configured for production"
-                : worst(health) === "warn"
-                  ? "Running, with non-production settings"
-                  : "Something is broken"}
-            </span>
-          )}
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="flex items-center gap-2 font-medium">
+            {status && (
+              <span aria-hidden className={`h-2.5 w-2.5 rounded-full ${DOT[status.overall]}`} />
+            )}
+            System status
+          </h2>
+          <span className="flex items-center gap-3 text-xs text-muted">
+            {status && (
+              <>
+                <span>
+                  {status.overall === "good"
+                    ? "Everything we can check is healthy"
+                    : status.overall === "warn"
+                      ? "Running, with something worth a look"
+                      : "Something is broken"}
+                </span>
+                <span>· checked {new Date(status.checkedAt).toLocaleTimeString()}</span>
+              </>
+            )}
+            <button
+              onClick={() => loadStatus(true)}
+              disabled={statusBusy}
+              className="underline hover:text-ink disabled:opacity-50"
+            >
+              {statusBusy ? "Checking…" : "Re-check"}
+            </button>
+          </span>
         </div>
-        {!health ? (
-          <p className="mt-3 text-sm text-bad">
-            Status unavailable — /api/health did not respond.
+
+        {!status ? (
+          <p className="mt-3 text-sm text-muted">
+            {statusBusy ? "Running checks…" : "Status unavailable."}
           </p>
         ) : (
-          <ul className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
-            {checks(health).map((c) => (
-              <li key={c.label} className="flex items-start gap-2.5 text-sm">
-                <span
-                  aria-hidden
-                  className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${DOT[c.level]}`}
-                />
-                <span>
-                  <span className="text-muted">{c.label}: </span>
-                  <span className="font-medium">{c.value}</span>
-                  <span className="sr-only"> — {c.level}</span>
-                  <span className="block text-xs text-muted">{c.note}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="mt-4 space-y-5">
+            {GROUPS.map((g) => {
+              const rows = status.checks.filter((c) => c.group === g.key);
+              if (!rows.length) return null;
+              return (
+                <div key={g.key}>
+                  <p className="text-xs uppercase tracking-wide text-muted">
+                    {g.title} <span className="normal-case tracking-normal">— {g.blurb}</span>
+                  </p>
+                  <ul className="mt-2 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {rows.map((c) => (
+                      <li key={c.key} className="flex items-start gap-2.5 text-sm">
+                        <span
+                          aria-hidden
+                          className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${DOT[c.level]}`}
+                        />
+                        <span className="min-w-0">
+                          <span className="text-muted">{c.label}: </span>
+                          {c.link ? (
+                            <a
+                              href={c.link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="font-medium underline decoration-line underline-offset-2"
+                            >
+                              {c.value}
+                            </a>
+                          ) : (
+                            <span className="font-medium">{c.value}</span>
+                          )}
+                          {c.blame && (
+                            <span className="ml-1 rounded bg-bg px-1.5 py-0.5 text-xs text-muted">
+                              {BLAME[c.blame]}
+                            </span>
+                          )}
+                          {c.ms !== undefined && (
+                            <span className="ml-1 text-xs text-muted tabular-nums">{c.ms}ms</span>
+                          )}
+                          <span className="sr-only"> — {c.level}</span>
+                          <span className="block text-xs text-muted">{c.note}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
         )}
       </section>
 

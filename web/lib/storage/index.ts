@@ -1,4 +1,4 @@
-import { S3Client, DeleteObjectCommand, GetObjectCommand, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, DeleteObjectCommand, GetObjectCommand, HeadBucketCommand, PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { Upload } from "@aws-sdk/lib-storage";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { Readable } from "stream";
@@ -30,6 +30,14 @@ function s3(): S3Client {
 
 export function storageEnabled(): boolean {
   return !!BUCKET;
+}
+
+// Liveness probe for the status page: proves the bucket exists and the
+// Lambda's role can reach it. Throws on failure so the caller can report why.
+export async function storageReachable(): Promise<boolean> {
+  if (!BUCKET) return false;
+  await s3().send(new HeadBucketCommand({ Bucket: BUCKET }));
+  return true;
 }
 
 export interface StoredVideo {
