@@ -1,0 +1,77 @@
+name: Stage end-to-end
+
+# Signs up, joins and tops up with Stripe test cards, generates, extends and
+# downloads on a deployed stage, in a real browser. See scripts/dev-e2e.mjs.
+
+on:
+  # Push trigger only registers the workflow (gated below); runs are manual.
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+      - claude/seedance-video-platform-9sp9cn
+    paths:
+      - ".github/workflows/dev-e2e.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage to test (dev -> https://dev.remerged.click)"
+        type: string
+        default: dev
+      email:
+        description: "Test account email (default: a fresh e2e+<ts>@remerged.click)"
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  e2e:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      STAGE: ${{ inputs.stage }}
+      E2E_EMAIL: ${{ inputs.email }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load Clerk key from SSM
+        run: |
+          v=$(aws ssm get-parameter --name "/remerged/$STAGE/CLERK_SECRET_KEY" --with-decryption \
+              --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "CLERK_SECRET_KEY=$v" >> "$GITHUB_ENV"
+          host=$([ "$STAGE" = prod ] && echo remerged.click || echo "$STAGE.remerged.click")
+          echo "BASE_URL=https://$host" >> "$GITHUB_ENV"
+
+      - name: Install Playwright
+        run: |
+          mkdir -p "$RUNNER_TEMP/e2e" && cd "$RUNNER_TEMP/e2e"
+          npm init -y >/dev/null
+          npm install --silent playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Run end-to-end
+        run: |
+          cp scripts/dev-e2e.mjs "$RUNNER_TEMP/e2e/"
+          E2E_OUT="$GITHUB_WORKSPACE/e2e-out" node "$RUNNER_TEMP/e2e/dev-e2e.mjs"
+
+      - name: Upload screenshots and media
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ inputs.stage }}-${{ github.run_id }}
+          path: e2e-out
+          if-no-files-found: ignore
