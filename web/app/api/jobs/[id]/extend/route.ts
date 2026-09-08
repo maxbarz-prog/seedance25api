@@ -64,7 +64,12 @@ export async function POST(
     );
   }
   const plan = PLANS[user.membership as keyof typeof PLANS];
-  if ((await storageUsedBytes(user.id)) + b.durationS * 500_000 > plan.storageGb * 1e9) {
+  // The delivered file is the source plus the new seconds, so size the quota
+  // check against the whole thing rather than only what was added.
+  if (
+    (await storageUsedBytes(user.id)) + (source.duration_s + b.durationS) * 500_000 >
+    plan.storageGb * 1e9
+  ) {
     return NextResponse.json(
       { error: "storage_full", message: "Storage quota reached. Delete some videos first." },
       { status: 409 }

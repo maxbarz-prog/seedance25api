@@ -127,10 +127,16 @@ SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
 3. **Extension `duration` is the length of the output, and the output is the
    continuation only.** A +6 s request on a 4 s reference returned a 6.0 s
    clip whose first frame matches the source's last frame (SSIM 0.68) and not
-   its first (0.26). So `durationS` = seconds added is the right contract,
-   but the delivered file does not contain the original clip. Product
-   decision pending: concatenate source + continuation at finalize (ffmpeg
-   in the pipeline Lambda) or present extensions as separate clips.
+   its first (0.26). So `durationS` = seconds added is the right contract.
+   This matches every comparable product — the extension models behind Kling,
+   Runway and Luma all return a continuation — but those products stitch
+   before the user sees it, and now so do we: `finalize()` joins source +
+   continuation with ffmpeg (`web/lib/video.ts:concat`) and stores the single
+   video, updating `duration_s` to the real total. Stream copy first, with
+   re-encode and a no-audio variant as fallbacks; any failure delivers the
+   continuation alone rather than failing a paid job. Verified locally on
+   real clips: 4 s + 6 s → 10.02 s, including the silent and mixed-audio
+   fallback paths.
 4. **Extension billing counts the reference video as input tokens.** 96,075
    tokens = ~4 s of source + 6 s of output at ~9,600 tokens/s, billed at the
    with-video rate ($6.40/M, i.e. 0.598× the plain rate). Left alone, cost
@@ -169,16 +175,14 @@ SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
    - After an extension, check the Lambda log via `logs.yml` for
      "ffmpeg unavailable" or "tail trim failed"; neither should appear.
    - Compare the ModelArk and fal invoices against the measured table below.
-2. **Concatenate-or-not** for extensions, if the separate-clip behaviour is
-   not what members should get. The ffmpeg binary is already in the bundle.
-3. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
+2. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
    production keys, live Stripe key, webhook `we_1UDNRZ2Nd3VZM6rLW1KGdxoR`
    for `https://remerged.click/api/billing/webhook` with its secret,
    `MOCK_BILLING=0`, `PROVIDER_MODE=live`, and the `COST_*` values. Cut a
    `prod-YYYY-MM-DD` tag on the platform branch to deploy. The apex domain
    does not resolve until that first prod deploy, which is also when
    https://remerged.click/terms and /privacy go live.
-4. **After the first real generations**, reconcile `COST_*` in SSM against
+3. **After the first real generations**, reconcile `COST_*` in SSM against
    the invoices and redeploy (the deploy bakes SSM values into the Lambda).
 
 ## Housekeeping

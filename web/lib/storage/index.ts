@@ -80,6 +80,19 @@ export async function storeBuffer(key: string, body: Buffer, contentType: string
   await s3().send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));
 }
 
+// Store a finished video we assembled ourselves (a stitched extension)
+// under the same key shape as a copied provider output.
+export async function storeVideoBuffer(
+  userId: string,
+  jobId: string,
+  body: Buffer
+): Promise<StoredVideo> {
+  if (!BUCKET) throw new Error("storage not configured");
+  const key = `videos/${userId}/${jobId}.mp4`;
+  await storeBuffer(key, body, "video/mp4");
+  return { key, bytes: body.length };
+}
+
 // Resolve a stored key to something a browser (or an upstream provider, for
 // reference images) can fetch for the next hour.
 export async function readUrl(key: string | null | undefined): Promise<string | null> {

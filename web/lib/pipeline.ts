@@ -1,9 +1,16 @@
 import { addLedger, claimJob, Job, jobById, jobsInFlight, updateJob, userById } from "./db";
 import { generator, upscaler } from "./providers";
-import { deleteObject, readUrl, storageEnabled, storeBuffer, storeVideoFromUrl } from "./storage";
+import {
+  deleteObject,
+  readUrl,
+  storageEnabled,
+  storeBuffer,
+  storeVideoBuffer,
+  storeVideoFromUrl,
+} from "./storage";
 import { sendEmail } from "./email";
 import { EXTEND_CONTEXT_S, SITE_DOMAIN, SITE_NAME } from "./config";
-import { trimTail } from "./video";
+import { concat, durationOf, trimTail } from "./video";
 
 // Job pipeline: queued -> generating -> [upscaling ->] ready | failed.
 //
@@ -134,6 +141,43 @@ export async function advanceAll(): Promise<{ scanned: number }> {
   return { scanned: jobs.length };
 }
 
+// Join an extension's source clip to the continuation the provider returned.
+// Returns null on any problem, so the job still delivers the continuation
+// alone rather than failing after the member has been charged.
+async function stitchWithSource(
+  job: Job,
+  providerUrl: string
+): Promise<{ video: Buffer; durationS: number | null } | null> {
+  if (!job.source_job_id || !storageEnabled()) return null;
+  try {
+    const source = await jobById(job.source_job_id);
+    const sourceUrl = await readUrl(source?.video_url);
+    if (!sourceUrl) {
+      console.warn(`job ${job.id}: source video unavailable, delivering the continuation alone`);
+      return null;
+    }
+    const [a, b] = await Promise.all([
+      fetch(sourceUrl).then(async (r) => {
+        if (!r.ok) throw new Error(`source fetch ${r.status}`);
+        return Buffer.from(await r.arrayBuffer());
+      }),
+      fetch(providerUrl).then(async (r) => {
+        if (!r.ok) throw new Error(`continuation fetch ${r.status}`);
+        return Buffer.from(await r.arrayBuffer());
+      }),
+    ]);
+    const video = await concat([a, b]);
+    if (!video) {
+      console.warn(`job ${job.id}: concat unavailable, delivering the continuation alone`);
+      return null;
+    }
+    return { video, durationS: await durationOf(video) };
+  } catch (err) {
+    console.warn(`job ${job.id}: stitching failed, delivering the continuation alone:`, err);
+    return null;
+  }
+}
+
 // Temporary trimmed reference clip for an extension job; removed once the
 // job settles.
 function extendContextKey(job: Job): string {
@@ -150,10 +194,19 @@ async function cleanupContext(job: Job) {
 async function finalize(job: Job, providerUrl: string) {
   await cleanupContext(job);
   try {
-    const stored = await storeVideoFromUrl(job.user_id, job.id, providerUrl);
+    // An extension comes back as the continuation only. Members asked for a
+    // longer video, so join it to the source before it lands in the library.
+    const joined = job.kind === "extend" ? await stitchWithSource(job, providerUrl) : null;
+    const stored = joined
+      ? await storeVideoBuffer(job.user_id, job.id, joined.video)
+      : await storeVideoFromUrl(job.user_id, job.id, providerUrl);
     await updateJob(job.id, {
       video_url: stored.key,
       size_bytes: stored.bytes || job.duration_s * 500_000,
+      // The delivered clip is now source + continuation, so the row should
+      // say how long the video actually is. The charge is unaffected: it was
+      // quoted on the seconds added, which is what the provider billed us for.
+      ...(joined?.durationS ? { duration_s: Math.round(joined.durationS) } : {}),
       provider_task_id: null,
       error: null,
     });
