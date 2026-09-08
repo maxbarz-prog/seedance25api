@@ -78,7 +78,8 @@ async function api(ctx, method, path, body) {
     data: body === undefined ? undefined : JSON.stringify(body),
   });
   const j = await res.json().catch(() => ({}));
-  return { status: res.status, ok: res.ok, json: j };
+  // Playwright's APIResponse exposes status/ok as methods, not properties.
+  return { status: res.status(), ok: res.ok(), json: j };
 }
 
 async function waitFor(desc, fn, { timeoutMs, everyMs = 5_000 }) {
