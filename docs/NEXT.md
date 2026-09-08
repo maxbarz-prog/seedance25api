@@ -58,13 +58,15 @@ Fix, in the Clerk dashboard (https://dashboard.clerk.com):
    into `/remerged/dev/NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
    `/remerged/dev/CLERK_SECRET_KEY`. Development instances serve any origin,
    so dev.remerged.click works with no DNS.
-3. **Prod**: create its *Production* instance with domain `remerged.click`,
-   copy `pk_live_…` / `sk_live_…` into the `/remerged/prod/` parameters,
-   then dispatch `provider-check.yml` with `mode=keys, stage=prod,
-   clerk_dns=upsert`: it verifies the instance serves remerged.click and
-   writes the five Clerk CNAMEs (clerk, accounts, clkmail, clk._domainkey,
-   clk2._domainkey) into the Route 53 zone. Clerk shows the domain as
-   verified once DNS propagates.
+3. **Prod**: create its *Production* instance with domain `remerged.click`
+   and copy `pk_live_…` / `sk_live_…` into the `/remerged/prod/` parameters.
+   **DNS is already done** (2026-09-08, run 34272361362): the five Clerk
+   CNAMEs for the `gd1nhwizioam` instance are in the Route 53 zone
+   `Z096785530HXNK0WR7VVF` and verified against public DNS — see
+   `infra/clerk-dns.json` and `.github/workflows/dns.yml` (`mode=apply`,
+   idempotent UPSERT). If Clerk ever reissues the instance, edit that JSON
+   and re-run. The zone has **no DMARC record**; add
+   `_dmarc.remerged.click TXT "v=DMARC1; p=none;"` if Clerk asks for one.
 4. Redeploy the stage (parameters are baked in at deploy) and run
    `dev-e2e.yml`.
 
