@@ -62,10 +62,39 @@ run. What was wrong and is now fixed:
   insert, REMOVE on clear). Local SQLite accepted the null, which is why it
   never showed up in development.
 
-`GET /api/health` reports what a stage actually has wired up — bundled
-ffmpeg binary, bucket, provider mode, webhook secret — as booleans, with no
-secrets and no provider calls. Dev currently returns: dynamo, storage true,
-ffmpeg true, live/byteplus/fal, clerk, billing true, webhookSecret true.
+## Status monitoring
+
+The **admin page** carries a traffic-light panel fed by `GET
+/api/admin/status` (`web/lib/status.ts`), in five groups:
+
+- **config** — how the stage is wired (database, storage, ffmpeg, provider
+  mode, generator, upscaler, auth, billing, webhook secret).
+- **internal** — live probes of our own pieces: a read against the users
+  table, a HeadBucket on the media bucket, and the age of the oldest
+  in-flight job (catches a cron that has stopped advancing work).
+- **dependency** — our real keys against each vendor's API, read-only and
+  free: Stripe balance, Clerk users, ModelArk task list, a fal request-status
+  lookup for an id that cannot exist (404 is the healthy answer). A 401/403
+  is labelled "our side", a timeout or 5xx "their side".
+- **vendor** — public incident feeds. Verified to exist and answer:
+  Clerk, Cloudflare and GitHub (Statuspage `/api/v2/status.json`), Google
+  (`appsstatus/dashboard/incidents.json`, open = no `end`), AWS
+  (`health.aws.amazon.com/public/currentevents`, **served as UTF-16**,
+  filtered to our region). **Stripe, fal and BytePlus publish no usable
+  machine-readable status page** — those rows say so and defer to the direct
+  probe above, which is the better signal anyway.
+- **deprecation** — whether the pinned ModelArk model ids still appear in
+  `GET {ARK}/models`. If one disappears, the row goes amber before
+  generations start failing.
+
+Results are cached 60 s; "Re-check" forces a refresh. Endpoints were
+verified against the live services with `provider-check.yml mode=status`
+(`scripts/status-probe.mjs`) rather than guessed — re-run it if a vendor
+changes their feed.
+
+`GET /api/health` stays public but says only `{ ok, ready }`: it must not
+name the generator or upscaler, since provider identity is never revealed to
+users.
 
 ## Spending discipline
 
