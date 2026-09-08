@@ -28,8 +28,9 @@ import {
 //
 // Still to confirm on a live key (see docs/NEXT.md): whether `camera_fixed`
 // is honoured as a top-level field, whether extension `duration` means the
-// added length or the total, and whether Seedance 2.5 accepts 1080p (the
-// public model catalogue lists 720p as its ceiling; 1080p/4k are 2.0-only).
+// added length or the total, and whether ModelArk accepts 1080p on the 2.5
+// model id. Seedance 2.5 launched with a 720p ceiling but gained native
+// 1080p on partner platforms in late August 2026, so 1080p is sent as-is.
 
 const BASE =
   process.env.BYTEPLUS_API_BASE ||

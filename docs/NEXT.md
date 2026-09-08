@@ -44,9 +44,17 @@ Still to confirm on a live key (each is flagged in the client comments):
 
 1. Whether `camera_fixed` is accepted as a top-level boolean.
 2. Whether extension `duration` is the added length or the total length.
-3. Whether Seedance 2.5 accepts `1080p`. The public model catalogue lists
-   720p as its ceiling and 1080p/4k as 2.0-only. If so, "native 1080p" mode
-   must route to Seedance 2.0 or be limited to 2.0 in the UI.
+3. Whether ModelArk accepts `resolution: "1080p"` on
+   `dreamina-seedance-2-5-260628`. At launch (2026-08-07) the 2.5 ceiling was
+   720p; the seedance-cli model table (snapshot 2026-08-06) still says so. In
+   late August 2026 ByteDance rolled native 1080p for 2.5 out to partner
+   platforms (Runway, Higgsfield, Morphic all announced "Seedance 2.5 in
+   1080p", rendered as a full 1920x1080 frame, no upscale step), so the
+   model itself does 1080p now. The client already sends `1080p` for
+   "native 1080p" mode on 2.5; the live check is a 4s 1080p task on the 2.5
+   id. If ModelArk still rejects it (`InvalidParameter` on submit or an
+   async failure), decide between routing that mode to Seedance 2.0 and
+   sending 720p until the ModelArk rollout lands.
 4. Seedance 2.5 needs a prepaid resource pack in the Ark console; without one
    calls return `ModelNotOpen`.
 5. Reference videos must be fetchable URLs (presigned S3 URLs are fine, ~1h).
