@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { EXTEND_MAX_S, EXTEND_MIN_S } from "@/lib/config";
+import { EXTEND_CONTEXT_S, EXTEND_MAX_S, EXTEND_MIN_S } from "@/lib/config";
 
 interface Job {
   id: string;
@@ -42,7 +42,8 @@ export default function JobView({ id }: { id: string }) {
   useEffect(() => {
     if (!job || !extendOpen) return;
     const ctl = new AbortController();
-    fetch(`/api/quote?model=${job.model ?? "seedance-2.5"}&duration=${extendS}&mode=${job.mode}`, {
+    const context = Math.min(job.duration_s, EXTEND_CONTEXT_S);
+    fetch(`/api/quote?model=${job.model ?? "seedance-2.5"}&duration=${extendS}&mode=${job.mode}&context=${context}`, {
       signal: ctl.signal,
     })
       .then((r) => r.json())

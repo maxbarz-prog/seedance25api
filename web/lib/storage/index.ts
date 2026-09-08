@@ -66,6 +66,12 @@ export async function storeVideoFromUrl(
   return { key, bytes: head.ContentLength ?? 0 };
 }
 
+// Store a server-generated object (e.g. a trimmed reference clip).
+export async function storeBuffer(key: string, body: Buffer, contentType: string): Promise<void> {
+  if (!BUCKET) throw new Error("storage not configured");
+  await s3().send(new PutObjectCommand({ Bucket: BUCKET, Key: key, Body: body, ContentType: contentType }));
+}
+
 // Resolve a stored key to something a browser (or an upstream provider, for
 // reference images) can fetch for the next hour.
 export async function readUrl(key: string | null | undefined): Promise<string | null> {

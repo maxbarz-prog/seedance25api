@@ -25,13 +25,18 @@ export function rates() {
     gen: {
       "seedance-2.5": {
         p480: envNum("COST_SD25_480P_PER_SEC", 0.1028),
-        p1080: envNum("COST_SD25_1080P_PER_SEC", 0.5686),
+        p1080: envNum("COST_SD25_1080P_PER_SEC", 0.5202),
+        // Requests that carry a reference video (extensions) are billed at a
+        // lower per-token price, but the reference clip's seconds count as
+        // input. Ratio of the with-video to the plain rate ($6.40 / $10.70).
+        videoInputRatio: envNum("COST_SD25_VIDEO_INPUT_RATIO", 0.598),
       },
       "seedance-2.0": {
-        p480: envNum("COST_SD20_480P_PER_SEC", 0.06),
-        p1080: envNum("COST_SD20_1080P_PER_SEC", 0.3),
+        p480: envNum("COST_SD20_480P_PER_SEC", 0.0432),
+        p1080: envNum("COST_SD20_1080P_PER_SEC", 0.2091),
+        videoInputRatio: envNum("COST_SD20_VIDEO_INPUT_RATIO", 1),
       },
-    } satisfies Record<ModelId, { p480: number; p1080: number }>,
+    } satisfies Record<ModelId, { p480: number; p1080: number; videoInputRatio: number }>,
     // Provider: upscaler, per source second. ByteDance Video Upscaler via fal,
     // published 30fps rates: $0.0072/s to 1080p, $0.0288/s to 4K.
     upscale2xPerSec: envNum("COST_UPSCALE_2X_PER_SEC", 0.0072),
@@ -51,6 +56,10 @@ export interface QuoteInput {
   durationS: number;
   mode: "upscaled-1080p" | "native-1080p";
   upscaleFactor?: UpscaleFactor;
+  // Extensions only: seconds of reference video sent with the request. The
+  // provider bills those as input, at the with-video rate for the whole
+  // request; the upscaler only ever sees the new output seconds.
+  contextS?: number;
 }
 
 export interface Quote {
@@ -65,13 +74,16 @@ export interface Quote {
 export function quote(input: QuoteInput): Quote {
   const r = rates();
   const d = input.durationS;
+  const ctx = input.contextS ?? 0;
   const gen = r.gen[input.model];
+  const genSeconds = d + ctx;
+  const ratio = ctx > 0 ? gen.videoInputRatio : 1;
   let providerUsd: number;
   if (input.mode === "native-1080p") {
-    providerUsd = gen.p1080 * d;
+    providerUsd = gen.p1080 * genSeconds * ratio;
   } else {
     const up = input.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec;
-    providerUsd = (gen.p480 + up) * d;
+    providerUsd = gen.p480 * genSeconds * ratio + up * d;
   }
   const usd =
     ((providerUsd + r.deliveryPerVideo) * (1 + r.overheadPct)) / (1 - r.processingPct);

@@ -1,8 +1,9 @@
 import { addLedger, claimJob, Job, jobById, jobsInFlight, updateJob, userById } from "./db";
 import { generator, upscaler } from "./providers";
-import { readUrl, storeVideoFromUrl } from "./storage";
+import { deleteObject, readUrl, storageEnabled, storeBuffer, storeVideoFromUrl } from "./storage";
 import { sendEmail } from "./email";
-import { SITE_DOMAIN, SITE_NAME } from "./config";
+import { EXTEND_CONTEXT_S, SITE_DOMAIN, SITE_NAME } from "./config";
+import { trimTail } from "./video";
 
 // Job pipeline: queued -> generating -> [upscaling ->] ready | failed.
 //
@@ -45,7 +46,26 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
       if (job.kind === "extend" && job.source_job_id) {
         const source = await jobById(job.source_job_id);
         sourceVideoUrl = (await readUrl(source?.video_url)) ?? undefined;
-        if (!sourceVideoUrl) throw new Error("extend: source video unavailable");
+        if (!sourceVideoUrl || !source) throw new Error("extend: source video unavailable");
+        // Only the tail of the source goes up as the reference video: the
+        // provider bills every second of it as input, and the quote assumed
+        // EXTEND_CONTEXT_S. Any trimming problem falls back to the full clip.
+        if (source.duration_s > EXTEND_CONTEXT_S && storageEnabled()) {
+          try {
+            const res = await fetch(sourceVideoUrl);
+            if (!res.ok) throw new Error(`source fetch ${res.status}`);
+            const tail = await trimTail(Buffer.from(await res.arrayBuffer()), EXTEND_CONTEXT_S);
+            if (tail) {
+              const key = extendContextKey(job);
+              await storeBuffer(key, tail, "video/mp4");
+              sourceVideoUrl = (await readUrl(key)) ?? sourceVideoUrl;
+            } else {
+              console.warn(`job ${id}: ffmpeg unavailable, sending the full ${source.duration_s}s source`);
+            }
+          } catch (err) {
+            console.warn(`job ${id}: tail trim failed, sending the full source:`, err);
+          }
+        }
       }
       const taskId = await generator().submitGeneration({
         prompt: job.prompt,
@@ -114,9 +134,21 @@ export async function advanceAll(): Promise<{ scanned: number }> {
   return { scanned: jobs.length };
 }
 
+// Temporary trimmed reference clip for an extension job; removed once the
+// job settles.
+function extendContextKey(job: Job): string {
+  return `tmp/${job.user_id}/${job.id}-context.mp4`;
+}
+
+async function cleanupContext(job: Job) {
+  if (job.kind !== "extend") return;
+  await deleteObject(extendContextKey(job)).catch((e) => console.warn("context cleanup failed:", e));
+}
+
 // Status is already "ready" (claimed) by the time we get here; copying the
 // output into our own storage is the last step before the row is complete.
 async function finalize(job: Job, providerUrl: string) {
+  await cleanupContext(job);
   try {
     const stored = await storeVideoFromUrl(job.user_id, job.id, providerUrl);
     await updateJob(job.id, {
@@ -143,6 +175,7 @@ async function finalize(job: Job, providerUrl: string) {
 
 async function fail(job: Job, internalError?: string) {
   if (internalError) console.error(`job ${job.id} failed upstream:`, internalError);
+  await cleanupContext(job);
   await updateJob(job.id, { status: "failed", error: GENERIC_FAILURE, provider_task_id: null });
   await addLedger(job.user_id, job.quote_credits, "refund", {
     jobId: job.id,

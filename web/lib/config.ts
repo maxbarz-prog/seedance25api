@@ -57,4 +57,9 @@ export type InputRole = (typeof INPUT_ROLES)[number];
 // Extending an existing clip: how much can be added per step.
 export const EXTEND_MIN_S = 4;
 export const EXTEND_MAX_S = 15;
+// Seconds of the source clip sent to the provider as the reference video for
+// an extension. The provider bills the whole reference clip as input tokens,
+// so only the tail goes up (trimmed server-side); it also fixes the price of
+// an extension regardless of how long the source is.
+export const EXTEND_CONTEXT_S = 5;
 export type AspectRatio = (typeof ASPECT_RATIOS)[number];

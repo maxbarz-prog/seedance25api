@@ -18,6 +18,7 @@
     "@clerk/nextjs": "^7.9.1",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
+    "ffmpeg-static": "^5.3.0",
     "iron-session": "^9.0.1",
     "next": "15.5.25",
     "react": "~19.1.4",

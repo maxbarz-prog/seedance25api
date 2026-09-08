@@ -28,7 +28,7 @@ docs/NEXT.md and go". Read `web/README.md` and `infra/README.md` first.
   - `.github/workflows/dev-e2e.yml` → `scripts/dev-e2e.mjs`. Real-browser
     run on a deployed stage: Clerk sign-in token → Stripe Checkout with the
     4242 test card (join, then $10 top-up) → generate → extend → download.
-    Needs a **test-mode** Stripe key on the stage (see the blocker below).
+    Needs a **test-mode** Stripe key on the stage (dev has one; see below).
 - The AWS connector (`https://aws-mcp.us-east-1.api.aws/mcp`) authenticates
   with OAuth via AWS Sign-in using your IAM identity, not access keys: the
   access token lasts 1 hour and the refresh token at most 12 hours, after
@@ -41,23 +41,14 @@ docs/NEXT.md and go". Read `web/README.md` and `infra/README.md` first.
   `AWS_SECRET_ACCESS_KEY` in the session env are proxy placeholders (STS
   rejects them), so boto3 or the CLI cannot be used as a fallback.
 
-## Blocker: the dev Stripe key is a LIVE key
+## Stripe on dev (resolved 2026-09-08)
 
-`/remerged/dev/STRIPE_SECRET_KEY` is `sk_live_…` (balance check returns
-`livemode: true`). Consequences:
-
-- The end-to-end run cannot pay with test cards, and nobody should be
-  making real charges to test dev, so the "sign up, top up, generate,
-  extend, download" rehearsal has not been run.
-- The dev webhook endpoint was deliberately **not** created: a live-mode
-  endpoint's secret would be wrong the moment dev switches to a test key.
-
-To unblock: put an `sk_test_…` key into `/remerged/dev/STRIPE_SECRET_KEY`
-(SecureString, overwrite), then dispatch `provider-check.yml` with
-`mode=keys, stage=dev, webhook=create` (creates the test-mode endpoint for
-`https://dev.remerged.click/api/billing/webhook` and stores the secret in
-`/remerged/dev/STRIPE_WEBHOOK_SECRET`), redeploy dev, then dispatch
-`dev-e2e.yml` with `stage=dev`.
+`/remerged/dev/STRIPE_SECRET_KEY` is now a test-mode key (`sk_test_…`,
+`livemode: false`). The test-mode webhook endpoint
+`we_1UDUcR2Nd3VZM6rLeEsRqKne` for `https://dev.remerged.click/api/billing/webhook`
+exists and its secret is in `/remerged/dev/STRIPE_WEBHOOK_SECRET`. If the
+key is ever rotated, dispatch `provider-check.yml` with `mode=keys,
+stage=dev, webhook=recreate` and redeploy.
 
 ## Measured provider numbers (live run 2026-09-08, 4 s clips, 16:9, seed 12345)
 
@@ -103,13 +94,22 @@ SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
    in the pipeline Lambda) or present extensions as separate clips.
 4. **Extension billing counts the reference video as input tokens.** 96,075
    tokens = ~4 s of source + 6 s of output at ~9,600 tokens/s, billed at the
-   with-video rate. Cost per added second therefore grows with source length:
-   a +5 s extension of a 30 s clip costs about (35 × 9,611 × $6.40/M) / 5 =
-   $0.43 per added second, four times the plain 480p rate the extend quote
-   currently uses (`web/app/api/jobs/[id]/extend/route.ts` quotes
-   `durationS` at the generation rate). Fix before prod: quote extensions as
-   `(source.duration_s + durationS)` seconds at the with-video rate, or cap
-   extension sources.
+   with-video rate ($6.40/M, i.e. 0.598× the plain rate). Left alone, cost
+   per added second would grow with source length (a +5 s extension of a
+   30 s clip ≈ $0.43 per added second). Fixed 2026-09-08 in two parts:
+   - The pipeline sends only the last `EXTEND_CONTEXT_S` (5 s) of the source
+     as the reference video, trimmed with `ffmpeg-static` in the server
+     Lambda (`web/lib/video.ts`, `pipeline.ts`), stored under
+     `tmp/<user>/<job>-context.mp4` and deleted when the job settles. Any
+     trimming failure (missing binary, wrong CPU architecture) logs a
+     warning and falls back to the full clip, so jobs never fail on it.
+   - `quote()` takes `contextS` and prices `(added + context)` seconds at
+     the with-video rate (`videoInputRatio`, env `COST_SD25_VIDEO_INPUT_RATIO`),
+     plus the upscaler on the added seconds only. The extend route, the
+     quote API (`context=` param) and the job page all pass it.
+   Verify on dev after the first extension: the job log should not contain
+   "ffmpeg unavailable" or "tail trim failed", and `usage.total_tokens` for
+   the extension should be ≈ (5 + added) × 9,611 at 480p.
 5. **fal queue polling** must address `queue.fal.run/fal-ai/bytedance-upscaler/requests/{id}`
    (the app id), not the full model subpath (405). Fixed in `fal.ts`; the
    result body carries `video.url` and `duration`.
@@ -119,20 +119,16 @@ SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
 
 ## Tasks, in order
 
-1. **Dev go-live check.** The Deploy workflow was dispatched on
-   `claude/seedance-1080p-verify-c8cbha` on 2026-09-08 with live providers
-   and the measured costs. Confirm the run is green and
-   https://dev.remerged.click loads.
-2. **Swap dev to a Stripe test key** and run the steps under the blocker
-   above (keys run → redeploy → `dev-e2e.yml`). Read the e2e summary and
-   the screenshots artifact.
-3. **Extension pricing** (fact 4 above) and the concatenate-or-not decision
-   (fact 3). Both are a few lines in `pricing.ts` / the extend route /
-   `pipeline.ts`.
-4. **Merge into the platform branch.** `claude/seedance-video-platform-9sp9cn`
-   is behind `claude/seedance-1080p-verify-c8cbha` (provider fixes, check
-   workflows, this brief). Merge or fast-forward it; that push redeploys dev.
-5. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk,
+1. **Dev end-to-end.** Dev is deployed with live providers, the measured
+   costs, the test-mode Stripe key and its webhook. Dispatch `dev-e2e.yml`
+   with `stage=dev` after any deploy and read the summary plus the
+   screenshots artifact; it signs up, joins, tops up, generates, extends and
+   downloads.
+2. **Concatenate-or-not** for extensions (fact 3 above): the delivered file
+   is the continuation only. If members should get source + continuation in
+   one file, join them with ffmpeg at finalize (the binary is already in the
+   server bundle).
+3. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk,
    admin emails, `MOCK_BILLING=0`, `PROVIDER_MODE=live`, the live Stripe
    key, the live webhook endpoint `we_1UDNRZ2Nd3VZM6rLW1KGdxoR` for
    `https://remerged.click/api/billing/webhook` with its secret in

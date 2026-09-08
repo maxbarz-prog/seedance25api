@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { quote } from "@/lib/pricing";
-import { DEFAULT_MODEL, MIN_DURATION_S, MODELS, ModelId } from "@/lib/config";
+import { DEFAULT_MODEL, EXTEND_CONTEXT_S, MIN_DURATION_S, MODELS, ModelId } from "@/lib/config";
 
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
@@ -19,5 +19,9 @@ export async function GET(req: NextRequest) {
   ) {
     return NextResponse.json({ error: "Invalid duration." }, { status: 400 });
   }
-  return NextResponse.json(quote({ model, durationS, mode, upscaleFactor: factor }));
+  // Extensions send `context` = seconds of the source clip that will ride
+  // along as the reference video (capped server-side to EXTEND_CONTEXT_S).
+  const contextRaw = Number(p.get("context") || 0);
+  const contextS = Number.isFinite(contextRaw) && contextRaw > 0 ? Math.min(contextRaw, EXTEND_CONTEXT_S) : 0;
+  return NextResponse.json(quote({ model, durationS, mode, upscaleFactor: factor, contextS }));
 }

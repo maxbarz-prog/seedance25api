@@ -4,7 +4,7 @@ import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { addLedger, balance, createJob, jobById, storageUsedBytes } from "@/lib/db";
 import { quote } from "@/lib/pricing";
-import { EXTEND_MAX_S, EXTEND_MIN_S, MAX_PROMPT_CHARS, MODELS, PLANS } from "@/lib/config";
+import { EXTEND_CONTEXT_S, EXTEND_MAX_S, EXTEND_MIN_S, MAX_PROMPT_CHARS, MODELS, PLANS } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
 
 // Continue an existing (ready) clip by N more seconds. The result is a new
@@ -53,6 +53,8 @@ export async function POST(
     durationS: b.durationS,
     mode: source.mode,
     upscaleFactor: source.upscale_factor === 4 ? 4 : 2,
+    // The pipeline sends only the last EXTEND_CONTEXT_S of the source.
+    contextS: Math.min(source.duration_s, EXTEND_CONTEXT_S),
   });
   const bal = await balance(user.id);
   if (bal < q.credits) {
