@@ -41,6 +41,38 @@ docs/NEXT.md and go". Read `web/README.md` and `infra/README.md` first.
   `AWS_SECRET_ACCESS_KEY` in the session env are proxy placeholders (STS
   rejects them), so boto3 or the CLI cannot be used as a fallback.
 
+## BLOCKER: the Clerk keys belong to another app (found 2026-09-08)
+
+The `CLERK_SECRET_KEY` / `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` in SSM (dev and
+prod, same values) are a **production instance whose only domain is
+`facematch.click`** (frontend API `clerk.facematch.click`). Clerk
+production instances serve exactly their configured domain, so the sign-in
+widget on dev.remerged.click / remerged.click never completes a session; the
+end-to-end run (34270152274) timed out on the sign-in page for that reason.
+Nobody can sign in until this is fixed.
+
+Fix, in the Clerk dashboard (https://dashboard.clerk.com):
+
+1. Create a new application "Remerged" (Google + email sign-in as before).
+2. **Dev**: from its *Development* instance copy `pk_test_…` and `sk_test_…`
+   into `/remerged/dev/NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
+   `/remerged/dev/CLERK_SECRET_KEY`. Development instances serve any origin,
+   so dev.remerged.click works with no DNS.
+3. **Prod**: create its *Production* instance with domain `remerged.click`,
+   copy `pk_live_…` / `sk_live_…` into the `/remerged/prod/` parameters,
+   then dispatch `provider-check.yml` with `mode=keys, stage=prod,
+   clerk_dns=upsert`: it verifies the instance serves remerged.click and
+   writes the five Clerk CNAMEs (clerk, accounts, clkmail, clk._domainkey,
+   clk2._domainkey) into the Route 53 zone. Clerk shows the domain as
+   verified once DNS propagates.
+4. Redeploy the stage (parameters are baked in at deploy) and run
+   `dev-e2e.yml`.
+
+The keys run now reports `siteCheck` (MISMATCH / ok / development instance)
+and decodes the publishable key's host, so a mismatched pair is caught too.
+The failed e2e run created a stray user `e2e+1788896363551@remerged.click`
+in the facematch Clerk app; delete it from that dashboard.
+
 ## Stripe on dev (resolved 2026-09-08)
 
 `/remerged/dev/STRIPE_SECRET_KEY` is now a test-mode key (`sk_test_…`,
@@ -119,6 +151,7 @@ SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
 
 ## Tasks, in order
 
+0. **Clerk keys** (blocker above), then redeploy dev.
 1. **Dev end-to-end.** Dev is deployed with live providers, the measured
    costs, the test-mode Stripe key and its webhook. Dispatch `dev-e2e.yml`
    with `stage=dev` after any deploy and read the summary plus the

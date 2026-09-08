@@ -107,9 +107,57 @@ async function checkClerk() {
   } else out.domainsError = d.text.slice(0, 200);
   const inst = await req("https://api.clerk.com/v1/instance", { headers: { Authorization: `Bearer ${key}` } });
   if (inst.ok) out.instance = { environmentType: inst.json?.environment_type, allowedOrigins: inst.json?.allowed_origins };
+  // The publishable key encodes the frontend API host; it must belong to the
+  // same instance as the secret key.
+  const pk = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
+  if (pk) {
+    try {
+      out.publishableKeyHost = Buffer.from(pk.replace(/^pk_(live|test)_/, ""), "base64").toString().replace(/\$$/, "");
+      out.publishableKeyMode = pk.startsWith("pk_test_") ? "test" : pk.startsWith("pk_live_") ? "live" : "unknown";
+    } catch {
+      out.publishableKeyHost = "undecodable";
+    }
+  }
+  // Does this instance serve the stage's site? A production instance serves
+  // exactly its configured domain; a development instance serves any origin.
+  const site = process.env.SITE_DOMAIN;
+  if (site && out.domains) {
+    const match = out.domains.find((d) => d.name === site);
+    if (out.instance?.environmentType === "development") {
+      out.siteCheck = "development instance: any origin allowed, no DNS needed";
+    } else if (!match) {
+      out.siteCheck = `MISMATCH: this Clerk instance serves ${out.domains.map((d) => d.name).join(", ") || "no domain"}, not ${site}. Sign-in cannot work on this stage. Create a Clerk application for ${site} (production instance) and store its sk_live_/pk_live_ keys, or use a development instance's sk_test_/pk_test_ keys for dev.`;
+      out.error = out.siteCheck;
+    } else {
+      out.siteCheck = `ok: instance serves ${site}`;
+      // Make sure the instance's CNAMEs exist in our hosted zone (idempotent).
+      if (process.env.CLERK_DNS === "upsert") out.dns = clerkDns(site, match);
+    }
+  }
   summary.checks.clerk = out;
   log("clerk", JSON.stringify(out));
   return out;
+}
+
+// Upsert a Clerk domain's CNAME targets into the Route 53 zone for `site`
+// (the deploy role has the permission; records are idempotent).
+function clerkDns(site, domain) {
+  const region = process.env.AWS_REGION || "us-east-1";
+  const zones = spawnSync("aws", [
+    "route53", "list-hosted-zones", "--query", `HostedZones[?Name=='${site}.'].Id`, "--output", "text", "--region", region,
+  ], { encoding: "utf8" });
+  const zoneId = (zones.stdout || "").trim();
+  if (!zoneId) return { error: `no hosted zone for ${site}` };
+  const changes = (domain.cnameTargets || []).map((t) => {
+    const [host, value] = t.replace(/ \(optional\)$/, "").split(" -> ");
+    return { Action: "UPSERT", ResourceRecordSet: { Name: host, Type: "CNAME", TTL: 300, ResourceRecords: [{ Value: value }] } };
+  });
+  if (!changes.length) return { result: "no CNAME targets" };
+  const r = spawnSync("aws", [
+    "route53", "change-resource-record-sets", "--hosted-zone-id", zoneId,
+    "--change-batch", JSON.stringify({ Changes: changes }), "--region", region,
+  ], { encoding: "utf8" });
+  return r.status === 0 ? { result: `upserted ${changes.length} records in ${zoneId}` } : { error: r.stderr.slice(0, 300) };
 }
 
 // ---------- ModelArk ----------
