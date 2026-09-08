@@ -1,0 +1,89 @@
+name: DNS records
+
+# Applies the Clerk production-instance records for remerged.click into the
+# Route 53 hosted zone, from infra/clerk-dns.json (values live in that file so
+# nothing is retyped). UPSERT, so re-running is safe and idempotent.
+
+on:
+  # Push trigger only registers the workflow with GitHub; runs are manual.
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+      - claude/seedance-video-platform-9sp9cn
+    paths:
+      - ".github/workflows/dns.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "plan = show current records only; apply = upsert infra/clerk-dns.json"
+        type: choice
+        options: [plan, apply]
+        default: plan
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  dns:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DOMAIN: remerged.click
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Find hosted zone
+        run: |
+          ZONE=$(aws route53 list-hosted-zones \
+            --query "HostedZones[?Name=='$DOMAIN.'].Id" --output text)
+          if [ -z "$ZONE" ]; then echo "::error::no hosted zone for $DOMAIN"; exit 1; fi
+          echo "ZONE=$ZONE" >> "$GITHUB_ENV"
+          echo "Hosted zone: $ZONE"
+
+      - name: Current records
+        run: |
+          echo "### Before" >> "$GITHUB_STEP_SUMMARY"
+          aws route53 list-resource-record-sets --hosted-zone-id "$ZONE" \
+            --query "ResourceRecordSets[?Type=='CNAME' || Type=='TXT' || Type=='MX'].{Name:Name,Type:Type,Value:ResourceRecords[0].Value}" \
+            --output table | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply Clerk records
+        if: inputs.mode == 'apply'
+        run: |
+          ID=$(aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" \
+            --change-batch file://infra/clerk-dns.json \
+            --query ChangeInfo.Id --output text)
+          echo "Change $ID submitted; waiting for INSYNC"
+          aws route53 wait resource-record-sets-changed --id "$ID"
+          echo "Change $ID is INSYNC"
+
+      - name: Verify from public DNS
+        if: inputs.mode == 'apply'
+        run: |
+          echo "### After" >> "$GITHUB_STEP_SUMMARY"
+          fail=0
+          check() {
+            got=$(dig +short CNAME "$1" @1.1.1.1 | sed 's/\.$//')
+            if [ "$got" = "$2" ]; then
+              echo "ok   $1 -> $got" | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "FAIL $1 -> '${got:-<empty>}' (expected $2)" | tee -a "$GITHUB_STEP_SUMMARY"
+              fail=1
+            fi
+          }
+          check clerk.remerged.click frontend-api.clerk.services
+          check accounts.remerged.click accounts.clerk.services
+          check clkmail.remerged.click mail.gd1nhwizioam.clerk.services
+          check clk._domainkey.remerged.click dkim1.gd1nhwizioam.clerk.services
+          check clk2._domainkey.remerged.click dkim2.gd1nhwizioam.clerk.services
+          echo "--- existing DMARC (left untouched):" | tee -a "$GITHUB_STEP_SUMMARY"
+          dig +short TXT _dmarc.remerged.click @1.1.1.1 | tee -a "$GITHUB_STEP_SUMMARY" || true
+          exit $fail
