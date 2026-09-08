@@ -1,0 +1,73 @@
+name: Lambda logs
+
+# Reads CloudWatch logs for a deployed stage's functions. Claude's sandbox
+# cannot reach AWS when the connector's OAuth token has expired, so this is
+# the reliable way to see a server-side error behind a 500.
+
+on:
+  # Push trigger only registers the workflow with GitHub; runs are manual.
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+      - claude/seedance-video-platform-9sp9cn
+    paths:
+      - ".github/workflows/logs.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage"
+        type: string
+        default: dev
+      function:
+        description: "Log group name substring (e.g. WebServer, AdvanceJobs, MailForwarder)"
+        type: string
+        default: WebServer
+      minutes:
+        description: "How far back to read"
+        type: string
+        default: "30"
+      filter:
+        description: "CloudWatch filter pattern; empty reads everything"
+        type: string
+        default: "?ERROR ?Error ?error ?Exception"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  logs:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Read logs
+        env:
+          STAGE: ${{ inputs.stage }}
+          FUNCTION: ${{ inputs.function }}
+          MINUTES: ${{ inputs.minutes }}
+          FILTER: ${{ inputs.filter }}
+        run: |
+          set -euo pipefail
+          start=$(( ($(date +%s) - MINUTES * 60) * 1000 ))
+          groups=$(aws logs describe-log-groups \
+            --log-group-name-prefix "/aws/lambda/remerged-$STAGE" \
+            --query "logGroups[?contains(logGroupName, '$FUNCTION')].logGroupName" --output text)
+          if [ -z "$groups" ]; then echo "::error::no log groups matching $FUNCTION"; exit 1; fi
+          for g in $groups; do
+            echo "===== $g (last ${MINUTES}m) ====="
+            if [ -n "$FILTER" ]; then
+              aws logs filter-log-events --log-group-name "$g" --start-time "$start" \
+                --filter-pattern "$FILTER" --max-items 200 \
+                --query 'events[].message' --output text || true
+            else
+              aws logs filter-log-events --log-group-name "$g" --start-time "$start" \
+                --max-items 200 --query 'events[].message' --output text || true
+            fi
+          done | tee -a "$GITHUB_STEP_SUMMARY"

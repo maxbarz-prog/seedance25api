@@ -55,7 +55,14 @@ export class DynamoStore implements DataStore {
       stripe_customer_id: null,
       created_at: Date.now(),
     };
-    await this.doc.send(new PutCommand({ TableName: USERS, Item: u }));
+    // `stripe_customer_id` is the hash key of the "stripe" GSI, and DynamoDB
+    // rejects an item whose index key attribute is NULL ("Type mismatch for
+    // Index Key ... Expected: S Actual: NULL"). An absent attribute is fine —
+    // the item simply isn't indexed — so it is omitted until a customer id
+    // exists. Same reasoning as the REMOVE in setStripeIds.
+    const { stripe_customer_id: _unindexed, ...item } = u;
+    void _unindexed;
+    await this.doc.send(new PutCommand({ TableName: USERS, Item: item }));
     return u;
   }
 
@@ -89,12 +96,35 @@ export class DynamoStore implements DataStore {
   }
 
   async setStripeIds(userId: string, customerId: string | null, subscriptionId: string | null) {
+    // Clearing an id must REMOVE the attribute rather than set it to NULL:
+    // stripe_customer_id backs the "stripe" GSI and DynamoDB rejects a NULL
+    // index key. Kept symmetric for the subscription id.
+    const sets: string[] = [];
+    const removes: string[] = [];
+    const values: Record<string, string> = {};
+    for (const [attr, slot, value] of [
+      ["stripe_customer_id", ":c", customerId],
+      ["stripe_subscription_id", ":s", subscriptionId],
+    ] as const) {
+      if (value === null) {
+        removes.push(attr);
+      } else {
+        sets.push(`${attr} = ${slot}`);
+        values[slot] = value;
+      }
+    }
+    const expression = [
+      sets.length ? `SET ${sets.join(", ")}` : "",
+      removes.length ? `REMOVE ${removes.join(", ")}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
     await this.doc.send(
       new UpdateCommand({
         TableName: USERS,
         Key: { id: userId },
-        UpdateExpression: "SET stripe_customer_id = :c, stripe_subscription_id = :s",
-        ExpressionAttributeValues: { ":c": customerId, ":s": subscriptionId },
+        UpdateExpression: expression,
+        ...(sets.length ? { ExpressionAttributeValues: values } : {}),
       })
     );
   }
