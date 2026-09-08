@@ -1,111 +1,147 @@
 # Remerged — next session brief
 
-Handover for the validation-to-prod leg. A fresh Claude Code session can be
-told "read docs/NEXT.md and go". Read `web/README.md` and `infra/README.md`
-first.
+Handover for the go-live leg. A fresh Claude Code session can be told "read
+docs/NEXT.md and go". Read `web/README.md` and `infra/README.md` first.
 
-## Where things stand
+## Where things stand (2026-09-08)
 
-- The whole platform lives on branch `claude/seedance-video-platform-9sp9cn`.
-  Pushing `web/**`, `functions/**`, `sst.config.ts` or `package.json` to that
-  branch deploys the `dev` stage (https://dev.remerged.click) via
-  `.github/workflows/deploy.yml`; a `prod-*` tag deploys `prod`
-  (https://remerged.click). Work on any other branch does **not** deploy until
-  it is merged into that branch.
-- All keys are in SSM Parameter Store under `/remerged/dev/` (Stripe test,
-  BytePlus, fal, Clerk). The deploy workflow reads them by name; see the
-  `load` loop in `deploy.yml` for the exact parameter list.
-- Providers run in mock mode until `PROVIDER_MODE=live` is set in SSM.
-- The AWS connector (`https://aws-mcp.us-east-1.api.aws/mcp`) must be
-  connected and enabled for the session. It authenticates with OAuth via
-  AWS Sign-in using your IAM identity, not with access keys: the access
-  token lasts 1 hour and the refresh token at most 12 hours, after which
-  AWS refuses to renew and the connector is dead until you sign in again.
-  claude.ai keeps showing it as "Connected" in that state (the badge is
-  the install record; the org-level state is `needs_reconnect`) and there
-  is no refresh button, so: Settings → Connectors → AWS → **Disconnect**,
-  then **Connect** again and complete the AWS Sign-in consent page, then
-  start a new session within 12 hours. Symptom in-session: every AWS tool
-  call returns `MCP server "AWS" requires re-authorization (token expired)`.
-  The `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` in the session env are
-  proxy placeholders (STS rejects them with `InvalidClientTokenId`), so
-  boto3 or the CLI cannot be used as a fallback. Verified 2026-09-08.
+- The whole platform lives on branch `claude/seedance-video-platform-9sp9cn`
+  plus the commits on `claude/seedance-1080p-verify-c8cbha` (provider fixes,
+  the check workflows, this brief). Pushing `web/**`, `functions/**`,
+  `sst.config.ts` or `package.json` to the platform branch deploys the `dev`
+  stage (https://dev.remerged.click) via `.github/workflows/deploy.yml`; a
+  `prod-*` tag deploys `prod` (https://remerged.click). The Deploy workflow
+  can also be dispatched manually on any branch: a branch ref deploys dev
+  from that branch, a `prod-*` tag ref deploys prod.
+- All keys are in SSM Parameter Store under `/remerged/dev/` and
+  `/remerged/prod/`. The deploy workflow reads them by name; see the `load`
+  loop in `deploy.yml` for the exact list.
+- `PROVIDER_MODE=live` is set on both stages; the measured `COST_*` values
+  are set on both stages (table below).
+- Claude's sandbox cannot reach Stripe, Clerk, ModelArk or fal (egress
+  policy). Anything that needs a provider call runs from a GitHub runner:
+  - `.github/workflows/provider-check.yml` → `scripts/provider-check.mjs`.
+    Modes: `keys` (Stripe/Clerk + webhook, free), `validate` (one small
+    task per provider), `full` (the three-way cost test and the probes).
+    Dispatch it with the GitHub MCP `actions_run_trigger` tool and read the
+    job log with `get_job_logs`; the JSON summary is at the end.
+  - `.github/workflows/dev-e2e.yml` → `scripts/dev-e2e.mjs`. Real-browser
+    run on a deployed stage: Clerk sign-in token → Stripe Checkout with the
+    4242 test card (join, then $10 top-up) → generate → extend → download.
+    Needs a **test-mode** Stripe key on the stage (see the blocker below).
+- The AWS connector (`https://aws-mcp.us-east-1.api.aws/mcp`) authenticates
+  with OAuth via AWS Sign-in using your IAM identity, not access keys: the
+  access token lasts 1 hour and the refresh token at most 12 hours, after
+  which the connector is dead until you sign in again. claude.ai keeps
+  showing it as "Connected" in that state and there is no refresh button:
+  Settings → Connectors → AWS → **Disconnect**, then **Connect** again and
+  complete the AWS Sign-in consent page, then start a new session within 12
+  hours. In-session symptom: every AWS tool call returns `MCP server "AWS"
+  requires re-authorization (token expired)`. The `AWS_ACCESS_KEY_ID` /
+  `AWS_SECRET_ACCESS_KEY` in the session env are proxy placeholders (STS
+  rejects them), so boto3 or the CLI cannot be used as a fallback.
 
-## Provider request shapes (confirmed 2026-09-08 from the ModelArk schema)
+## Blocker: the dev Stripe key is a LIVE key
 
-Source: BytePlus ModelArk API as encoded in the open-source seedance-cli
-(paperfoot/seedance-cli, run daily against the live API) and the fal model
-page for `fal-ai/bytedance-upscaler/upscale/video`. Applied in
-`web/lib/providers/byteplus.ts` and `web/lib/providers/fal.ts`.
+`/remerged/dev/STRIPE_SECRET_KEY` is `sk_live_…` (balance check returns
+`livemode: true`). Consequences:
 
-BytePlus ModelArk, `POST /api/v3/contents/generations/tasks`:
+- The end-to-end run cannot pay with test cards, and nobody should be
+  making real charges to test dev, so the "sign up, top up, generate,
+  extend, download" rehearsal has not been run.
+- The dev webhook endpoint was deliberately **not** created: a live-mode
+  endpoint's secret would be wrong the moment dev switches to a test key.
 
-| Concern | Field |
-|---|---|
-| Model ids | `dreamina-seedance-2-5-260628`, `dreamina-seedance-2-0-260128` |
-| Generation controls | top-level `resolution`, `ratio`, `duration`, `seed`, `generate_audio`, `watermark`, `return_last_frame` (not prompt text flags) |
-| Image roles | `content[].role` = `first_frame`, `last_frame`, `reference_image` |
-| Reference video / audio | `content[]` `type: "video_url"` + `role: "reference_video"`; `type: "audio_url"` + `role: "reference_audio"` |
-| Extension | no dedicated role: `reference_video` + extend/continue intent in the prompt, and `ratio` must be `adaptive` (else `InvalidParameter.TaskTypeConstraint`, raised asynchronously) |
-| Terminal statuses | `succeeded`, `failed`, `cancelled`, `expired` |
-| Result | `content.video_url`, `content.last_frame_url`, `usage.total_tokens` |
+To unblock: put an `sk_test_…` key into `/remerged/dev/STRIPE_SECRET_KEY`
+(SecureString, overwrite), then dispatch `provider-check.yml` with
+`mode=keys, stage=dev, webhook=create` (creates the test-mode endpoint for
+`https://dev.remerged.click/api/billing/webhook` and stores the secret in
+`/remerged/dev/STRIPE_WEBHOOK_SECRET`), redeploy dev, then dispatch
+`dev-e2e.yml` with `stage=dev`.
 
-Still to confirm on a live key (each is flagged in the client comments):
+## Measured provider numbers (live run 2026-09-08, 4 s clips, 16:9, seed 12345)
 
-1. Whether `camera_fixed` is accepted as a top-level boolean.
-2. Whether extension `duration` is the added length or the total length.
-3. Whether ModelArk accepts `resolution: "1080p"` on
-   `dreamina-seedance-2-5-260628`. At launch (2026-08-07) the 2.5 ceiling was
-   720p; the seedance-cli model table (snapshot 2026-08-06) still says so. In
-   late August 2026 ByteDance rolled native 1080p for 2.5 out to partner
-   platforms (Runway, Higgsfield, Morphic all announced "Seedance 2.5 in
-   1080p", rendered as a full 1920x1080 frame, no upscale step), so the
-   model itself does 1080p now. The client already sends `1080p` for
-   "native 1080p" mode on 2.5; the live check is a 4s 1080p task on the 2.5
-   id. If ModelArk still rejects it (`InvalidParameter` on submit or an
-   async failure), decide between routing that mode to Seedance 2.0 and
-   sending 720p until the ModelArk rollout lands.
-4. Seedance 2.5 needs a prepaid resource pack in the Ark console; without one
-   calls return `ModelNotOpen`.
-5. Reference videos must be fetchable URLs (presigned S3 URLs are fine, ~1h).
+Source: `provider-check.yml` run 34222147838. Cost = `usage.total_tokens` ×
+ModelArk list price ($10.70/M tokens for Seedance 2.5 without video input,
+$6.40/M with video input, $4.30/M for Seedance 2.0 resource packs). The Ark
+billing console was not reachable from Claude; reconcile the first invoice
+against these.
 
-fal upscaler, `POST https://queue.fal.run/fal-ai/bytedance-upscaler/upscale/video`:
-`video_url` plus `target_resolution` in `1080p` | `2K` | `4K`. Published
-price per source second at 30fps: 0.0072 / 0.0144 / 0.0288 USD. The
-`COST_UPSCALE_4X_PER_SEC` default is now 0.0288.
+| Task | Output | Tokens | Per output second |
+|---|---|---|---|
+| Seedance 2.5, 480p | 854x480 @24 fps, 4.04 s | 38,830 | **$0.1028** |
+| Seedance 2.5, native 1080p | 1920x1080 @24 fps, 4.04 s | 196,425 | **$0.5202** |
+| Seedance 2.0, 480p | 864x496 @24 fps, 4.04 s | 40,594 | **$0.0432** |
+| Seedance 2.0, native 1080p | 1920x1080 @24 fps, 4.04 s | 196,425 | **$0.2091** |
+| fal ByteDance upscaler, 480p → 1080p | 1918x1080 @30 fps, 4.0 s, 141 s wall | n/a | **$0.0072** (list, per source second) |
+| Seedance 2.5 extension, +6 s from a 4 s source | 854x480 @24 fps, 6.0 s | 96,075 | $0.1025 per added second (see below) |
+
+Three-way comparison for a 1080p deliverable on Seedance 2.5: 480p→upscale
+$0.110/s versus native $0.520/s, so the upscaled path is 4.7× cheaper.
+Wall-clock: 480p ~160 s + upscale ~140 s versus native ~195 s.
+
+`COST_*` set in SSM (dev and prod): SD25 480p 0.1028, SD25 1080p 0.5202,
+SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
+(4K is fal's list price, not measured).
+
+## ModelArk facts confirmed on the live key
+
+1. **1080p on `dreamina-seedance-2-5-260628` works** and renders a true
+   1920x1080 frame. The launch-time 720p ceiling is gone. No routing change
+   needed; the client sends `1080p` for native mode.
+2. **`camera_fixed` is rejected at submit for Seedance 2.5 text-to-video**
+   (`400: the specified parameter camera_fixed is not supported for model
+   dreamina-seedance-2-5 in t2v, must be empty`). `BytePlusGenerator`
+   now drops the flag and resubmits once on that specific 400. Not yet
+   probed: whether 2.5 image-to-video or Seedance 2.0 accept it.
+3. **Extension `duration` is the length of the output, and the output is the
+   continuation only.** A +6 s request on a 4 s reference returned a 6.0 s
+   clip whose first frame matches the source's last frame (SSIM 0.68) and not
+   its first (0.26). So `durationS` = seconds added is the right contract,
+   but the delivered file does not contain the original clip. Product
+   decision pending: concatenate source + continuation at finalize (ffmpeg
+   in the pipeline Lambda) or present extensions as separate clips.
+4. **Extension billing counts the reference video as input tokens.** 96,075
+   tokens = ~4 s of source + 6 s of output at ~9,600 tokens/s, billed at the
+   with-video rate. Cost per added second therefore grows with source length:
+   a +5 s extension of a 30 s clip costs about (35 × 9,611 × $6.40/M) / 5 =
+   $0.43 per added second, four times the plain 480p rate the extend quote
+   currently uses (`web/app/api/jobs/[id]/extend/route.ts` quotes
+   `durationS` at the generation rate). Fix before prod: quote extensions as
+   `(source.duration_s + durationS)` seconds at the with-video rate, or cap
+   extension sources.
+5. **fal queue polling** must address `queue.fal.run/fal-ai/bytedance-upscaler/requests/{id}`
+   (the app id), not the full model subpath (405). Fixed in `fal.ts`; the
+   result body carries `video.url` and `duration`.
+6. Seedance 2.5 resource pack / `ModelNotOpen`: not encountered; tasks ran
+   pay-as-you-go on this key.
+7. Reference videos as plain https URLs (ModelArk's own output URLs) work.
 
 ## Tasks, in order
 
-1. **Verify AWS access.** `sts:GetCallerIdentity`, then list parameter names
-   under `/remerged/dev/` (`ssm:GetParametersByPath`, recursive, no
-   decryption needed for names).
-2. **Validate each provider key** with a minimal call: Stripe
-   (`GET /v1/balance`), BytePlus (create a 4s 480p task and poll it), fal
-   (submit a short upscale and poll it), Clerk (`GET /v1/users?limit=1`).
-3. **Three-way quality test.** Same prompt and seed on Seedance 2.5 at
-   480p, native 1080p, and 480p→1080p upscaled. Record `usage.total_tokens`
-   from each task (the pipeline logs it as `generation usage`) and the fal
-   request cost, then report cost per output second from real billing
-   (ModelArk billing console / fal usage page), not from list prices.
-4. **Set measured `COST_*` parameters** in SSM under `/remerged/dev/`:
-   `COST_SD25_480P_PER_SEC`, `COST_SD25_1080P_PER_SEC`,
-   `COST_SD20_480P_PER_SEC`, `COST_SD20_1080P_PER_SEC`,
-   `COST_UPSCALE_2X_PER_SEC`, `COST_UPSCALE_4X_PER_SEC`.
-5. **Confirm the open ModelArk questions** above with the live key and fix
-   `web/lib/providers/byteplus.ts` if needed (image roles, extend, reference
-   video/audio are already aligned; `camera_fixed`, extension duration and
-   2.5 resolution ceiling remain).
-6. **Stripe webhook.** Create an endpoint for
-   `https://dev.remerged.click/api/billing/webhook` listening to
-   `checkout.session.completed`, `customer.subscription.created`,
-   `customer.subscription.updated`, `customer.subscription.deleted`,
-   `invoice.paid`, `invoice.payment_failed`, and store its signing secret as
-   `/remerged/dev/STRIPE_WEBHOOK_SECRET` (SecureString).
-7. **Go live on dev.** Set `/remerged/dev/PROVIDER_MODE=live`, redeploy
-   (push to the platform branch or run the Deploy workflow), and do an
-   end-to-end generation on the dev site: sign up, mock or test-card top-up,
-   generate, extend, download.
-8. **Prepare prod.** Create the same parameter set under `/remerged/prod/`
-   with live Stripe keys, a prod webhook endpoint for
-   `https://remerged.click/api/billing/webhook`, and the measured `COST_*`
-   values; then cut the first `prod-YYYY-MM-DD` tag on the platform branch.
+1. **Dev go-live check.** The Deploy workflow was dispatched on
+   `claude/seedance-1080p-verify-c8cbha` on 2026-09-08 with live providers
+   and the measured costs. Confirm the run is green and
+   https://dev.remerged.click loads.
+2. **Swap dev to a Stripe test key** and run the steps under the blocker
+   above (keys run → redeploy → `dev-e2e.yml`). Read the e2e summary and
+   the screenshots artifact.
+3. **Extension pricing** (fact 4 above) and the concatenate-or-not decision
+   (fact 3). Both are a few lines in `pricing.ts` / the extend route /
+   `pipeline.ts`.
+4. **Merge into the platform branch.** `claude/seedance-video-platform-9sp9cn`
+   is behind `claude/seedance-1080p-verify-c8cbha` (provider fixes, check
+   workflows, this brief). Merge or fast-forward it; that push redeploys dev.
+5. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk,
+   admin emails, `MOCK_BILLING=0`, `PROVIDER_MODE=live`, the live Stripe
+   key, the live webhook endpoint `we_1UDNRZ2Nd3VZM6rLW1KGdxoR` for
+   `https://remerged.click/api/billing/webhook` with its secret in
+   `/remerged/prod/STRIPE_WEBHOOK_SECRET`, and the `COST_*` values. Cut the
+   first `prod-YYYY-MM-DD` tag on the platform branch, watch the Deploy run,
+   then run `dev-e2e.yml` with `stage=prod` **only if** you accept one real
+   monthly membership charge plus a $10 top-up on your own card (there is no
+   test mode in prod); otherwise sign up by hand and verify manually.
+6. **After the first real generations**, compare the ModelArk and fal
+   invoices with the table above and adjust `COST_*` in SSM. The deploy
+   workflow bakes SSM values into the Lambda environment, so redeploy after
+   changing any parameter.
