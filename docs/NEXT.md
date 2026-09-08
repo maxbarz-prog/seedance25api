@@ -41,48 +41,53 @@ docs/NEXT.md and go". Read `web/README.md` and `infra/README.md` first.
   `AWS_SECRET_ACCESS_KEY` in the session env are proxy placeholders (STS
   rejects them), so boto3 or the CLI cannot be used as a fallback.
 
-## BLOCKER: the Clerk keys belong to another app (found 2026-09-08)
+## Auth and billing: resolved and verified (2026-09-08)
 
-The `CLERK_SECRET_KEY` / `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` in SSM (dev and
-prod, same values) are a **production instance whose only domain is
-`facematch.click`** (frontend API `clerk.facematch.click`). Clerk
-production instances serve exactly their configured domain, so the sign-in
-widget on dev.remerged.click / remerged.click never completes a session; the
-end-to-end run (34270152274) timed out on the sign-in page for that reason.
-Nobody can sign in until this is fixed.
+Both stages are configured and the deployed dev stage passes an end-to-end
+run. What was wrong and is now fixed:
 
-Fix, in the Clerk dashboard (https://dashboard.clerk.com):
+- **Clerk was the wrong application.** The keys in SSM belonged to a
+  production instance serving `facematch.click`, so sign-in could never work
+  on either stage. Now: dev holds the new app's **Development** instance
+  (`pk_test_`/`sk_test_`, any origin, no DNS); prod holds its **Production**
+  instance (`pk_live_`/`sk_live_`, domain `remerged.click`). The five Clerk
+  CNAMEs are in Route 53 and verified — see `infra/clerk-dns.json` and
+  `.github/workflows/dns.yml`.
+- **Stripe** is test mode on dev and live mode on prod, each with its own
+  webhook endpoint and signing secret in SSM. Never copy one to the other.
+- **A DynamoDB bug blocked every signup on AWS.** `createUser` wrote
+  `stripe_customer_id: null`, and that attribute is the hash key of the
+  users table's "stripe" GSI; DynamoDB rejects a NULL index key, so account
+  creation 500'd on both stages. Fixed in `web/lib/data/dynamo.ts` (omit on
+  insert, REMOVE on clear). Local SQLite accepted the null, which is why it
+  never showed up in development.
 
-1. Create a new application "Remerged" (Google + email sign-in as before).
-2. **Dev**: from its *Development* instance copy `pk_test_…` and `sk_test_…`
-   into `/remerged/dev/NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and
-   `/remerged/dev/CLERK_SECRET_KEY`. Development instances serve any origin,
-   so dev.remerged.click works with no DNS.
-3. **Prod**: create its *Production* instance with domain `remerged.click`
-   and copy `pk_live_…` / `sk_live_…` into the `/remerged/prod/` parameters.
-   **DNS is already done** (2026-09-08, run 34272361362): the five Clerk
-   CNAMEs for the `gd1nhwizioam` instance are in the Route 53 zone
-   `Z096785530HXNK0WR7VVF` and verified against public DNS — see
-   `infra/clerk-dns.json` and `.github/workflows/dns.yml` (`mode=apply`,
-   idempotent UPSERT). If Clerk ever reissues the instance, edit that JSON
-   and re-run. The zone has **no DMARC record**; add
-   `_dmarc.remerged.click TXT "v=DMARC1; p=none;"` if Clerk asks for one.
-4. Redeploy the stage (parameters are baked in at deploy) and run
-   `dev-e2e.yml`.
+`GET /api/health` reports what a stage actually has wired up — bundled
+ffmpeg binary, bucket, provider mode, webhook secret — as booleans, with no
+secrets and no provider calls. Dev currently returns: dynamo, storage true,
+ffmpeg true, live/byteplus/fal, clerk, billing true, webhookSecret true.
 
-The keys run now reports `siteCheck` (MISMATCH / ok / development instance)
-and decodes the publishable key's host, so a mismatched pair is caught too.
-The failed e2e run created a stray user `e2e+1788896363551@remerged.click`
-in the facematch Clerk app; delete it from that dashboard.
+## Spending discipline
 
-## Stripe on dev (resolved 2026-09-08)
+Every generation and extension is a real, billed provider call (roughly
+$0.42 for a 4 s 480p Seedance 2.5 clip, $2.10 at native 1080p). So:
 
-`/remerged/dev/STRIPE_SECRET_KEY` is now a test-mode key (`sk_test_…`,
-`livemode: false`). The test-mode webhook endpoint
-`we_1UDUcR2Nd3VZM6rLeEsRqKne` for `https://dev.remerged.click/api/billing/webhook`
-exists and its secret is in `/remerged/dev/STRIPE_WEBHOOK_SECRET`. If the
-key is ever rotated, dispatch `provider-check.yml` with `mode=keys,
-stage=dev, webhook=recreate` and redeploy.
+- `dev-e2e.yml` defaults to `generate: "no"` and stops after billing. It
+  still proves sign-up, sign-in, membership purchase, top-up, both webhooks
+  and the credit ledger — all free. Only pass `generate: "yes"` deliberately.
+- `provider-check.yml` defaults to `mode: keys`, the only free mode.
+- To exercise the pipeline without paying, set `/remerged/dev/PROVIDER_MODE`
+  to anything but `live` and redeploy; the mock provider returns a sample
+  clip through the same states.
+
+## Verified on dev (run 34279866051, no provider spend)
+
+health → signup → Clerk ticket sign-in → membership via Stripe Checkout
+(4242 test card, webhook activated it) → $10 top-up (webhook credited 1,000
+credits) → generation skipped by choice. 29 seconds, `ok: true`.
+
+Watch item: two RSC prefetches (`/terms`, `/library`) returned 429 during
+the run. Direct navigation to those pages worked. Worth checking under load.
 
 ## Measured provider numbers (live run 2026-09-08, 4 s clips, 16:9, seed 12345)
 
@@ -153,26 +158,32 @@ SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
 
 ## Tasks, in order
 
-0. **Clerk keys** (blocker above), then redeploy dev.
-1. **Dev end-to-end.** Dev is deployed with live providers, the measured
-   costs, the test-mode Stripe key and its webhook. Dispatch `dev-e2e.yml`
-   with `stage=dev` after any deploy and read the summary plus the
-   screenshots artifact; it signs up, joins, tops up, generates, extends and
-   downloads.
-2. **Concatenate-or-not** for extensions (fact 3 above): the delivered file
-   is the continuation only. If members should get source + continuation in
-   one file, join them with ffmpeg at finalize (the binary is already in the
-   server bundle).
-3. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk,
-   admin emails, `MOCK_BILLING=0`, `PROVIDER_MODE=live`, the live Stripe
-   key, the live webhook endpoint `we_1UDNRZ2Nd3VZM6rLW1KGdxoR` for
-   `https://remerged.click/api/billing/webhook` with its secret in
-   `/remerged/prod/STRIPE_WEBHOOK_SECRET`, and the `COST_*` values. Cut the
-   first `prod-YYYY-MM-DD` tag on the platform branch, watch the Deploy run,
-   then run `dev-e2e.yml` with `stage=prod` **only if** you accept one real
-   monthly membership charge plus a $10 top-up on your own card (there is no
-   test mode in prod); otherwise sign up by hand and verify manually.
-6. **After the first real generations**, compare the ModelArk and fal
-   invoices with the table above and adjust `COST_*` in SSM. The deploy
-   workflow bakes SSM values into the Lambda environment, so redeploy after
-   changing any parameter.
+1. **Owner's manual generation test on dev** (deliberately not automated —
+   the owner wants to validate output quality personally). Sign in at
+   https://dev.remerged.click, join, top up, then generate a short clip in
+   each mode, extend one, and download. What to watch:
+   - 480p → upscaled 1080p is the default path; native 1080p is the premium
+     toggle and costs about 5× more per second.
+   - An extension returns **only the new seconds**, not source plus
+     continuation (see ModelArk fact 3). Decide whether to concatenate.
+   - After an extension, check the Lambda log via `logs.yml` for
+     "ffmpeg unavailable" or "tail trim failed"; neither should appear.
+   - Compare the ModelArk and fal invoices against the measured table below.
+2. **Concatenate-or-not** for extensions, if the separate-clip behaviour is
+   not what members should get. The ffmpeg binary is already in the bundle.
+3. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
+   production keys, live Stripe key, webhook `we_1UDNRZ2Nd3VZM6rLW1KGdxoR`
+   for `https://remerged.click/api/billing/webhook` with its secret,
+   `MOCK_BILLING=0`, `PROVIDER_MODE=live`, and the `COST_*` values. Cut a
+   `prod-YYYY-MM-DD` tag on the platform branch to deploy. The apex domain
+   does not resolve until that first prod deploy, which is also when
+   https://remerged.click/terms and /privacy go live.
+4. **After the first real generations**, reconcile `COST_*` in SSM against
+   the invoices and redeploy (the deploy bakes SSM values into the Lambda).
+
+## Housekeeping
+
+Test accounts named `e2e+<timestamp>@remerged.click` exist in the Clerk
+development instance and the dev Dynamo tables; delete them when convenient.
+One stray user `e2e+1788896363551@remerged.click` sits in the old
+facematch Clerk app.
