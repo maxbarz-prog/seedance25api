@@ -3,7 +3,10 @@
 
 export const SITE_NAME = "Remerged";
 export const SITE_TAGLINE = "AI video, priced at cost";
-export const SITE_DOMAIN = "remerged.app";
+// The registered domain. Used for the support address on the legal pages and
+// for links in outbound email, so it must match the deployed prod domain and
+// the SES identity (both remerged.click).
+export const SITE_DOMAIN = "remerged.click";
 
 export const CREDIT_USD = 0.01; // 1 credit = 1 cent
 
