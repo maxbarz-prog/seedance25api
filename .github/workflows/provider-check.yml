@@ -16,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "keys = Stripe/Clerk + webhook only (free); validate = one minimal call per provider; full = three-way cost test + probes"
+        description: "keys = Stripe/Clerk + webhook (free); status = probe vendor status pages and provider reachability (free); validate = one minimal call per provider (costs); full = three-way cost test (costs)"
         type: choice
-        options: [keys, validate, full]
+        options: [keys, status, validate, full]
         # `keys` is the only free mode; validate and full submit real
         # generation tasks and cost money, so they are never the default.
         default: keys
@@ -91,5 +91,10 @@ jobs:
       - name: Tooling
         run: ffmpeg -version | head -1 && ffprobe -version | head -1 && node --version
 
+      - name: Probe dependency status endpoints
+        if: inputs.mode == 'status'
+        run: node scripts/status-probe.mjs
+
       - name: Run checks
+        if: inputs.mode != 'status'
         run: node scripts/provider-check.mjs
