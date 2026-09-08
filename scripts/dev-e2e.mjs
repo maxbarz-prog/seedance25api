@@ -124,6 +124,10 @@ async function probe(url, name) {
            contentType: res.headers.get("content-type") };
 }
 
+// Thrown to end a successful run early (generation opted out) without
+// skipping the summary that lives after the try/finally.
+class SkipRest extends Error {}
+
 async function main() {
   if (!CLERK) throw new Error("CLERK_SECRET_KEY not set");
 
@@ -209,6 +213,13 @@ async function main() {
     step("topup", { returnedTo: back2, balanceBefore: before, balanceAfter: bal });
 
     // 5. Generate (480p -> upscaled 1080p, the default mode).
+    // Opt-in: every generation and extension is a real, billed provider call,
+    // so a plain run stops here having proven auth, billing and the webhooks.
+    if ((process.env.E2E_GENERATE || "no") !== "yes") {
+      step("generate", { skipped: "E2E_GENERATE is not 'yes' — no provider calls made" });
+      summary.ok = true;
+      throw new SkipRest();
+    }
     const gen = await api(ctx, "POST", "/api/jobs", {
       prompt: "A red vintage bicycle leaning against a sunlit stone wall, leaves drifting past, gentle camera push-in",
       model: "seedance-2.5", durationS: DURATION_S, aspect: "16:9", audio: false,
@@ -238,6 +249,9 @@ async function main() {
     step("final", { balanceCredits: final.balanceCredits, ledger: final.ledger.slice(0, 6).map((l) => `${l.kind} ${l.delta_credits} ${l.memo ?? ""}`) });
     summary.ok = true;
   } catch (e) {
+    if (e instanceof SkipRest) {
+      // Clean early exit, not a failure.
+    } else {
     summary.ok = false;
     summary.error = String(e);
     await page.screenshot({ path: `${OUT}/failure.png`, fullPage: true }).catch(() => {});
@@ -262,6 +276,7 @@ async function main() {
         .catch((e) => String(e)),
     };
     log("FAILED", summary.error);
+    }
   } finally {
     summary.consoleErrors = consoleErrors.slice(0, 30);
     summary.failedRequests = failedRequests.slice(0, 30);

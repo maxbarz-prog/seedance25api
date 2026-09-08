@@ -19,7 +19,9 @@ on:
         description: "keys = Stripe/Clerk + webhook only (free); validate = one minimal call per provider; full = three-way cost test + probes"
         type: choice
         options: [keys, validate, full]
-        default: validate
+        # `keys` is the only free mode; validate and full submit real
+        # generation tasks and cost money, so they are never the default.
+        default: keys
       stage:
         description: "SSM stage prefix (/remerged/<stage>/)"
         type: string

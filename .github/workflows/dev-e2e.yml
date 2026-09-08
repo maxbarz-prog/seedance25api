@@ -21,6 +21,11 @@ on:
         description: "Test account email (default: a fresh e2e+<ts>@remerged.click)"
         type: string
         default: ""
+      generate:
+        description: "Run the generate/extend/download steps? These call the real providers and COST MONEY (~$0.45 a run at 4s). 'no' stops after billing."
+        type: choice
+        options: [no, yes]
+        default: no
 
 permissions:
   id-token: write
@@ -34,6 +39,7 @@ jobs:
     env:
       STAGE: ${{ inputs.stage }}
       E2E_EMAIL: ${{ inputs.email }}
+      E2E_GENERATE: ${{ inputs.generate }}
     steps:
       - uses: actions/checkout@v4
 
