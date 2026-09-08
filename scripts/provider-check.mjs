@@ -93,6 +93,20 @@ async function checkClerk() {
   const out = { status: r.status, keyMode: key.startsWith("sk_test_") ? "test" : key.startsWith("sk_live_") ? "live" : "unknown" };
   if (r.ok) out.sampleUsers = Array.isArray(r.json) ? r.json.length : "?";
   else out.error = r.json?.errors?.[0]?.message || r.text.slice(0, 200);
+  // Production instances only serve their configured domain, and need the
+  // CNAMEs below to exist in DNS before the frontend can load at all.
+  const d = await req("https://api.clerk.com/v1/domains", { headers: { Authorization: `Bearer ${key}` } });
+  if (d.ok) {
+    out.domains = (d.json?.data || []).map((x) => ({
+      name: x.name,
+      isSatellite: x.is_satellite,
+      frontendApiUrl: x.frontend_api_url,
+      accountsPortalUrl: x.accounts_portal_url,
+      cnameTargets: (x.cname_targets || []).map((c) => `${c.host} -> ${c.value}${c.required === false ? " (optional)" : ""}`),
+    }));
+  } else out.domainsError = d.text.slice(0, 200);
+  const inst = await req("https://api.clerk.com/v1/instance", { headers: { Authorization: `Bearer ${key}` } });
+  if (inst.ok) out.instance = { environmentType: inst.json?.environment_type, allowedOrigins: inst.json?.allowed_origins };
   summary.checks.clerk = out;
   log("clerk", JSON.stringify(out));
   return out;
