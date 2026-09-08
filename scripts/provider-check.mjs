@@ -4,6 +4,8 @@
 // Keys arrive as env vars loaded from SSM by the workflow and are never
 // printed. Node 22, no dependencies; ffprobe/ffmpeg from the runner image.
 //
+// MODE=keys      Stripe + Clerk key checks (and the webhook step) only; no
+//                video tasks, so it is free to run.
 // MODE=validate  one minimal call per provider (Stripe, Clerk, ModelArk, fal).
 // MODE=full      validate + the three-way cost test from docs/NEXT.md
 //                (Seedance 2.5 at 480p, native 1080p, 480p->1080p via fal),
@@ -22,6 +24,8 @@ import { join } from "node:path";
 const MODE = process.env.MODE || "validate";
 const ARK = process.env.BYTEPLUS_API_BASE || "https://ark.ap-southeast.bytepluses.com/api/v3";
 const FAL_MODEL = process.env.FAL_UPSCALER_MODEL || "fal-ai/bytedance-upscaler/upscale/video";
+// Queue status/result endpoints use the app id (first two path segments).
+const FAL_APP = FAL_MODEL.split("/").slice(0, 2).join("/");
 const SD25 = process.env.BYTEPLUS_SEEDANCE_25_MODEL || "dreamina-seedance-2-5-260628";
 const SD20 = process.env.BYTEPLUS_SEEDANCE_20_MODEL || "dreamina-seedance-2-0-260128";
 
@@ -210,7 +214,7 @@ async function falUpscale(videoUrl, target = "1080p") {
   rec.requestId = sub.json.request_id;
   log("fal submitted", rec.requestId);
   for (;;) {
-    const st = await req(`https://queue.fal.run/${FAL_MODEL}/requests/${rec.requestId}/status`, {
+    const st = await req(`https://queue.fal.run/${FAL_APP}/requests/${rec.requestId}/status`, {
       headers: falHeaders(),
     });
     if (!st.ok) throw new Error(`fal poll ${st.status} ${st.text.slice(0, 200)}`);
@@ -224,7 +228,7 @@ async function falUpscale(videoUrl, target = "1080p") {
     if (Date.now() - t0 > 20 * 60_000) throw new Error("fal timed out");
     await sleep(5_000);
   }
-  const res = await req(`https://queue.fal.run/${FAL_MODEL}/requests/${rec.requestId}`, { headers: falHeaders() });
+  const res = await req(`https://queue.fal.run/${FAL_APP}/requests/${rec.requestId}`, { headers: falHeaders() });
   rec.status = "succeeded";
   rec.elapsedS = Math.round((Date.now() - t0) / 1000);
   rec.videoUrl = res.json?.video?.url;
@@ -252,6 +256,7 @@ async function ffprobe(url, label) {
       "-show_entries", "stream=width,height,r_frame_rate,nb_frames:format=duration,size",
       "-of", "json", p,
     ], { encoding: "utf8" });
+    if (r.error || r.status !== 0) throw new Error(`ffprobe: ${r.error?.message || r.stderr}`);
     const j = JSON.parse(r.stdout || "{}");
     const s = j.streams?.[0] || {};
     const [n, d] = String(s.r_frame_rate || "0/1").split("/").map(Number);
@@ -352,18 +357,22 @@ async function main() {
     }
   }
 
+  if (MODE === "keys") return report();
+
   // ModelArk + fal. Validate mode: one 4s 480p task on 2.5 with the
   // camera_fixed probe, then one fal upscale of it.
   const sd25_480 = await submitWithProbe("sd25_480p", baseBody(SD25, "480p", { camera_fixed: true }), ["camera_fixed"]);
-  let sd25_1080 = null, sd20_480 = null;
+  let sd25_1080 = null, sd20_480 = null, sd20_1080 = null;
   if (MODE === "full") {
     sd25_1080 = await submitWithProbe("sd25_1080p", baseBody(SD25, "1080p"));
     sd20_480 = await submitWithProbe("sd20_480p", baseBody(SD20, "480p"));
+    sd20_1080 = await submitWithProbe("sd20_1080p", baseBody(SD20, "1080p"));
   }
   const [a] = await Promise.all([
     finish(sd25_480, "sd25_480p"),
     finish(sd25_1080, "sd25_1080p"),
     finish(sd20_480, "sd20_480p"),
+    finish(sd20_1080, "sd20_1080p"),
   ]);
 
   if (a?.videoUrl) {
@@ -420,10 +429,17 @@ async function main() {
         ? { perSec: +(t.sd25_480p.listCostPerOutputSec + up).toFixed(4), upscalePerSec: up, out: `${t.fal_upscale.width}x${t.fal_upscale.height}@${t.fal_upscale.fps}`, upscaleElapsedS: t.fal_upscale.elapsedS }
         : { status: t.fal_upscale?.status ?? t.fal_upscale?.submit, error: t.fal_upscale?.error },
       "sd20 480p": t.sd20_480p?.listCostPerOutputSec !== undefined
-        ? { perSec: t.sd20_480p.listCostPerOutputSec, tokens: t.sd20_480p.usage?.total_tokens }
+        ? { perSec: t.sd20_480p.listCostPerOutputSec, tokens: t.sd20_480p.usage?.total_tokens, out: `${t.sd20_480p.width}x${t.sd20_480p.height}@${t.sd20_480p.fps}` }
+        : undefined,
+      "sd20 native 1080p": t.sd20_1080p?.listCostPerOutputSec !== undefined
+        ? { perSec: t.sd20_1080p.listCostPerOutputSec, tokens: t.sd20_1080p.usage?.total_tokens, out: `${t.sd20_1080p.width}x${t.sd20_1080p.height}@${t.sd20_1080p.fps}` }
         : undefined,
     };
   }
+  report();
+}
+
+function report() {
   summary.finishedAt = new Date().toISOString();
   const clean = JSON.parse(JSON.stringify(summary, (k, v) => (k === "videoUrl" || k === "file" ? undefined : v)));
   console.log("\n===== SUMMARY =====\n" + JSON.stringify(clean, null, 2));
@@ -431,7 +447,7 @@ async function main() {
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, "```json\n" + JSON.stringify(clean, null, 2) + "\n```\n");
   }
   const failed = Object.values(summary.checks).some((c) => c?.error) ||
-    Object.values(summary.tasks).some((x) => x?.submit?.startsWith("failed") || x?.status === "failed");
+    Object.values(summary.tasks).some((x) => x?.submit?.startsWith("failed") || x?.status === "failed" || x?.error);
   process.exitCode = failed ? 1 : 0;
 }
 

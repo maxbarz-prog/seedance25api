@@ -16,9 +16,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "validate = one minimal call per provider; full = three-way cost test + probes"
+        description: "keys = Stripe/Clerk + webhook only (free); validate = one minimal call per provider; full = three-way cost test + probes"
         type: choice
-        options: [validate, full]
+        options: [keys, validate, full]
         default: validate
       stage:
         description: "SSM stage prefix (/remerged/<stage>/)"
@@ -75,6 +75,9 @@ jobs:
           host=$([ "$STAGE" = prod ] && echo remerged.click || echo "$STAGE.remerged.click")
           echo "WEBHOOK_URL=https://$host/api/billing/webhook" >> "$GITHUB_ENV"
           echo "WEBHOOK_PARAM=/remerged/$STAGE/STRIPE_WEBHOOK_SECRET" >> "$GITHUB_ENV"
+
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null && ffprobe -version | head -1
 
       - name: Tooling
         run: ffmpeg -version | head -1 && ffprobe -version | head -1 && node --version

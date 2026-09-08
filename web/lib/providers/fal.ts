@@ -11,6 +11,10 @@ import { ProviderTaskResult, VideoUpscaler } from "./types";
 
 const MODEL = process.env.FAL_UPSCALER_MODEL || "fal-ai/bytedance-upscaler/upscale/video";
 const QUEUE = "https://queue.fal.run";
+// Submissions go to the full model path, but the queue's status and result
+// endpoints are addressed by the app id (the first two path segments).
+// Confirmed live 2026-09-08: polling under the full path answers 405.
+const APP_ID = MODEL.split("/").slice(0, 2).join("/");
 
 function headers() {
   const key = process.env.FAL_KEY;
@@ -40,13 +44,13 @@ export class FalUpscaler implements VideoUpscaler {
   }
 
   async pollTask(taskId: string): Promise<ProviderTaskResult> {
-    const status = await fetch(`${QUEUE}/${MODEL}/requests/${taskId}/status`, {
+    const status = await fetch(`${QUEUE}/${APP_ID}/requests/${taskId}/status`, {
       headers: headers(),
     });
     if (!status.ok) throw new Error(`upstream poll failed: ${status.status}`);
     const s = (await status.json()) as { status: string; error?: string };
     if (s.status === "COMPLETED") {
-      const result = await fetch(`${QUEUE}/${MODEL}/requests/${taskId}`, { headers: headers() });
+      const result = await fetch(`${QUEUE}/${APP_ID}/requests/${taskId}`, { headers: headers() });
       if (!result.ok) throw new Error(`upstream result fetch failed: ${result.status}`);
       const data = (await result.json()) as { video?: { url?: string } };
       return { status: "succeeded", videoUrl: data.video?.url };

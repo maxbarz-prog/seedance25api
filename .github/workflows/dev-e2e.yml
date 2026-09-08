@@ -56,6 +56,9 @@ jobs:
           host=$([ "$STAGE" = prod ] && echo remerged.click || echo "$STAGE.remerged.click")
           echo "BASE_URL=https://$host" >> "$GITHUB_ENV"
 
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null && ffprobe -version | head -1
+
       - name: Install Playwright
         run: |
           mkdir -p "$RUNNER_TEMP/e2e" && cd "$RUNNER_TEMP/e2e"

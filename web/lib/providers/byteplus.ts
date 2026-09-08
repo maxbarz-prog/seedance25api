@@ -26,11 +26,14 @@ import {
 //     task carries content.video_url, content.last_frame_url (when
 //     return_last_frame was set) and usage.total_tokens (billing basis).
 //
-// Still to confirm on a live key (see docs/NEXT.md): whether `camera_fixed`
-// is honoured as a top-level field, whether extension `duration` means the
-// added length or the total, and whether ModelArk accepts 1080p on the 2.5
-// model id. Seedance 2.5 launched with a 720p ceiling but gained native
-// 1080p on partner platforms in late August 2026, so 1080p is sent as-is.
+// Confirmed on the live key 2026-09-08 (scripts/provider-check.mjs):
+//   - ModelArk accepts resolution "1080p" on dreamina-seedance-2-5-260628
+//     (the launch-time 720p ceiling is gone), so 1080p is sent as-is;
+//   - `camera_fixed` is rejected at submit for Seedance 2.5 text-to-video
+//     ("not supported for model dreamina-seedance-2-5 in t2v, must be
+//     empty"), so submitGeneration drops it and resubmits once on that
+//     specific 400 instead of failing the job;
+//   - extension `duration` semantics: see docs/NEXT.md.
 
 const BASE =
   process.env.BYTEPLUS_API_BASE ||
@@ -106,16 +109,33 @@ export function buildGenerationBody(req: GenerationRequest): Record<string, unkn
 
 export class BytePlusGenerator implements VideoGenerator {
   async submitGeneration(req: GenerationRequest): Promise<string> {
-    const res = await fetch(`${BASE}/contents/generations/tasks`, {
-      method: "POST",
-      headers: headers(),
-      body: JSON.stringify(buildGenerationBody(req)),
-    });
+    const body = buildGenerationBody(req);
+    let res = await this.post(body);
     if (!res.ok) {
-      throw new Error(`upstream generation submit failed: ${res.status} ${await res.text()}`);
+      const text = await res.text();
+      // Some model/task combinations refuse camera_fixed outright (Seedance
+      // 2.5 text-to-video does). Drop the flag and retry once rather than
+      // failing the job; the flag is a preference, not a requirement.
+      if (res.status === 400 && "camera_fixed" in body && text.includes("camera_fixed")) {
+        delete body.camera_fixed;
+        res = await this.post(body);
+        if (!res.ok) {
+          throw new Error(`upstream generation submit failed: ${res.status} ${await res.text()}`);
+        }
+      } else {
+        throw new Error(`upstream generation submit failed: ${res.status} ${text}`);
+      }
     }
     const data = (await res.json()) as { id: string };
     return data.id;
+  }
+
+  private post(body: Record<string, unknown>): Promise<Response> {
+    return fetch(`${BASE}/contents/generations/tasks`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
   }
 
   async pollTask(taskId: string): Promise<ProviderTaskResult> {
