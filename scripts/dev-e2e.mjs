@@ -44,19 +44,28 @@ async function clerk(path, init = {}) {
 async function payOnCheckout(page, label) {
   await page.waitForURL(/checkout\.stripe\.com/, { timeout: 60_000 });
   await page.waitForLoadState("domcontentloaded");
+  // Stripe hydrates the card fields a moment after load. Waiting for the card
+  // number first stops every fill below from silently no-oping on a slow page,
+  // which is what left the form empty and timed out a previous run.
+  await page.locator("#cardNumber").waitFor({ state: "visible", timeout: 60_000 });
   await page.screenshot({ path: `${OUT}/${label}-checkout.png`, fullPage: true });
-  const fill = async (sel, val) => {
+  const fill = async (sel, val, required = false) => {
     const el = page.locator(sel).first();
-    if (await el.count()) {
-      await el.waitFor({ state: "visible", timeout: 20_000 }).catch(() => {});
-      if (await el.isVisible().catch(() => false)) await el.fill(val);
+    if (!(await el.count())) {
+      if (required) throw new Error(`checkout(${label}): ${sel} never appeared`);
+      return;
     }
+    await el.waitFor({ state: "visible", timeout: 20_000 });
+    // A prefilled/readonly field (e.g. email on a repeat purchase) is fine.
+    await el.fill(val).catch((e) => {
+      if (required) throw e;
+    });
   };
   await fill("#email", EMAIL);
-  await fill("#cardNumber", "4242424242424242");
-  await fill("#cardExpiry", "12/34");
-  await fill("#cardCvc", "123");
-  await fill("#billingName", "E2E Test");
+  await fill("#cardNumber", "4242424242424242", true);
+  await fill("#cardExpiry", "12/34", true);
+  await fill("#cardCvc", "123", true);
+  await fill("#billingName", "E2E Test", true);
   const country = page.locator("#billingCountry");
   if (await country.count()) await country.selectOption("US").catch(() => {});
   await fill("#billingPostalCode", "94107");
@@ -130,6 +139,10 @@ class SkipRest extends Error {}
 
 async function main() {
   if (!CLERK) throw new Error("CLERK_SECRET_KEY not set");
+
+  // 0. Readiness: what the deployed stage actually has wired up. Free.
+  const health = await fetch(`${BASE}/api/health`).then((r) => r.json()).catch((e) => ({ error: String(e) }));
+  step("health", health);
 
   // 1. Sign up: a Clerk user plus a one-time sign-in token.
   const existing = await clerk(`/users?email_address=${encodeURIComponent(EMAIL)}&limit=1`);
