@@ -1,0 +1,41 @@
+name: Model activation check
+
+# Which video models this account can actually call. FREE — nothing is
+# generated; each model is probed with a deliberately invalid request and
+# classified by the error it returns.
+
+on:
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+    paths:
+      - ".github/workflows/model-activation.yml"
+      - "scripts/model-activation.mjs"
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+      - name: Load the provider key from SSM
+        run: |
+          set -euo pipefail
+          v=$(aws ssm get-parameter --name "/remerged/dev/BYTEPLUS_API_KEY" --with-decryption \
+            --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "BYTEPLUS_API_KEY=$v" >> "$GITHUB_ENV"
+      - run: node scripts/model-activation.mjs
