@@ -38,21 +38,41 @@ jobs:
           [ "$STAGE" = "prod" ] && base="https://remerged.click"
           echo "base=$base"
           fail=0
-          printf '%-22s %-16s %6s %10s\n' MODEL MODE DUR PRICE
-          for model in seedance-2.5 seedance-2.0 seedance-2.0-fast; do
+          # Every sold model, at a duration each one supports.
+          printf '%-24s %-16s %6s %10s\n' MODEL MODE DUR PRICE
+          for model in seedance-2.5 seedance-2.0 seedance-2.0-fast \
+                       seedance-2.0-mini seedance-1.5-pro seedance-1.0-pro \
+                       seedance-1.0-pro-fast; do
             for mode in upscaled-1080p native-1080p; do
-              for d in 5 15; do
+              for d in 5 10; do
                 body=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=$d&mode=$mode")
-                usd=$(printf '%s' "$body" | jq -r '.usd // ("ERR " + (.error // "?"))')
-                printf '%-22s %-16s %6s %10s\n' "$model" "$mode" "${d}s" "$usd"
-                case "$usd" in ERR*) fail=1 ;; esac
+                usd=$(printf '%s' "$body" | jq -r 'if .usd then (.usd|tostring) else "n/a " + (.error // "?") end')
+                printf '%-24s %-16s %6s %10s\n' "$model" "$mode" "${d}s" "$usd"
               done
             done
           done
+          # Every model must quote SOMETHING on the upscaled path.
+          for model in seedance-2.5 seedance-2.0 seedance-2.0-fast \
+                       seedance-2.0-mini seedance-1.5-pro seedance-1.0-pro \
+                       seedance-1.0-pro-fast; do
+            usd=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=5&mode=upscaled-1080p" | jq -r '.usd // empty')
+            [ -n "$usd" ] || { echo "FAIL: $model has no upscaled quote"; fail=1; }
+          done
+          # Seedance 1.5 Pro charges double with a soundtrack, so the audio
+          # quote must come back strictly higher than the silent one.
+          silent=$(curl -sS --max-time 20 "$base/api/quote?model=seedance-1.5-pro&duration=10&mode=native-1080p&audio=0" | jq -r '.usd')
+          loud=$(curl -sS --max-time 20 "$base/api/quote?model=seedance-1.5-pro&duration=10&mode=native-1080p&audio=1" | jq -r '.usd')
+          echo "1.5 Pro 10s native: silent=$silent audio=$loud (audio must be higher)"
+          awk -v a="$silent" -v b="$loud" 'BEGIN{exit !(b>a)}' || { echo "FAIL: audio not priced higher"; fail=1; }
+          # 2.0 Fast has no native 1080p at the provider: must be refused.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            "$base/api/quote?model=seedance-2.0-fast&duration=5&mode=native-1080p")
+          echo "2.0 Fast native -> HTTP $code (expect 400)"
+          [ "$code" = "400" ] || fail=1
           # An unpriced model must be refused cleanly, not 500.
           code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
-            "$base/api/quote?model=seedance-1.5-pro&duration=5")
-          echo "unpriced model -> HTTP $code (expect 400)"
+            "$base/api/quote?model=seedance-1.0-lite-t2v&duration=5")
+          echo "unpriced model  -> HTTP $code (expect 400)"
           [ "$code" = "400" ] || fail=1
           code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$base/pricing")
           echo "pricing page   -> HTTP $code (expect 200)"
