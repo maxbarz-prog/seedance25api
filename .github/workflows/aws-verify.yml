@@ -36,3 +36,17 @@ jobs:
             aws ssm get-parameters-by-path --path "/remerged/$stage" \
               --query 'Parameters[].Name' --output text | tr '\t' '\n' | sort || true
           done
+
+      # COST_* values only. These are per-second provider rates — the same
+      # numbers the public pricing page is computed from, not credentials —
+      # and an override here silently beats the rate derived in code, so we
+      # have to be able to see it.
+      - name: Show COST_* parameter values
+        run: |
+          set -euo pipefail
+          for stage in dev prod; do
+            echo "--- /remerged/$stage ---"
+            aws ssm get-parameters-by-path --path "/remerged/$stage" \
+              --query 'Parameters[?contains(Name, `COST_`)].[Name,Value]' \
+              --output text | sort || true
+          done
