@@ -8,6 +8,7 @@ interface Job {
   prompt: string;
   duration_s: number;
   status: string;
+  provider_phase?: string | null;
   video_url: string | null;
   created_at: number;
 }
@@ -78,7 +79,13 @@ export default function LibraryPage() {
                 <video src={j.video_url} muted loop playsInline className="aspect-video w-full object-cover" />
               ) : (
                 <div className="flex aspect-video items-center justify-center bg-bg text-sm text-muted">
-                  {j.status === "failed" ? "Failed (refunded)" : "Processing…"}
+                  {j.status === "failed"
+                    ? "Failed (refunded)"
+                    : j.status === "upscaling"
+                      ? "Upscaling…"
+                      : j.status === "queued" || j.provider_phase === "queued"
+                        ? "Queued…"
+                        : "Generating…"}
                 </div>
               )}
               <div className="p-3">

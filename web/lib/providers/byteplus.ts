@@ -51,6 +51,9 @@ function upstreamModel(productModel: string): string {
   if (productModel === "seedance-2.0") {
     return process.env.BYTEPLUS_SEEDANCE_20_MODEL || "dreamina-seedance-2-0-260128";
   }
+  if (productModel === "seedance-2.0-fast") {
+    return process.env.BYTEPLUS_SEEDANCE_20_FAST_MODEL || "dreamina-seedance-2-0-fast-260128";
+  }
   return process.env.BYTEPLUS_SEEDANCE_25_MODEL || "dreamina-seedance-2-5-260628";
 }
 
@@ -162,6 +165,7 @@ export class BytePlusGenerator implements VideoGenerator {
       usage?: { completion_tokens?: number; total_tokens?: number };
       error?: { code?: string; message?: string };
     };
+    if (data.status === "queued") return { status: "running", phase: "queued" };
     if (data.status === "succeeded") {
       return {
         status: "succeeded",
@@ -174,6 +178,6 @@ export class BytePlusGenerator implements VideoGenerator {
       const msg = [data.error?.code, data.error?.message].filter(Boolean).join(": ");
       return { status: "failed", error: msg || `generation ${data.status}` };
     }
-    return { status: "running" };
+    return { status: "running", phase: "running" };
   }
 }

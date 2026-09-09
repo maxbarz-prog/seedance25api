@@ -32,10 +32,14 @@ export const PLANS = {
 
 export type PlanId = keyof typeof PLANS;
 
-// Generation models on offer. Duration ceilings mirror each model's contract.
+// Generation models on offer, best first. Duration ceilings mirror each
+// model's contract. Each model version carries its own concurrency quota at
+// the provider, so offering more than one also widens the throughput we can
+// draw on, not just the choice a member gets.
 export const MODELS = {
   "seedance-2.5": { id: "seedance-2.5", label: "Seedance 2.5", maxDurationS: 30 },
   "seedance-2.0": { id: "seedance-2.0", label: "Seedance 2.0", maxDurationS: 15 },
+  "seedance-2.0-fast": { id: "seedance-2.0-fast", label: "Seedance 2.0 Fast", maxDurationS: 15 },
 } as const;
 
 export type ModelId = keyof typeof MODELS;

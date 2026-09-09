@@ -86,6 +86,8 @@ export default $config({
       COST_SD25_1080P_PER_SEC: process.env.COST_SD25_1080P_PER_SEC ?? "",
       COST_SD20_480P_PER_SEC: process.env.COST_SD20_480P_PER_SEC ?? "",
       COST_SD20_1080P_PER_SEC: process.env.COST_SD20_1080P_PER_SEC ?? "",
+      COST_SD20_FAST_480P_PER_SEC: process.env.COST_SD20_FAST_480P_PER_SEC ?? "",
+      COST_SD20_FAST_1080P_PER_SEC: process.env.COST_SD20_FAST_1080P_PER_SEC ?? "",
       COST_UPSCALE_2X_PER_SEC: process.env.COST_UPSCALE_2X_PER_SEC ?? "",
       COST_UPSCALE_4X_PER_SEC: process.env.COST_UPSCALE_4X_PER_SEC ?? "",
     };

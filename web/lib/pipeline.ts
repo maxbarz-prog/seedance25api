@@ -100,10 +100,16 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
         }
         throw err;
       }
-      await updateJob(id, { provider_task_id: taskId });
+      // A freshly submitted task sits in the provider's queue until a slot
+      // frees up, so start there rather than claiming to be rendering.
+      await updateJob(id, { provider_task_id: taskId, provider_phase: "queued" });
     } else if (job.status === "generating") {
       if (!job.provider_task_id) return job; // claimed by someone mid-submit
       const result = await generator().pollTask(job.provider_task_id);
+      // Only write when it changes: this runs every minute per in-flight job.
+      if (result.phase && result.phase !== job.provider_phase) {
+        await updateJob(id, { provider_phase: result.phase });
+      }
       if (result.status === "succeeded") {
         if (result.tokens !== undefined) {
           // Billing basis for the measured COST_* rates (see docs/NEXT.md).

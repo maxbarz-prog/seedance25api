@@ -13,6 +13,7 @@ interface Job {
   aspect: string;
   mode: string;
   status: "queued" | "generating" | "upscaling" | "ready" | "failed";
+  provider_phase?: string | null;
   quote_credits: number;
   video_url: string | null;
   error: string | null;
@@ -27,6 +28,13 @@ const LABELS: Record<string, string> = {
   upscaling: "Upscaling to 1080p",
   ready: "Ready",
 };
+
+// A submitted job sits in the provider's queue until a rendering slot frees
+// up. Showing "Generating" for that whole time makes a working queue look
+// like a stall, so the wait keeps its own name until work actually starts.
+function phaseOf(job: Job): string {
+  return job.status === "generating" && job.provider_phase === "queued" ? "queued" : job.status;
+}
 
 export default function JobView({ id }: { id: string }) {
   const router = useRouter();
@@ -109,10 +117,11 @@ export default function JobView({ id }: { id: string }) {
   }
   if (!job) return <div className="py-16 text-center text-muted">Loading…</div>;
 
+  const phase = phaseOf(job);
   const stepIdx =
-    job.mode === "native-1080p" && job.status === "generating"
+    job.mode === "native-1080p" && phase === "generating"
       ? 1
-      : STEPS.indexOf(job.status as (typeof STEPS)[number]);
+      : STEPS.indexOf(phase as (typeof STEPS)[number]);
 
   return (
     <div className="py-10">

@@ -85,6 +85,7 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE jobs ADD COLUMN kind TEXT`,
       `ALTER TABLE jobs ADD COLUMN source_job_id TEXT`,
       `ALTER TABLE jobs ADD COLUMN camera_fixed INTEGER`,
+      `ALTER TABLE jobs ADD COLUMN provider_phase TEXT`,
       `ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT`,
       `ALTER TABLE users ADD COLUMN reset_token_hash TEXT`,
       `ALTER TABLE users ADD COLUMN reset_expires_at INTEGER`,

@@ -37,6 +37,8 @@ export interface Job {
   status: JobStatus;
   quote_credits: number;
   provider_task_id: string | null;
+  // "queued" while the provider is holding the task, "running" once it starts.
+  provider_phase?: string | null;
   video_url: string | null; // storage key (see lib/storage); resolved to a URL on read
   image_keys?: string | null; // JSON array of {key, role} for all inputs (images, ref video/audio)
   kind?: "generate" | "extend" | null;

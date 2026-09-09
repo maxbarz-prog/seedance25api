@@ -36,6 +36,16 @@ export function rates() {
         p1080: envNum("COST_SD20_1080P_PER_SEC", 0.2091),
         videoInputRatio: envNum("COST_SD20_VIDEO_INPUT_RATIO", 1),
       },
+      // NOT YET MEASURED. Defaults deliberately mirror Seedance 2.0 rather
+      // than guessing lower: a fast variant is normally cheaper, so this errs
+      // towards charging slightly too much rather than selling below cost.
+      // Measure with provider-check before this model goes to production and
+      // set COST_SD20_FAST_* in SSM.
+      "seedance-2.0-fast": {
+        p480: envNum("COST_SD20_FAST_480P_PER_SEC", 0.0432),
+        p1080: envNum("COST_SD20_FAST_1080P_PER_SEC", 0.2091),
+        videoInputRatio: envNum("COST_SD20_FAST_VIDEO_INPUT_RATIO", 1),
+      },
     } satisfies Record<ModelId, { p480: number; p1080: number; videoInputRatio: number }>,
     // Provider: upscaler, per source second. ByteDance Video Upscaler via fal,
     // published 30fps rates: $0.0072/s to 1080p, $0.0288/s to 4K.

@@ -38,6 +38,11 @@ export type ProviderTaskStatus = "running" | "succeeded" | "failed";
 
 export interface ProviderTaskResult {
   status: ProviderTaskStatus;
+  // Whether the provider is actually rendering yet, or still holding the task
+  // in its own queue. With only a handful of concurrent slots per model, a
+  // submitted task can wait a long while before work starts, and telling a
+  // member "generating" for all of it makes a working queue look like a stall.
+  phase?: "queued" | "running";
   videoUrl?: string;
   // Final frame of the output, when the provider can return it (chaining).
   lastFrameUrl?: string;
