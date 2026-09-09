@@ -70,6 +70,7 @@ export class DynamoStore implements DataStore {
       membership: "none",
       membership_renews_at: null,
       stripe_customer_id: null,
+      balance_credits: 0,
       created_at: Date.now(),
     };
     // `stripe_customer_id` is the hash key of the "stripe" GSI, and DynamoDB
@@ -217,9 +218,43 @@ export class DynamoStore implements DataStore {
     return limit !== undefined ? items.slice(0, limit) : items;
   }
 
+  // Reads the running total off the user row. Summing the whole ledger on
+  // every page load meant a member's account page got slower the more they
+  // used the product. The fallback covers rows written before the running
+  // balance existed and disappears the first time they transact.
   async balance(userId: string): Promise<number> {
+    const u = await this.userById(userId);
+    if (u && typeof u.balance_credits === "number") return u.balance_credits;
+    return this.sumLedger(userId);
+  }
+
+  private async sumLedger(userId: string): Promise<number> {
     const items = await this.queryLedger(userId);
     return items.reduce((acc, e) => acc + (e.delta_credits ?? 0), 0);
+  }
+
+  // A user whose row predates the running balance has no attribute to add to,
+  // and an ADD would silently start them from zero. Seed it from the ledger
+  // first; the conditional write makes a concurrent seed harmless, and every
+  // writer does this before adding, so no delta can be applied to a missing
+  // attribute.
+  private async ensureBalance(userId: string): Promise<void> {
+    const u = await this.userById(userId);
+    if (!u || typeof u.balance_credits === "number") return;
+    const sum = await this.sumLedger(userId);
+    try {
+      await this.doc.send(
+        new UpdateCommand({
+          TableName: USERS,
+          Key: { id: userId },
+          UpdateExpression: "SET balance_credits = :b",
+          ConditionExpression: "attribute_not_exists(balance_credits)",
+          ExpressionAttributeValues: { ":b": sum },
+        })
+      );
+    } catch (err) {
+      if (!String(err).includes("ConditionalCheckFailed")) throw err;
+    }
   }
 
   async addLedger(
@@ -239,28 +274,43 @@ export class DynamoStore implements DataStore {
       created_at: Date.now(),
     };
     const item = { ...e, pk: userId, sk: `${String(e.created_at).padStart(15, "0")}#${e.id}` };
-    if (opts.externalId) {
-      try {
-        await this.doc.send(
-          new TransactWriteCommand({
-            TransactItems: [
-              {
-                Put: {
-                  TableName: LEDGER,
-                  Item: { pk: `ext#${opts.externalId}`, sk: "guard" },
-                  ConditionExpression: "attribute_not_exists(pk)",
-                },
-              },
-              { Put: { TableName: LEDGER, Item: item } },
-            ],
-          })
-        );
-      } catch (err: unknown) {
-        if (String(err).includes("TransactionCanceled")) return null;
-        throw err;
-      }
-    } else {
-      await this.doc.send(new PutCommand({ TableName: LEDGER, Item: item }));
+    await this.ensureBalance(userId);
+    // The ledger row and the running balance move together, so a crash cannot
+    // leave the cached total disagreeing with the entries behind it.
+    const applyBalance = {
+      Update: {
+        TableName: USERS,
+        Key: { id: userId },
+        UpdateExpression: "ADD balance_credits :d",
+        ExpressionAttributeValues: { ":d": e.delta_credits },
+      },
+    };
+    try {
+      await this.doc.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            // Idempotency guard for externally-triggered credits (a Stripe
+            // checkout session): a replayed webhook cancels the whole
+            // transaction, so neither the entry nor the balance is applied.
+            ...(opts.externalId
+              ? [
+                  {
+                    Put: {
+                      TableName: LEDGER,
+                      Item: { pk: `ext#${opts.externalId}`, sk: "guard" },
+                      ConditionExpression: "attribute_not_exists(pk)",
+                    },
+                  },
+                ]
+              : []),
+            { Put: { TableName: LEDGER, Item: item } },
+            applyBalance,
+          ],
+        })
+      );
+    } catch (err: unknown) {
+      if (opts.externalId && String(err).includes("TransactionCanceled")) return null;
+      throw err;
     }
     return e;
   }

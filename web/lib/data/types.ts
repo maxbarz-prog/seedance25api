@@ -17,6 +17,10 @@ export interface User {
   stripe_subscription_id?: string | null;
   reset_token_hash?: string | null;
   reset_expires_at?: number | null;
+  // Running credit balance, kept in step with the ledger by the store rather
+  // than recomputed from it. Optional because rows written before this
+  // existed have no value yet; readers fall back to summing the ledger.
+  balance_credits?: number;
   created_at: number;
 }
 
