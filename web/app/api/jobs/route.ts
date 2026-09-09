@@ -21,6 +21,7 @@ import {
   PLANS,
 } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
+import { currentHalt } from "@/lib/money";
 import { presentJob } from "@/lib/present";
 
 const Body = z.object({
@@ -63,6 +64,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "membership_required", message: "An active membership is required to generate." },
       { status: 402 }
+    );
+  }
+
+  // Money safety: if anything is wrong with what we charge or pay, we take
+  // no more money until a human has cleared it. Checked before the quote, so
+  // nobody is debited for work that will not start.
+  const stop = await currentHalt();
+  if (stop) {
+    return NextResponse.json(
+      {
+        error: "paused",
+        message:
+          "Generation is paused while we check a billing issue. Nothing has been charged — please try again shortly.",
+      },
+      { status: 503 }
     );
   }
 

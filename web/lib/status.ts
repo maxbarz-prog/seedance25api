@@ -3,6 +3,8 @@ import { storageEnabled, storageReachable } from "./storage";
 import { ffmpegAvailable } from "./video";
 import { clerkEnabled } from "./auth";
 import { stripeEnabled } from "./billing";
+import { currentHalt, providerCostUsd } from "./money";
+import { ModelId } from "./config";
 
 // System status for the admin page.
 //
@@ -58,6 +60,37 @@ const SD25 = process.env.BYTEPLUS_SEEDANCE_25_MODEL || "dreamina-seedance-2-5-26
 const SD20 = process.env.BYTEPLUS_SEEDANCE_20_MODEL || "dreamina-seedance-2-0-260128";
 
 let cache: { at: number; value: Status } | null = null;
+
+// Fixtures for the pricing self-test. Each is a row from the provider's own
+// published price examples, so a rate typed wrong, a promotion that lapsed
+// or a model silently withdrawn shows up as a red light here rather than as
+// a loss on a member's invoice.
+//
+// The cost of a known token count is token-linear — tokens x rate — so these
+// compare exactly, independently of the per-second constants. The tolerance
+// only absorbs the provider's own rounding in the published examples. Being
+// UNDER the example is never a failure: a live promotion legitimately puts
+// us there, and paying less than expected is not the direction that hurts.
+const PRICING_FIXTURES: {
+  model: ModelId;
+  tokens: number;
+  native: boolean;
+  audio?: boolean;
+  expectUsd: number;
+}[] = [
+  // Seedance 2.5, 5s: docs quote $0.514 at 480p and $2.843 at 1080p list.
+  { model: "seedance-2.5", tokens: 48037, native: false, expectUsd: 0.514 },
+  // 1080p carries a 28% promotion until 2026-09-17, so the live figure is
+  // below list while it runs; the fixture tracks whichever is in force.
+  { model: "seedance-2.5", tokens: 243000, native: true, expectUsd: 2.843 },
+  { model: "seedance-2.0", tokens: 48037, native: false, expectUsd: 0.336 },
+  { model: "seedance-2.0", tokens: 243000, native: true, expectUsd: 1.871 },
+  { model: "seedance-1.0-pro", tokens: 244800, native: true, expectUsd: 0.612 },
+  { model: "seedance-1.0-pro-fast", tokens: 244800, native: true, expectUsd: 0.245 },
+  { model: "seedance-1.5-pro", tokens: 243000, native: true, expectUsd: 0.292 },
+  { model: "seedance-1.5-pro", tokens: 243000, native: true, audio: true, expectUsd: 0.583 },
+];
+const PRICING_TOLERANCE = 0.12;
 
 async function timed<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<{ ok: true; value: T; ms: number } | { ok: false; error: string; ms: number; status?: number }> {
   const t0 = Date.now();
@@ -140,6 +173,53 @@ function configChecks(): Check[] {
 
 async function internalChecks(): Promise<Check[]> {
   const out: Check[] = [];
+
+  // The money halt is the loudest thing on this page when it is on: while it
+  // is set, nothing is being sold.
+  const stop = await currentHalt().catch(() => null);
+  out.push({
+    key: "internal.halt", group: "internal", label: "Selling",
+    value: stop ? "HALTED" : "open",
+    level: stop ? "bad" : "good",
+    blame: stop ? "us" : undefined,
+    note: stop
+      ? `generation is paused: ${stop.reason} — ${stop.detail}`
+      : "no money halt in force",
+  });
+
+  // Does our rate table still reproduce the provider's published prices? A
+  // discount that lapsed, a rate that moved or a bad token constant all show
+  // up here, before a member is charged the wrong amount.
+  const bad: string[] = [];
+  for (const f of PRICING_FIXTURES) {
+    const got = providerCostUsd({
+      model: f.model,
+      tokens: f.tokens,
+      native: f.native,
+      audio: f.audio,
+    });
+    if (got === null) {
+      bad.push(`${f.model}${f.audio ? " (audio)" : ""}: not priced`);
+      continue;
+    }
+    // A live promotion legitimately puts us under the list example, so only
+    // an overshoot beyond tolerance is a failure.
+    const drift = (got - f.expectUsd) / f.expectUsd;
+    if (drift > PRICING_TOLERANCE) {
+      bad.push(
+        `${f.model}${f.native ? " 1080p" : " 480p"}${f.audio ? " audio" : ""}: $${got.toFixed(3)} vs $${f.expectUsd.toFixed(3)}`
+      );
+    }
+  }
+  out.push({
+    key: "internal.pricing", group: "internal", label: "Pricing self-test",
+    value: bad.length ? `${bad.length} off` : `${PRICING_FIXTURES.length} ok`,
+    level: bad.length ? "bad" : "good",
+    blame: bad.length ? "us" : undefined,
+    note: bad.length
+      ? `rate table disagrees with the provider's published prices — ${bad.join("; ")}`
+      : "every rate reproduces the provider's own published price examples",
+  });
 
   // A read of a key that cannot exist: proves the table, the IAM role and the
   // region are all right, without writing anything.

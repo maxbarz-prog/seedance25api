@@ -104,6 +104,8 @@ export interface AddLedgerOpts {
   externalId?: string;
 }
 
+import { MoneyIssue } from "./reconcile";
+
 export interface DataStore {
   createUser(email: string, passwordHash: string): Promise<User>;
   userByEmail(email: string): Promise<User | undefined>;
@@ -136,4 +138,12 @@ export interface DataStore {
   storageUsedBytes(userId: string): Promise<number>;
 
   adminData(): Promise<AdminData>;
+
+  // Small global key-value store for operational state that is not tied to a
+  // user or a job — currently the money-safety halt (lib/money.ts).
+  getSystem(key: string): Promise<string | undefined>;
+  setSystem(key: string, value: string | null): Promise<void>;
+
+  // Charges with no matching spend — see lib/data/reconcile.ts.
+  moneyIssues(): Promise<MoneyIssue[]>;
 }

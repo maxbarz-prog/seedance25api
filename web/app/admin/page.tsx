@@ -99,6 +99,22 @@ function Tile({ label, value, detail }: { label: string; value: string; detail?:
   );
 }
 
+interface MoneyIssue {
+  jobId: string;
+  userId: string;
+  email?: string;
+  credits: number;
+  status: string;
+  reason: string;
+  createdAt: number;
+}
+
+interface Money {
+  halt: { reason: string; detail: string; at: number; jobId?: string; by?: string } | null;
+  issues: MoneyIssue[];
+  owedCredits: number;
+}
+
 export default function AdminPage() {
   const [data, setData] = useState<Overview | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
@@ -106,6 +122,38 @@ export default function AdminPage() {
   const [denied, setDenied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [grant, setGrant] = useState({ email: "", usd: "", memo: "" });
+  const [money, setMoney] = useState<Money | null>(null);
+  const [moneyBusy, setMoneyBusy] = useState(false);
+
+  const loadMoney = useCallback(() => {
+    fetch("/api/admin/money")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setMoney)
+      .catch(() => setMoney(null));
+  }, []);
+
+  async function moneyAction(body: Record<string, unknown>, confirmText?: string) {
+    if (confirmText && !confirm(confirmText)) return;
+    setMoneyBusy(true);
+    try {
+      const res = await fetch("/api/admin/money", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const d = await res.json();
+      setMsg(
+        res.ok
+          ? d.refunded !== undefined
+            ? `Refunded ${d.refunded} job(s), ${usd(d.credits)}.`
+            : "Done."
+          : d.error || "Failed."
+      );
+      loadMoney();
+    } finally {
+      setMoneyBusy(false);
+    }
+  }
 
   const loadStatus = useCallback((force: boolean) => {
     setStatusBusy(true);
@@ -125,7 +173,8 @@ export default function AdminPage() {
       setData(await r.json());
     });
     loadStatus(false);
-  }, [loadStatus]);
+    loadMoney();
+  }, [loadStatus, loadMoney]);
   useEffect(refresh, [refresh]);
 
   async function submitGrant(e: React.FormEvent) {
@@ -179,6 +228,117 @@ export default function AdminPage() {
   return (
     <div className="space-y-8 py-10">
       <h1 className="text-2xl font-semibold">Admin</h1>
+
+      {/* Money desk. The halt switch is the first thing on the page because
+          when it is on, nothing else here matters. */}
+      <section
+        className={`rounded-2xl border p-5 ${
+          money?.halt ? "border-red-500 bg-red-500/5" : "border-line bg-surface"
+        }`}
+      >
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-medium">
+            {money?.halt ? "⛔ Generation halted" : "Money"}
+          </h2>
+          {money?.halt ? (
+            <button
+              onClick={() =>
+                moneyAction(
+                  { action: "resume" },
+                  "Resume selling? Only do this once you know why it halted."
+                )
+              }
+              disabled={moneyBusy}
+              className="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-accent-ink disabled:opacity-50"
+            >
+              Resume generation
+            </button>
+          ) : (
+            <button
+              onClick={() =>
+                moneyAction(
+                  { action: "halt", reason: "manual" },
+                  "Stop all generation now? Members will be told we are checking a billing issue and nobody will be charged."
+                )
+              }
+              disabled={moneyBusy}
+              className="rounded-full border border-line px-4 py-1.5 text-sm hover:border-red-500 hover:text-red-500 disabled:opacity-50"
+            >
+              Halt generation
+            </button>
+          )}
+        </div>
+
+        {money?.halt && (
+          <p className="mt-2 text-sm">
+            <span className="font-medium">{money.halt.reason}</span> — {money.halt.detail}
+            <span className="text-muted">
+              {" "}
+              ({new Date(money.halt.at).toLocaleString()}
+              {money.halt.by ? ` · ${money.halt.by}` : ""})
+            </span>
+          </p>
+        )}
+
+        <div className="mt-4 flex flex-wrap items-baseline justify-between gap-2">
+          <p className="text-sm text-muted">
+            {money === null
+              ? "Checking…"
+              : money.issues.length === 0
+                ? "Charged and unspent: nothing outstanding."
+                : `${money.issues.length} charge(s) with no matching spend — ${usd(money.owedCredits)} owed back.`}
+          </p>
+          {!!money?.issues.length && (
+            <button
+              onClick={() =>
+                moneyAction(
+                  { action: "refund-all" },
+                  `Refund ${usd(money.owedCredits)} across ${money.issues.length} job(s)?`
+                )
+              }
+              disabled={moneyBusy}
+              className="rounded-full bg-accent px-4 py-1.5 text-sm font-medium text-accent-ink disabled:opacity-50"
+            >
+              Refund all
+            </button>
+          )}
+        </div>
+
+        {!!money?.issues.length && (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-muted">
+                  <th className="py-2 font-normal">Member</th>
+                  <th className="py-2 font-normal">Owed</th>
+                  <th className="py-2 font-normal">Status</th>
+                  <th className="py-2 font-normal">Why</th>
+                  <th className="py-2 font-normal"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {money.issues.slice(0, 50).map((i) => (
+                  <tr key={i.jobId} className="border-b border-line last:border-0">
+                    <td className="py-2">{i.email}</td>
+                    <td className="py-2 tabular-nums">{usd(i.credits)}</td>
+                    <td className="py-2 text-muted">{i.status}</td>
+                    <td className="py-2 text-muted">{i.reason}</td>
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={() => moneyAction({ action: "refund", jobId: i.jobId })}
+                        disabled={moneyBusy}
+                        className="rounded-full border border-line px-3 py-1 text-xs hover:border-accent disabled:opacity-50"
+                      >
+                        Refund
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="rounded-2xl border border-line bg-surface p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

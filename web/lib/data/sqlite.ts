@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "crypto";
+import { findMoneyIssues, MoneyIssue } from "./reconcile";
 import fs from "fs";
 import path from "path";
 import {
@@ -76,6 +77,10 @@ export class SqliteStore implements DataStore {
         updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs(user_id);
+      CREATE TABLE IF NOT EXISTS system (
+        k TEXT PRIMARY KEY,
+        v TEXT NOT NULL
+      );
     `);
     // Additive migration for databases created before the model column.
     const adds = [
@@ -265,6 +270,29 @@ export class SqliteStore implements DataStore {
       )
       .get(userId) as { used: number };
     return row.used;
+  }
+
+  async getSystem(key: string): Promise<string | undefined> {
+    const r = this.db().prepare(`SELECT v FROM system WHERE k = ?`).get(key) as
+      | { v: string }
+      | undefined;
+    return r?.v;
+  }
+
+  async setSystem(key: string, value: string | null): Promise<void> {
+    if (value === null) {
+      this.db().prepare(`DELETE FROM system WHERE k = ?`).run(key);
+      return;
+    }
+    this.db()
+      .prepare(`INSERT INTO system (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
+      .run(key, value);
+  }
+
+  async moneyIssues(): Promise<MoneyIssue[]> {
+    const jobs = this.db().prepare(`SELECT * FROM jobs`).all() as Job[];
+    const ledger = this.db().prepare(`SELECT * FROM ledger`).all() as LedgerEntry[];
+    return findMoneyIssues(jobs, ledger);
   }
 
   async adminData(): Promise<AdminData> {

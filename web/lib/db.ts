@@ -1,4 +1,5 @@
 import { DataStore } from "./data/types";
+export type { MoneyIssue } from "./data/reconcile";
 
 // Backend selection: DB_BACKEND=dynamo (AWS, tables from sst.config.ts) or
 // sqlite (default, local file). Routes import the async facade below and
@@ -56,3 +57,6 @@ export const deleteJob: DataStore["deleteJob"] = (...a) => store().deleteJob(...
 export const storageUsedBytes: DataStore["storageUsedBytes"] = (...a) =>
   store().storageUsedBytes(...a);
 export const adminData: DataStore["adminData"] = () => store().adminData();
+export const getSystem: DataStore["getSystem"] = (...a) => store().getSystem(...a);
+export const setSystem: DataStore["setSystem"] = (...a) => store().setSystem(...a);
+export const moneyIssues: DataStore["moneyIssues"] = () => store().moneyIssues();

@@ -12,6 +12,7 @@ import {
 import { sendEmail } from "./email";
 import { EXTEND_CONTEXT_S, SITE_DOMAIN, SITE_NAME } from "./config";
 import { concat, durationOf, trimTail } from "./video";
+import { checkMargin, currentHalt } from "./money";
 
 // Job pipeline: queued -> generating -> [upscaling ->] ready | failed.
 //
@@ -39,6 +40,14 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
     }
 
     if (job.status === "queued") {
+      // A money halt stops new spend. Jobs already with a provider keep
+      // polling below: that money is gone either way, and abandoning them
+      // would mean paying for a video nobody receives.
+      const stop = await currentHalt();
+      if (stop) {
+        console.warn(`job ${id}: held, money halt in force (${stop.reason})`);
+        return job;
+      }
       if (!(await claimJob(id, "queued", "generating"))) return jobById(id);
       type Role = "reference" | "first_frame" | "last_frame" | "reference_video" | "reference_audio";
       const declared: { key: string; role: Role }[] = job.image_keys ? JSON.parse(job.image_keys) : [];
@@ -112,9 +121,16 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
       }
       if (result.status === "succeeded") {
         if (result.tokens !== undefined) {
-          // Billing basis for the measured COST_* rates (see docs/NEXT.md).
+          // Billing basis for the measured rates (see docs/NEXT.md), and the
+          // input to the margin check: this is what the provider actually
+          // charged, not what we predicted it would.
           console.log(
             `job ${id} generation usage: ${result.tokens} tokens for ${job.duration_s}s at ${job.mode}`
+          );
+          // Never let a margin problem fail a job the member has paid for and
+          // the provider has already rendered.
+          await checkMargin(job, result.tokens).catch((e) =>
+            console.error(`margin check failed for job ${id}:`, e)
           );
         }
         if (job.mode === "native-1080p") {

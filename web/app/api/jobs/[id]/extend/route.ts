@@ -16,6 +16,7 @@ import {
   PLANS,
 } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
+import { currentHalt } from "@/lib/money";
 
 // Continue an existing (ready) clip by N more seconds. The result is a new
 // job that carries the source clip forward; the source is untouched.
@@ -47,6 +48,18 @@ export async function POST(
   }
   if (source.status !== "ready" || !source.video_url) {
     return NextResponse.json({ error: "Only finished videos can be extended." }, { status: 409 });
+  }
+
+  const stop = await currentHalt();
+  if (stop) {
+    return NextResponse.json(
+      {
+        error: "paused",
+        message:
+          "Generation is paused while we check a billing issue. Nothing has been charged — please try again shortly.",
+      },
+      { status: 503 }
+    );
   }
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));

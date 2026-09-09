@@ -10,6 +10,7 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
+import { findMoneyIssues, MoneyIssue } from "./reconcile";
 import {
   AddLedgerOpts,
   AdminData,
@@ -51,6 +52,9 @@ function isLive(status: JobStatus): boolean {
 
 const USERS = process.env.TABLE_USERS!;
 const LEDGER = process.env.TABLE_LEDGER!;
+// Reserved ledger partition for global state; user ids are uuids, so no
+// real user can occupy it.
+const SYSTEM_PK = "system";
 const JOBS = process.env.TABLE_JOBS!;
 
 export class DynamoStore implements DataStore {
@@ -451,6 +455,38 @@ export class DynamoStore implements DataStore {
     return items.slice(0, limit);
   }
 
+  // Global operational state lives in the ledger table under a reserved
+  // partition, which no user id can collide with (user ids are uuids).
+  async getSystem(key: string): Promise<string | undefined> {
+    const r = await this.doc.send(
+      new GetCommand({ TableName: LEDGER, Key: { pk: SYSTEM_PK, sk: key } })
+    );
+    return (r.Item as { v?: string } | undefined)?.v;
+  }
+
+  async setSystem(key: string, value: string | null): Promise<void> {
+    if (value === null) {
+      await this.doc.send(
+        new DeleteCommand({ TableName: LEDGER, Key: { pk: SYSTEM_PK, sk: key } })
+      );
+      return;
+    }
+    await this.doc.send(
+      new PutCommand({ TableName: LEDGER, Item: { pk: SYSTEM_PK, sk: key, v: value } })
+    );
+  }
+
+  async moneyIssues(): Promise<MoneyIssue[]> {
+    const [ledger, jobs] = await Promise.all([
+      this.scanAll<LedgerEntry & { pk: string }>(LEDGER, 20000),
+      this.scanAll<Job>(JOBS, 10000),
+    ]);
+    const entries = ledger.filter(
+      (e) => !String(e.pk).startsWith("ext#") && String(e.pk) !== SYSTEM_PK
+    );
+    return findMoneyIssues(jobs, entries);
+  }
+
   async adminData(): Promise<AdminData> {
     const now = Date.now();
     const [users, ledger, jobs] = await Promise.all([
@@ -458,7 +494,11 @@ export class DynamoStore implements DataStore {
       this.scanAll<LedgerEntry & { pk: string }>(LEDGER, 20000),
       this.scanAll<Job>(JOBS, 10000),
     ]);
-    const entries = ledger.filter((e) => !String(e.pk).startsWith("ext#"));
+    // Real ledger entries only: the table also holds webhook idempotency
+    // guards and the reserved system partition, neither of which is money.
+    const entries = ledger.filter(
+      (e) => !String(e.pk).startsWith("ext#") && String(e.pk) !== SYSTEM_PK
+    );
     const sum = (kind: string) =>
       entries.filter((e) => e.kind === kind).reduce((a, e) => a + Math.abs(e.delta_credits), 0);
     const active = (u: User, m: Membership) =>
