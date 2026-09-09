@@ -131,6 +131,11 @@ const SEED_MODEL = {
 };
 const SEED_CLIP_S = 4;
 
+// GitHub's runners no longer ship ffmpeg, so the binary is passed in rather
+// than assumed to be on PATH. Production uses the same ffmpeg-static build.
+const FFMPEG = process.env.FFMPEG_PATH || "ffmpeg";
+const FFPROBE = process.env.FFPROBE_PATH || "ffprobe";
+
 function sh(cmd, args) {
   return execFileSync(cmd, args, { encoding: "utf8" }).trim();
 }
@@ -172,6 +177,19 @@ async function keyImage() {
     return url;
   }
 
+  // A seed clip from an earlier run is money already spent — reuse it rather
+  // than render the same frame twice.
+  const existing = process.env.SEED_CLIP_PATH;
+  if (existing && existsSync(existing)) {
+    log("key frame: reusing the seed clip from an earlier run");
+    const framePath = join(OUT_DIR, "key-frame.png");
+    execFileSync(FFMPEG, ["-y", "-i", existing, "-vf", "select=eq(n\\,0)", "-vframes", "1", framePath]);
+    const url = await uploadFrame(framePath);
+    summary.keyImageUrl = url;
+    summary.keyImageSource = "frame 0 of a seed clip from an earlier run (no new spend)";
+    return url;
+  }
+
   log(`key frame: rendering a ${SEED_CLIP_S}s seed clip with ${SEED_MODEL.id}`);
   const sub = await req(`${ARK}/contents/generations/tasks`, {
     method: "POST",
@@ -207,7 +225,7 @@ async function keyImage() {
   if (!clip) throw new Error("seed clip could not be downloaded");
   const framePath = join(OUT_DIR, "key-frame.png");
   // Frame 0 exactly — the same still every model starts from.
-  execFileSync("ffmpeg", ["-y", "-i", clip, "-vf", "select=eq(n\\,0)", "-vframes", "1", framePath]);
+  execFileSync(FFMPEG, ["-y", "-i", clip, "-vf", "select=eq(n\\,0)", "-vframes", "1", framePath]);
   const url = await uploadFrame(framePath);
   summary.keyImageUrl = url;
   summary.keyImageSource = `frame 0 of a ${SEED_CLIP_S}s ${SEED_MODEL.id} clip`;
@@ -300,7 +318,7 @@ async function download(url, name) {
 function probe(path) {
   if (!path || !existsSync(path)) return {};
   try {
-    const out = execFileSync("ffprobe", [
+    const out = execFileSync(FFPROBE, [
       "-v", "error", "-select_streams", "v:0",
       "-show_entries", "stream=width,height,r_frame_rate:format=duration,size",
       "-of", "json", path,

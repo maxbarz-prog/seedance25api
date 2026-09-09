@@ -26,7 +26,11 @@ on:
         type: string
         default: "5"
       key_image_url:
-        description: "Reuse a key frame from an earlier run (blank = render a new one, ~$0.08)"
+        description: "Reuse a key frame from an earlier run (blank = render a new one, ~$0.12)"
+        type: string
+        default: ""
+      reuse_run_id:
+        description: "Run id of an earlier bake-off whose seed clip to reuse (avoids re-rendering the key frame)"
         type: string
         default: ""
       prompt:
@@ -57,6 +61,24 @@ jobs:
         with:
           node-version: 22
 
+      # The runner image no longer ships ffmpeg. ffmpeg-static is the same
+      # build the production Lambda bundles, so this matches what we run.
+      - name: Install ffmpeg
+        run: |
+          set -euo pipefail
+          npm install --no-save ffmpeg-static ffprobe-static
+          echo "FFMPEG_PATH=$(node -p "require('ffmpeg-static')")" >> "$GITHUB_ENV"
+          echo "FFPROBE_PATH=$(node -p "require('ffprobe-static').path")" >> "$GITHUB_ENV"
+
+      - name: Reuse an earlier seed clip
+        if: inputs.reuse_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: model-bakeoff
+          path: bakeoff
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Assume deploy role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -80,9 +102,11 @@ jobs:
           BAKEOFF_DURATION_S: ${{ inputs.duration }}
           KEY_IMAGE_URL: ${{ inputs.key_image_url }}
           BAKEOFF_PROMPT: ${{ inputs.prompt }}
+          SEED_CLIP_PATH: ${{ github.workspace }}/bakeoff/seed-clip.mp4
         run: |
           set -euo pipefail
           mkdir -p bakeoff
+          ls -la bakeoff/ || true
           node scripts/model-bakeoff.mjs
 
       - name: Upload the clips
@@ -92,3 +116,4 @@ jobs:
           name: model-bakeoff
           path: bakeoff/
           retention-days: 30
+          overwrite: true
