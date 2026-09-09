@@ -34,21 +34,51 @@ export type PlanId = keyof typeof PLANS;
 
 // Every video model this account can call, newest first.
 //
-// `perMillion` is the provider's own token rate, in USD per million tokens,
-// which is how it actually bills:
-//     tokens = duration x width x height x fps / 1024
-// That formula reproduces our measured usage to within 0.04%, so a model's
-// cost per second is arithmetic rather than something to guess — but only
-// once its rate is known. A model with `perMillion: null` is defined here
-// and deliberately NOT offered, because we sell at cost and must not price
-// what we cannot cost. Fill in the rate from the provider console
-// (Activation Management shows per-model pricing) and it appears by itself.
+// Rates are the provider's own, in USD per MILLION TOKENS, taken from the
+// ModelArk pricing page (docs.byteplus.com/en/docs/ModelArk/1544106). The
+// provider bills tokens, not seconds:
+//     tokens = (input video duration + output duration)
+//              x width x height x frame rate / 1024
+// so cost per second is arithmetic once the rate is known. Every rate below
+// reproduces the provider's own worked price examples exactly.
 //
-// `sd` covers renders up to 720p, `hd` is 1080p, and `withVideo` is the
-// lower rate charged when a reference video rides along (an extension).
+// `sd` covers 480p and 720p output, `hd` is 1080p. A null `hd` means the
+// model cannot render 1080p at all (2.0 Fast and 2.0 Mini) and the native
+// path is hidden for it. `withVideo` is the lower rate charged when a
+// reference video rides along, i.e. an extension — its seconds are billed
+// as input.
+//
+// `audio` is a separate rate table for models that price by whether the
+// output carries sound (Seedance 1.5 Pro: $1.20 silent, $2.40 with audio).
+// Omitted where sound makes no difference to the bill.
+//
+// `discount` is a time-limited provider promotion. It applies only while
+// now < until, so the rate reverts to list by itself the moment the
+// promotion lapses — nobody has to remember. Selling at a discounted rate
+// that has quietly expired is exactly how we ended up below cost before.
+//
+// A model with `perMillion: null` is defined here and deliberately NOT
+// offered: we sell at cost and must not price what we cannot cost.
 //
 // Each model version also carries its own concurrency quota at the provider,
 // so offering several widens total throughput, not just member choice.
+
+export interface RateTable {
+  sd: number;
+  hd: number | null;
+  sdWithVideo: number;
+  hdWithVideo: number | null;
+}
+
+export interface Discount {
+  // Fraction off the list rate, e.g. 0.28 for "28% off".
+  pct: number;
+  // ISO instant the promotion ends. Provider states these in UTC+8.
+  until: string;
+  // Which rate tiers the promotion covers.
+  applies: ("sd" | "hd")[];
+}
+
 export const MODELS = {
   "seedance-2.5": {
     id: "seedance-2.5",
@@ -56,7 +86,9 @@ export const MODELS = {
     upstream: "dreamina-seedance-2-5-260628",
     maxDurationS: 30,
     accepts: ["text", "image"],
-    perMillion: { sd: 10.7, hd: 10.7, withVideo: 6.4 },
+    perMillion: { sd: 10.7, hd: 11.7, sdWithVideo: 6.4, hdWithVideo: 7.0 },
+    // 28% off 1080p only, to 2026-09-17 14:00 UTC+8.
+    discount: { pct: 0.28, until: "2026-09-17T06:00:00Z", applies: ["hd"] },
   },
   "seedance-2.0": {
     id: "seedance-2.0",
@@ -64,7 +96,7 @@ export const MODELS = {
     upstream: "dreamina-seedance-2-0-260128",
     maxDurationS: 15,
     accepts: ["text", "image"],
-    perMillion: { sd: 7.0, hd: 7.7, withVideo: 4.3 },
+    perMillion: { sd: 7.0, hd: 7.7, sdWithVideo: 4.3, hdWithVideo: 4.7 },
   },
   "seedance-2.0-fast": {
     id: "seedance-2.0-fast",
@@ -72,16 +104,20 @@ export const MODELS = {
     upstream: "dreamina-seedance-2-0-fast-260128",
     maxDurationS: 15,
     accepts: ["text", "image"],
-    perMillion: { sd: 5.6, hd: 5.6, withVideo: 3.3 },
+    // 480p/720p only — the provider does not offer 1080p or 4K here.
+    perMillion: { sd: 5.6, hd: null, sdWithVideo: 3.3, hdWithVideo: null },
+    // 25% off, to 2026-10-07 14:00 UTC+8.
+    discount: { pct: 0.25, until: "2026-10-07T06:00:00Z", applies: ["sd"] },
   },
-  // --- available on the account, awaiting a confirmed token rate ---
   "seedance-2.0-mini": {
     id: "seedance-2.0-mini",
     label: "Seedance 2.0 Mini",
     upstream: "dreamina-seedance-2-0-mini-260615",
     maxDurationS: 15,
     accepts: ["text", "image"],
-    perMillion: null,
+    perMillion: { sd: 3.5, hd: null, sdWithVideo: 2.1, hdWithVideo: null },
+    // 60% off, to 2026-10-07 14:00 UTC+8.
+    discount: { pct: 0.6, until: "2026-10-07T06:00:00Z", applies: ["sd"] },
   },
   "seedance-1.5-pro": {
     id: "seedance-1.5-pro",
@@ -89,7 +125,9 @@ export const MODELS = {
     upstream: "seedance-1-5-pro-251215",
     maxDurationS: 10,
     accepts: ["text", "image"],
-    perMillion: null,
+    // Priced by soundtrack, not resolution.
+    perMillion: { sd: 1.2, hd: 1.2, sdWithVideo: 1.2, hdWithVideo: 1.2 },
+    audio: { sd: 2.4, hd: 2.4, sdWithVideo: 2.4, hdWithVideo: 2.4 },
   },
   "seedance-1.0-pro": {
     id: "seedance-1.0-pro",
@@ -97,7 +135,7 @@ export const MODELS = {
     upstream: "seedance-1-0-pro-250528",
     maxDurationS: 10,
     accepts: ["text", "image"],
-    perMillion: null,
+    perMillion: { sd: 2.5, hd: 2.5, sdWithVideo: 2.5, hdWithVideo: 2.5 },
   },
   "seedance-1.0-pro-fast": {
     id: "seedance-1.0-pro-fast",
@@ -105,10 +143,11 @@ export const MODELS = {
     upstream: "seedance-1-0-pro-fast-251015",
     maxDurationS: 10,
     accepts: ["text", "image"],
-    perMillion: null,
+    perMillion: { sd: 1.0, hd: 1.0, sdWithVideo: 1.0, hdWithVideo: 1.0 },
   },
   // The lite pair is split by input type — the model id says so — so each
-  // only accepts one kind of prompt.
+  // only accepts one kind of prompt. Neither appears on the provider's
+  // pricing page, so neither can be costed and neither is offered.
   "seedance-1.0-lite-t2v": {
     id: "seedance-1.0-lite-t2v",
     label: "Seedance 1.0 Lite (text)",
@@ -136,10 +175,20 @@ export const MODEL_IDS = (Object.keys(MODELS) as ModelId[]).filter(
 export const ALL_MODEL_IDS = Object.keys(MODELS) as ModelId[];
 export const DEFAULT_MODEL: ModelId = "seedance-2.5";
 
-// Billing units per second of output, from the provider's token formula.
+// Models that can render 1080p directly. The rest reach 1080p only through
+// the upscaler, which is the cheaper path anyway.
+export const NATIVE_1080P_MODEL_IDS = MODEL_IDS.filter(
+  (id) => MODELS[id].perMillion?.hd != null
+);
+
+// Billing units per second of output. Frame sizes are the LARGER of the
+// variants these models actually emit — 480p comes back as 864x496 on the
+// 2.0 series (measured) and 1080p as 1920x1088 on the 1.0 Pro pair (the
+// provider's own token table) — so a quote errs a little high rather than
+// selling a render for less than it costs.
 export const TOKENS_PER_SEC = {
-  p480: (854 * 480 * 24) / 1024,
-  p1080: (1920 * 1080 * 24) / 1024,
+  p480: (864 * 496 * 24) / 1024,
+  p1080: (1920 * 1088 * 24) / 1024,
 } as const;
 
 export const MIN_DURATION_S = 4;

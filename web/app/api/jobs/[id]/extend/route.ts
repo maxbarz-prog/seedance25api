@@ -67,6 +67,7 @@ export async function POST(
     durationS: b.durationS,
     mode: source.mode,
     upscaleFactor: source.upscale_factor === 4 ? 4 : 2,
+    audio: !!source.audio,
     // The pipeline sends only the last EXTEND_CONTEXT_S of the source.
     contextS: Math.min(source.duration_s, EXTEND_CONTEXT_S),
   });

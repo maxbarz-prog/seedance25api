@@ -18,6 +18,7 @@ import {
   MODEL_IDS,
   MODELS,
   ModelId,
+  NATIVE_1080P_MODEL_IDS,
 } from "@/lib/config";
 import CreditsDialog, { CreditsBlock } from "./CreditsDialog";
 import { BALANCE_EVENT } from "./Header";
@@ -77,6 +78,9 @@ export default function Composer() {
   const needs: "text" | "image" = imageCount > 0 ? "image" : "text";
   const compatible = (m: ModelId) =>
     (MODELS[m].accepts as readonly string[]).includes(needs);
+  // 2.0 Fast and 2.0 Mini have no 1080p output at the provider, so the native
+  // option is not offered for them at all.
+  const canNative = (NATIVE_1080P_MODEL_IDS as readonly string[]).includes(model);
 
   async function addImages(files: FileList | null, kind: "image" | "video" | "audio" = "image") {
     if (!files || !files.length) return;
@@ -190,15 +194,24 @@ export default function Composer() {
   }, [needs, model]);
 
   useEffect(() => {
+    if (!canNative && mode === "native-1080p") setMode("upscaled-1080p");
+  }, [canNative, mode]);
+
+  useEffect(() => {
     const ctl = new AbortController();
-    fetch(`/api/quote?model=${model}&duration=${Math.min(durationS, maxDuration)}&mode=${mode}`, {
-      signal: ctl.signal,
-    })
+    const effectiveMode = canNative ? mode : "upscaled-1080p";
+    const qs = new URLSearchParams({
+      model,
+      duration: String(Math.min(durationS, maxDuration)),
+      mode: effectiveMode,
+      audio: audio ? "1" : "0",
+    });
+    fetch(`/api/quote?${qs}`, { signal: ctl.signal })
       .then((r) => r.json())
-      .then(setQ)
+      .then((d) => setQ(d.error ? null : d))
       .catch(() => {});
     return () => ctl.abort();
-  }, [model, durationS, mode, maxDuration]);
+  }, [model, durationS, mode, maxDuration, audio, canNative]);
 
   async function generate() {
     setError(null);
@@ -422,14 +435,16 @@ export default function Composer() {
           >
             1080p upscaled
           </button>
-          <button
-            onClick={() => setMode("native-1080p")}
-            className={`rounded-full px-3 py-1 ${
-              mode === "native-1080p" ? "bg-accent text-accent-ink" : "text-muted"
-            }`}
-          >
-            1080p native
-          </button>
+          {canNative && (
+            <button
+              onClick={() => setMode("native-1080p")}
+              className={`rounded-full px-3 py-1 ${
+                mode === "native-1080p" ? "bg-accent text-accent-ink" : "text-muted"
+              }`}
+            >
+              1080p native
+            </button>
+          )}
         </div>
       </div>
 
@@ -437,6 +452,7 @@ export default function Composer() {
         <p className="mt-2 text-xs text-muted">
           Rendered at 480p, AI-upscaled to 1080p — same length, sharp result,
           a fraction of native cost.
+          {!canNative && ` ${MODELS[model].label} has no native 1080p, so this is the only 1080p route.`}
         </p>
       ) : (
         <p className="mt-2 text-xs text-muted">

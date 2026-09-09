@@ -17,6 +17,7 @@ import {
   MIN_DURATION_S,
   MODEL_IDS,
   MODELS,
+  NATIVE_1080P_MODEL_IDS,
   PLANS,
 } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
@@ -129,7 +130,21 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const q = quote({ model, durationS: b.durationS, mode: b.mode, upscaleFactor: b.upscaleFactor });
+  if (b.mode === "native-1080p" && !(NATIVE_1080P_MODEL_IDS as string[]).includes(model)) {
+    return NextResponse.json(
+      {
+        error: `${MODELS[model].label} does not render 1080p natively — use the upscaled option.`,
+      },
+      { status: 400 }
+    );
+  }
+  const q = quote({
+    model,
+    durationS: b.durationS,
+    mode: b.mode,
+    upscaleFactor: b.upscaleFactor,
+    audio: b.audio,
+  });
   const total = q.credits * b.variations;
   const bal = await balance(user.id);
   if (bal < total) {
