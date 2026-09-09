@@ -1,0 +1,304 @@
+#!/usr/bin/env node
+// Side-by-side comparison of every model we sell: the same 5-second shot from
+// each, then each upscaled to 1080p, keeping both the 480p original and the
+// 1080p result so the upscaler's contribution is visible too.
+//
+// The models are the only variable. Every render gets the same prompt, the
+// same seed, and the same first-frame image, so differences in the output are
+// the model rather than the setup. The key frame is generated once, up front,
+// from a text-to-image model — or supplied with KEY_IMAGE_URL to reuse the
+// frame from an earlier run and make two runs directly comparable.
+//
+// It doubles as a live test of the pricing and margin machinery: for each
+// render it records the tokens the provider actually billed, works out what
+// that cost, compares it to what we would have charged a member, and reports
+// the verdict the margin guard would have reached. A "LOSS" row here is the
+// same condition that halts selling in production.
+//
+// THIS SPENDS MONEY. It refuses to run without SPEND_OK=yes.
+
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+
+const ARK = process.env.BYTEPLUS_API_BASE || "https://ark.ap-southeast.bytepluses.com/api/v3";
+const FAL_MODEL = process.env.FAL_UPSCALER_MODEL || "fal-ai/bytedance-upscaler/upscale/video";
+const FAL_APP = FAL_MODEL.split("/").slice(0, 2).join("/");
+const IMAGE_MODEL = process.env.BAKEOFF_IMAGE_MODEL || "seedream-4-0-250828";
+
+const OUT_DIR = process.env.BAKEOFF_OUT || mkdtempSync(join(tmpdir(), "bakeoff-"));
+const DURATION_S = Number(process.env.BAKEOFF_DURATION_S || 5);
+const SEED = Number(process.env.BAKEOFF_SEED || 12345);
+const RATIO = "16:9";
+
+const PROMPT =
+  process.env.BAKEOFF_PROMPT ||
+  "A red vintage bicycle leaning against a sunlit stone wall, dry leaves drifting past on a light breeze, slow camera push-in, warm late-afternoon light, cinematic 35mm";
+const IMAGE_PROMPT =
+  process.env.BAKEOFF_IMAGE_PROMPT ||
+  "A red vintage bicycle leaning against a sunlit stone wall, dry leaves on the ground, warm late-afternoon light, cinematic 35mm photograph, 16:9";
+
+// The models we sell, with the rate the provider charges for 480p output
+// without video input, in USD per million tokens, and any promotion in force.
+// Mirrors web/lib/config.ts — the point of the run is to check that table
+// against reality, so it is restated here rather than imported.
+const MODELS = [
+  { id: "seedance-2.5", label: "Seedance 2.5", upstream: "dreamina-seedance-2-5-260628", perMillion: 10.7 },
+  { id: "seedance-2.0", label: "Seedance 2.0", upstream: "dreamina-seedance-2-0-260128", perMillion: 7.0 },
+  { id: "seedance-2.0-fast", label: "Seedance 2.0 Fast", upstream: "dreamina-seedance-2-0-fast-260128", perMillion: 5.6, discount: { pct: 0.25, until: "2026-10-07T06:00:00Z" } },
+  { id: "seedance-2.0-mini", label: "Seedance 2.0 Mini", upstream: "dreamina-seedance-2-0-mini-260615", perMillion: 3.5, discount: { pct: 0.6, until: "2026-10-07T06:00:00Z" } },
+  { id: "seedance-1.5-pro", label: "Seedance 1.5 Pro", upstream: "seedance-1-5-pro-251215", perMillion: 1.2 },
+  { id: "seedance-1.0-pro", label: "Seedance 1.0 Pro", upstream: "seedance-1-0-pro-250528", perMillion: 2.5 },
+  { id: "seedance-1.0-pro-fast", label: "Seedance 1.0 Pro Fast", upstream: "seedance-1-0-pro-fast-251015", perMillion: 1.0 },
+];
+
+const UPSCALE_PER_SEC = 0.0072;
+// Our own price formula, from web/lib/pricing.ts.
+const DELIVERY = 0.01, OVERHEAD = 0.1, PROCESSING = 0.035, CREDIT = 0.01;
+
+const now = Date.now();
+const liveRate = (m) =>
+  m.discount && Date.parse(m.discount.until) > now
+    ? m.perMillion * (1 - m.discount.pct)
+    : m.perMillion;
+
+// What we would charge a member for this render (480p + 2x upscale).
+function ourPriceUsd(m, durationS) {
+  // 864x496 at 24fps, the larger 480p frame the 2.0 series emits.
+  const tokensPerSec = (864 * 496 * 24) / 1024;
+  const provider = (liveRate(m) * tokensPerSec * durationS) / 1e6 + UPSCALE_PER_SEC * durationS;
+  const usd = ((provider + DELIVERY) * (1 + OVERHEAD)) / (1 - PROCESSING);
+  return Math.ceil(usd / CREDIT) * CREDIT;
+}
+
+const summary = { startedAt: new Date().toISOString(), prompt: PROMPT, seed: SEED, durationS: DURATION_S, models: [], totals: {} };
+
+const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function need(name) {
+  const v = process.env[name];
+  if (!v) throw new Error(`${name} not set`);
+  return v;
+}
+async function req(url, init = {}) {
+  const res = await fetch(url, init);
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = undefined; }
+  return { status: res.status, ok: res.ok, json, text };
+}
+const arkHeaders = () => ({ Authorization: `Bearer ${need("BYTEPLUS_API_KEY")}`, "Content-Type": "application/json" });
+const falHeaders = () => ({ Authorization: `Key ${need("FAL_KEY")}`, "Content-Type": "application/json" });
+
+async function arkPoll(id, label, timeoutMs = 25 * 60_000) {
+  const t0 = Date.now();
+  for (;;) {
+    const r = await req(`${ARK}/contents/generations/tasks/${id}`, { headers: arkHeaders() });
+    if (!r.ok) throw new Error(`${label}: poll ${r.status} ${r.text.slice(0, 200)}`);
+    const s = r.json.status;
+    if (["succeeded", "failed", "cancelled", "expired"].includes(s)) {
+      return { ...r.json, elapsedS: Math.round((Date.now() - t0) / 1000) };
+    }
+    if (Date.now() - t0 > timeoutMs) throw new Error(`${label}: timed out in ${s}`);
+    await sleep(10_000);
+  }
+}
+
+// One key frame, generated once and reused by every model, so the comparison
+// is of the models rather than of seven different opening shots.
+async function keyImage() {
+  if (process.env.KEY_IMAGE_URL) {
+    log("key image: reusing", process.env.KEY_IMAGE_URL.slice(0, 60));
+    return process.env.KEY_IMAGE_URL;
+  }
+  log("key image: generating with", IMAGE_MODEL);
+  const r = await req(`${ARK}/images/generations`, {
+    method: "POST",
+    headers: arkHeaders(),
+    body: JSON.stringify({
+      model: IMAGE_MODEL,
+      prompt: IMAGE_PROMPT,
+      size: "2K",
+      response_format: "url",
+      watermark: false,
+    }),
+  });
+  if (!r.ok) throw new Error(`key image failed ${r.status}: ${r.text.slice(0, 300)}`);
+  const url = r.json?.data?.[0]?.url;
+  if (!url) throw new Error(`key image: no url in ${r.text.slice(0, 300)}`);
+  summary.keyImageUrl = url;
+  log("key image ready");
+  return url;
+}
+
+async function generate(m, imageUrl) {
+  const rec = { id: m.id, label: m.label, upstream: m.upstream };
+  const body = {
+    model: m.upstream,
+    content: [
+      { type: "text", text: PROMPT },
+      { type: "image_url", image_url: { url: imageUrl }, role: "first_frame" },
+    ],
+    resolution: "480p",
+    ratio: RATIO,
+    duration: DURATION_S,
+    generate_audio: false,
+    watermark: false,
+    seed: SEED,
+  };
+  const t0 = Date.now();
+  const sub = await req(`${ARK}/contents/generations/tasks`, {
+    method: "POST", headers: arkHeaders(), body: JSON.stringify(body),
+  });
+  if (!sub.ok) {
+    rec.status = "submit-failed";
+    rec.error = (sub.json?.error?.message || sub.text).slice(0, 300);
+    log(m.id, "SUBMIT FAILED", rec.error);
+    return rec;
+  }
+  rec.taskId = sub.json.id;
+  log(m.id, "submitted", rec.taskId);
+  const done = await arkPoll(rec.taskId, m.id);
+  rec.status = done.status;
+  rec.genElapsedS = done.elapsedS;
+  if (done.status !== "succeeded") {
+    rec.error = JSON.stringify(done.error || done).slice(0, 300);
+    log(m.id, "FAILED", rec.error);
+    return rec;
+  }
+  rec.videoUrl = done.content?.video_url;
+  rec.tokens = done.usage?.total_tokens ?? done.usage?.completion_tokens;
+  rec.wallS = Math.round((Date.now() - t0) / 1000);
+  log(m.id, `generated in ${rec.wallS}s, ${rec.tokens} tokens`);
+  return rec;
+}
+
+async function upscale(rec) {
+  const t0 = Date.now();
+  const sub = await req(`https://queue.fal.run/${FAL_MODEL}`, {
+    method: "POST", headers: falHeaders(),
+    body: JSON.stringify({ video_url: rec.videoUrl, target_resolution: "1080p" }),
+  });
+  if (!sub.ok) {
+    rec.upscaleError = `submit ${sub.status}: ${sub.text.slice(0, 200)}`;
+    log(rec.id, "UPSCALE SUBMIT FAILED", rec.upscaleError);
+    return;
+  }
+  const reqId = sub.json.request_id;
+  for (;;) {
+    const st = await req(`https://queue.fal.run/${FAL_APP}/requests/${reqId}/status`, { headers: falHeaders() });
+    if (!st.ok) throw new Error(`fal poll ${st.status}`);
+    if (st.json.status === "COMPLETED") break;
+    if (["FAILED", "ERROR"].includes(st.json.status)) {
+      rec.upscaleError = JSON.stringify(st.json).slice(0, 200);
+      log(rec.id, "UPSCALE FAILED", rec.upscaleError);
+      return;
+    }
+    if (Date.now() - t0 > 20 * 60_000) throw new Error(`${rec.id}: upscale timed out`);
+    await sleep(5_000);
+  }
+  const res = await req(`https://queue.fal.run/${FAL_APP}/requests/${reqId}`, { headers: falHeaders() });
+  rec.upscaledUrl = res.json?.video?.url;
+  rec.upscaleElapsedS = Math.round((Date.now() - t0) / 1000);
+  log(rec.id, `upscaled in ${rec.upscaleElapsedS}s`);
+}
+
+async function download(url, name) {
+  if (!url) return null;
+  const p = join(OUT_DIR, name);
+  const res = await fetch(url);
+  if (!res.ok) { log("download failed", name, res.status); return null; }
+  writeFileSync(p, Buffer.from(await res.arrayBuffer()));
+  return p;
+}
+
+function probe(path) {
+  if (!path || !existsSync(path)) return {};
+  try {
+    const out = execFileSync("ffprobe", [
+      "-v", "error", "-select_streams", "v:0",
+      "-show_entries", "stream=width,height,r_frame_rate:format=duration,size",
+      "-of", "json", path,
+    ]).toString();
+    const j = JSON.parse(out);
+    const s = j.streams?.[0] || {};
+    return {
+      width: s.width, height: s.height,
+      fps: s.r_frame_rate,
+      durationS: Number(j.format?.duration || 0).toFixed(2),
+      bytes: Number(j.format?.size || 0),
+    };
+  } catch { return {}; }
+}
+
+// The margin guard's own decision, applied to the tokens actually billed.
+function verdictFor(m, rec) {
+  if (!rec.tokens) return { verdict: "unknown" };
+  const providerUsd = (rec.tokens * liveRate(m)) / 1e6 + UPSCALE_PER_SEC * DURATION_S;
+  const chargedUsd = ourPriceUsd(m, DURATION_S);
+  let verdict = "ok";
+  if (chargedUsd < providerUsd) verdict = "LOSS";
+  else if (chargedUsd < providerUsd * 1.05) verdict = "thin";
+  else if (chargedUsd > providerUsd * 1.5 && chargedUsd - providerUsd > 0.25) verdict = "overcharge";
+  return { providerUsd, chargedUsd, verdict };
+}
+
+async function main() {
+  if (process.env.SPEND_OK !== "yes") {
+    console.error("Refusing to run: this spends real money. Set SPEND_OK=yes.");
+    process.exit(2);
+  }
+  const imageUrl = await keyImage();
+
+  for (const m of MODELS) {
+    const rec = await generate(m, imageUrl);
+    if (rec.status === "succeeded") {
+      const p = await download(rec.videoUrl, `${m.id}-480p.mp4`);
+      rec.file480 = p && p.split("/").pop();
+      rec.probe480 = probe(p);
+      await upscale(rec);
+      const up = await download(rec.upscaledUrl, `${m.id}-1080p.mp4`);
+      rec.file1080 = up && up.split("/").pop();
+      rec.probe1080 = probe(up);
+    }
+    Object.assign(rec, verdictFor(m, rec));
+    summary.models.push(rec);
+  }
+  await download(summary.keyImageUrl, "key-frame.png");
+
+  const ok = summary.models.filter((r) => r.tokens);
+  summary.totals = {
+    providerUsd: Number(ok.reduce((a, r) => a + (r.providerUsd || 0), 0).toFixed(4)),
+    chargedUsd: Number(ok.reduce((a, r) => a + (r.chargedUsd || 0), 0).toFixed(2)),
+    losses: summary.models.filter((r) => r.verdict === "LOSS").map((r) => r.id),
+  };
+  writeFileSync(join(OUT_DIR, "bakeoff.json"), JSON.stringify(summary, null, 2));
+
+  const rows = [
+    "| Model | Tokens | Cost to us | We charge | Margin | 480p | 1080p | Gen |",
+    "|---|---|---|---|---|---|---|---|",
+    ...summary.models.map((r) => {
+      const p4 = r.probe480 || {}, p10 = r.probe1080 || {};
+      return `| ${r.label} | ${r.tokens ?? "—"} | ${r.providerUsd ? "$" + r.providerUsd.toFixed(4) : "—"} | ${r.chargedUsd ? "$" + r.chargedUsd.toFixed(2) : "—"} | ${r.verdict ?? "—"} | ${p4.width ? `${p4.width}x${p4.height}` : r.error ? "failed" : "—"} | ${p10.width ? `${p10.width}x${p10.height}` : r.upscaleError ? "failed" : "—"} | ${r.wallS ? r.wallS + "s" : "—"} |`;
+    }),
+    "",
+    `**Spent: $${summary.totals.providerUsd}** across ${ok.length} renders. Members would have paid $${summary.totals.chargedUsd}.`,
+    summary.totals.losses.length
+      ? `\n**${summary.totals.losses.length} render(s) sold below cost: ${summary.totals.losses.join(", ")}** — this is the condition that halts selling in production.`
+      : "\nNo render was priced below cost.",
+  ].join("\n");
+
+  console.log("\n" + rows + "\n");
+  console.log(JSON.stringify(summary, null, 2));
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const { appendFileSync } = await import("node:fs");
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, rows + "\n");
+  }
+  console.log("\nfiles in", OUT_DIR);
+}
+
+main().catch((e) => {
+  console.error("fatal:", e);
+  process.exitCode = 1;
+});

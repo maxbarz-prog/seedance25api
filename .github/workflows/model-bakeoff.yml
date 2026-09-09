@@ -1,0 +1,94 @@
+name: Model bake-off
+
+# Renders the same 5s shot from every model we sell, upscales each to 1080p,
+# and keeps both versions as artifacts so they can be compared side by side.
+# Also reports, per model, the tokens the provider actually billed against
+# what we would have charged — a live test of the rate table and the margin
+# guard.
+#
+# THIS SPENDS REAL MONEY. It is manual-only, requires typing the word "spend"
+# to confirm, and prints the estimate before it starts.
+
+on:
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+    paths:
+      - ".github/workflows/model-bakeoff.yml"
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "spend" to confirm this will cost real money (~$1.75)'
+        type: string
+        default: ""
+      duration:
+        description: "Seconds per clip"
+        type: string
+        default: "5"
+      key_image_url:
+        description: "Reuse a key frame from an earlier run (blank = generate a new one, ~$0.03)"
+        type: string
+        default: ""
+      prompt:
+        description: "Motion prompt (blank = the default bicycle shot)"
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  bakeoff:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check the confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "spend" ]; then
+            echo "Not confirmed — type \"spend\" in the confirm box to run this."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load provider keys from SSM
+        run: |
+          set -euo pipefail
+          for name in BYTEPLUS_API_KEY FAL_KEY; do
+            v=$(aws ssm get-parameter --name "/remerged/dev/$name" --with-decryption \
+              --query Parameter.Value --output text)
+            echo "::add-mask::$v"
+            echo "$name=$v" >> "$GITHUB_ENV"
+          done
+
+      - name: Run the bake-off
+        env:
+          SPEND_OK: "yes"
+          BAKEOFF_OUT: ${{ github.workspace }}/bakeoff
+          BAKEOFF_DURATION_S: ${{ inputs.duration }}
+          KEY_IMAGE_URL: ${{ inputs.key_image_url }}
+          BAKEOFF_PROMPT: ${{ inputs.prompt }}
+        run: |
+          set -euo pipefail
+          mkdir -p bakeoff
+          node scripts/model-bakeoff.mjs
+
+      - name: Upload the clips
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-bakeoff
+          path: bakeoff/
+          retention-days: 30
