@@ -1,0 +1,91 @@
+name: Set cost parameters
+
+# Sets or deletes the COST_* parameters under /remerged/<stage>/. These are
+# per-second provider rates, not credentials, so values are passed and echoed
+# in the clear — deliberately, because a wrong one silently sells below cost.
+#
+# Deleting a parameter is the normal fix: with no override, the rate is
+# derived from the model's token price in web/lib/config.ts, which is where
+# it should live.
+
+on:
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+    paths:
+      - ".github/workflows/ssm-cost.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage to change"
+        type: choice
+        options: ["dev", "prod", "both"]
+        default: both
+      action:
+        description: "delete = fall back to the rate derived in code; set = pin a value"
+        type: choice
+        options: ["delete", "set"]
+        default: delete
+      params:
+        description: "Space-separated. NAME for delete, NAME=VALUE for set."
+        type: string
+        default: COST_SD20_480P_PER_SEC COST_SD20_1080P_PER_SEC
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  apply:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Apply
+        env:
+          STAGE: ${{ inputs.stage }}
+          ACTION: ${{ inputs.action }}
+          PARAMS: ${{ inputs.params }}
+        run: |
+          set -euo pipefail
+          stages="$STAGE"
+          [ "$STAGE" = "both" ] && stages="dev prod"
+          for stage in $stages; do
+            for entry in $PARAMS; do
+              name="${entry%%=*}"
+              path="/remerged/$stage/$name"
+              case "$name" in
+                COST_*) ;;
+                *) echo "refusing $name: this workflow only touches COST_* parameters"; exit 1 ;;
+              esac
+              if [ "$ACTION" = "delete" ]; then
+                if aws ssm delete-parameter --name "$path" 2>/dev/null; then
+                  echo "deleted $path"
+                else
+                  echo "$path absent already"
+                fi
+              else
+                value="${entry#*=}"
+                [ "$value" = "$name" ] && { echo "set needs NAME=VALUE, got $entry"; exit 1; }
+                aws ssm put-parameter --name "$path" --value "$value" \
+                  --type String --overwrite >/dev/null
+                echo "set $path = $value"
+              fi
+            done
+          done
+
+      - name: Remaining COST_* values
+        run: |
+          set -euo pipefail
+          for stage in dev prod; do
+            echo "--- /remerged/$stage ---"
+            aws ssm get-parameters-by-path --path "/remerged/$stage" \
+              --query 'Parameters[?contains(Name, `COST_`)].[Name,Value]' \
+              --output text | sort || true
+          done
