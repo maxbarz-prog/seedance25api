@@ -1,8 +1,15 @@
 import {
   GenerationRequest,
+  ProviderBusyError,
   ProviderTaskResult,
   VideoGenerator,
 } from "./types";
+
+// 429 is the documented answer when we exceed tasks-created-per-minute; 5xx
+// is a wobble at their end. Neither means this job is bad.
+function busy(status: number): boolean {
+  return status === 429 || status >= 500;
+}
 
 // BytePlus ModelArk async video generation client (official Seedance source).
 // Endpoint shape: POST /contents/generations/tasks to create, then GET
@@ -112,6 +119,9 @@ export class BytePlusGenerator implements VideoGenerator {
     const body = buildGenerationBody(req);
     let res = await this.post(body);
     if (!res.ok) {
+      if (busy(res.status)) {
+        throw new ProviderBusyError(`generation submit deferred: ${res.status}`);
+      }
       const text = await res.text();
       // Some model/task combinations refuse camera_fixed outright (Seedance
       // 2.5 text-to-video does). Drop the flag and retry once rather than
@@ -143,6 +153,7 @@ export class BytePlusGenerator implements VideoGenerator {
       headers: headers(),
     });
     if (!res.ok) {
+      if (busy(res.status)) throw new ProviderBusyError(`poll deferred: ${res.status}`);
       throw new Error(`upstream poll failed: ${res.status}`);
     }
     const data = (await res.json()) as {

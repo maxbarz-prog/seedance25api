@@ -1,4 +1,11 @@
-import { ProviderTaskResult, VideoUpscaler } from "./types";
+import { ProviderBusyError, ProviderTaskResult, VideoUpscaler } from "./types";
+
+// fal queues anything over our concurrency limit rather than rejecting it, so
+// a 429 here is a request-rate limit and a 5xx is a wobble; both are worth
+// retrying rather than failing a paid job.
+function busy(status: number): boolean {
+  return status === 429 || status >= 500;
+}
 
 // ByteDance Video Upscaler (vCube) hosted on fal.ai — ByteDance's own
 // production super-resolution model, pay-per-use, commercially licensed via
@@ -37,6 +44,9 @@ export class FalUpscaler implements VideoUpscaler {
       }),
     });
     if (!res.ok) {
+      if (busy(res.status)) {
+        throw new ProviderBusyError(`upscale submit deferred: ${res.status}`);
+      }
       throw new Error(`upstream upscale submit failed: ${res.status} ${await res.text()}`);
     }
     const data = (await res.json()) as { request_id: string };
@@ -47,11 +57,19 @@ export class FalUpscaler implements VideoUpscaler {
     const status = await fetch(`${QUEUE}/${APP_ID}/requests/${taskId}/status`, {
       headers: headers(),
     });
-    if (!status.ok) throw new Error(`upstream poll failed: ${status.status}`);
+    if (!status.ok) {
+      if (busy(status.status)) throw new ProviderBusyError(`poll deferred: ${status.status}`);
+      throw new Error(`upstream poll failed: ${status.status}`);
+    }
     const s = (await status.json()) as { status: string; error?: string };
     if (s.status === "COMPLETED") {
       const result = await fetch(`${QUEUE}/${APP_ID}/requests/${taskId}`, { headers: headers() });
-      if (!result.ok) throw new Error(`upstream result fetch failed: ${result.status}`);
+      if (!result.ok) {
+        if (busy(result.status)) {
+          throw new ProviderBusyError(`result fetch deferred: ${result.status}`);
+        }
+        throw new Error(`upstream result fetch failed: ${result.status}`);
+      }
       const data = (await result.json()) as { video?: { url?: string } };
       return { status: "succeeded", videoUrl: data.video?.url };
     }

@@ -34,10 +34,16 @@ export default $config({
       fields: { pk: "string", sk: "string" },
       primaryIndex: { hashKey: "pk", rangeKey: "sk" },
     });
+    // `pending` is a sparse index key: the attribute exists only while a job
+    // is unfinished, so the index holds just the work queue rather than every
+    // job ever created. The cron reads that instead of scanning the table.
     const jobs = new sst.aws.Dynamo("Jobs", {
-      fields: { id: "string", user_id: "string", created_at: "number" },
+      fields: { id: "string", user_id: "string", created_at: "number", pending: "string" },
       primaryIndex: { hashKey: "id" },
-      globalIndexes: { user: { hashKey: "user_id", rangeKey: "created_at" } },
+      globalIndexes: {
+        user: { hashKey: "user_id", rangeKey: "created_at" },
+        pending: { hashKey: "pending", rangeKey: "created_at" },
+      },
     });
 
     // Private bucket: videos and reference images, served via presigned URLs.
@@ -67,6 +73,9 @@ export default $config({
       STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY ?? "",
       STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET ?? "",
       PROVIDER_MODE: process.env.PROVIDER_MODE ?? "",
+      // How many jobs the minute cron advances in parallel. Tunable from SSM
+      // without a code change if a provider's create-rate limit needs respecting.
+      PIPELINE_CONCURRENCY: process.env.PIPELINE_CONCURRENCY ?? "",
       BYTEPLUS_API_KEY: process.env.BYTEPLUS_API_KEY ?? "",
       TOPAZ_API_KEY: process.env.TOPAZ_API_KEY ?? "",
       FAL_KEY: process.env.FAL_KEY ?? "",

@@ -1,5 +1,6 @@
 import { addLedger, claimJob, Job, jobById, jobsInFlight, updateJob, userById } from "./db";
 import { generator, upscaler } from "./providers";
+import { ProviderBusyError } from "./providers/types";
 import {
   deleteObject,
   readUrl,
@@ -74,18 +75,31 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
           }
         }
       }
-      const taskId = await generator().submitGeneration({
-        prompt: job.prompt,
-        model: job.model,
-        durationS: job.duration_s,
-        aspect: job.aspect,
-        audio: !!job.audio,
-        resolution: job.mode === "native-1080p" ? "1080p" : "480p",
-        inputs,
-        sourceVideoUrl,
-        seed: job.seed ?? undefined,
-        cameraFixed: !!job.camera_fixed,
-      });
+      let taskId: string;
+      try {
+        taskId = await generator().submitGeneration({
+          prompt: job.prompt,
+          model: job.model,
+          durationS: job.duration_s,
+          aspect: job.aspect,
+          audio: !!job.audio,
+          resolution: job.mode === "native-1080p" ? "1080p" : "480p",
+          inputs,
+          sourceVideoUrl,
+          seed: job.seed ?? undefined,
+          cameraFixed: !!job.camera_fixed,
+        });
+      } catch (err) {
+        // Rate-limited on task creation: put the job back in the queue so the
+        // next tick retries it, rather than failing and refunding work the
+        // member still wants.
+        if (err instanceof ProviderBusyError) {
+          await claimJob(id, "generating", "queued");
+          console.warn(`job ${id}: generation deferred, provider busy: ${err.message}`);
+          return jobById(id);
+        }
+        throw err;
+      }
       await updateJob(id, { provider_task_id: taskId });
     } else if (job.status === "generating") {
       if (!job.provider_task_id) return job; // claimed by someone mid-submit
@@ -102,10 +116,23 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
           await finalize(job, result.videoUrl!);
         } else {
           if (!(await claimJob(id, "generating", "upscaling"))) return jobById(id);
-          const upTask = await upscaler().submitUpscale(
-            result.videoUrl!,
-            job.upscale_factor === 4 ? 4 : 2
-          );
+          let upTask: string;
+          try {
+            upTask = await upscaler().submitUpscale(
+              result.videoUrl!,
+              job.upscale_factor === 4 ? 4 : 2
+            );
+          } catch (err) {
+            // Same deferral as generation, but back to "generating": the
+            // provider task id still points at the finished source clip, so
+            // the next tick re-reads it and retries the upscale submit.
+            if (err instanceof ProviderBusyError) {
+              await claimJob(id, "upscaling", "generating");
+              console.warn(`job ${id}: upscale deferred, provider busy: ${err.message}`);
+              return jobById(id);
+            }
+            throw err;
+          }
           await updateJob(id, { provider_task_id: upTask });
         }
       } else if (result.status === "failed") {
@@ -122,6 +149,12 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
       }
     }
   } catch (err) {
+    // A busy provider is not a bad job: leave it where it is and let the next
+    // tick (or the stale sweep, eventually) deal with it.
+    if (err instanceof ProviderBusyError) {
+      console.warn(`job ${id}: provider busy, retrying next tick: ${err.message}`);
+      return jobById(id);
+    }
     console.error(`pipeline error for job ${id}:`, err);
     const now = await jobById(id);
     if (now && now.status !== "failed") {
@@ -132,13 +165,34 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
   return jobById(id);
 }
 
-// Cron entry point: push every in-flight job one step.
-export async function advanceAll(): Promise<{ scanned: number }> {
+// How many jobs the cron advances at once. Jobs are independent and every
+// transition that spends money claims atomically, so this is safe to raise;
+// the ceiling that matters is the provider's, not ours. Both providers queue
+// work beyond their concurrency limit and only rate-limit task *creation*,
+// which is handled by deferring on ProviderBusyError above.
+const CONCURRENCY = Math.max(1, Number(process.env.PIPELINE_CONCURRENCY || 12));
+
+// Cron entry point: push every in-flight job one step. Serial advancement
+// used to cap the whole system at a few dozen concurrent jobs, because one
+// slow finalize (download the output, copy it to S3, stitch an extension)
+// blocked every job behind it inside a single 120-second invocation.
+export async function advanceAll(): Promise<{ scanned: number; concurrency: number }> {
   const jobs = await jobsInFlight();
-  for (const j of jobs) {
-    await advanceJob(j.id);
+  let next = 0;
+  async function worker() {
+    for (;;) {
+      const i = next++;
+      if (i >= jobs.length) return;
+      // advanceJob already contains its own error handling; this guard is
+      // just so one unexpected throw cannot take the whole batch down.
+      await advanceJob(jobs[i].id).catch((err) =>
+        console.error(`advanceAll: job ${jobs[i].id} threw:`, err)
+      );
+    }
   }
-  return { scanned: jobs.length };
+  const workers = Math.min(CONCURRENCY, jobs.length);
+  await Promise.all(Array.from({ length: workers }, worker));
+  return { scanned: jobs.length, concurrency: workers };
 }
 
 // Join an extension's source clip to the continuation the provider returned.

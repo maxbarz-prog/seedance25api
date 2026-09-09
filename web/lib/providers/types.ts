@@ -23,6 +23,17 @@ export interface GenerationRequest {
   cameraFixed?: boolean;
 }
 
+// Raised when a provider is rate-limiting us or briefly unavailable. The
+// pipeline treats this as "try again next tick" rather than a failed job:
+// both providers queue work that exceeds their concurrency limits, so the
+// only limit we must actively respect is how fast we may create tasks.
+export class ProviderBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderBusyError";
+  }
+}
+
 export type ProviderTaskStatus = "running" | "succeeded" | "failed";
 
 export interface ProviderTaskResult {

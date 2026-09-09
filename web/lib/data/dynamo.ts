@@ -29,8 +29,25 @@ import {
 //                                GSI "reset"  (hashKey reset_token_hash)
 //   ledger: pk pk, sk sk         (pk = user id, sk = createdAt#id;
 //                                 idempotency guards live at pk = ext#<id>)
-//   jobs:   pk id;               GSI "user"   (hashKey user_id, rangeKey created_at)
+//   jobs:   pk id;               GSI "user"    (hashKey user_id, rangeKey created_at),
+//                                GSI "pending" (hashKey pending, rangeKey created_at)
 // Admin aggregation scans tables — fine at MVP scale, revisit past ~10k rows.
+//
+// The "pending" index is sparse: PENDING_KEY is written while a job is
+// unfinished and removed the moment it reaches ready or failed, so the index
+// contains only the live work queue. The minute cron reads it with a Query;
+// it used to Scan the whole jobs table, which grew with every job ever made.
+// Every status transition goes through claimJob or updateJob, so keeping the
+// attribute correct in those two places keeps the whole invariant.
+
+// Single partition value for the sparse work-queue index. One partition is
+// right here: the index only ever holds unfinished jobs, and the cron wants
+// all of them in creation order.
+const PENDING_KEY = "1";
+
+function isLive(status: JobStatus): boolean {
+  return status !== "ready" && status !== "failed";
+}
 
 const USERS = process.env.TABLE_USERS!;
 const LEDGER = process.env.TABLE_LEDGER!;
@@ -255,7 +272,8 @@ export class DynamoStore implements DataStore {
   async createJob(j: Omit<Job, "created_at" | "updated_at">): Promise<Job> {
     const now = Date.now();
     const job: Job = { ...j, created_at: now, updated_at: now };
-    await this.doc.send(new PutCommand({ TableName: JOBS, Item: job }));
+    const item = isLive(job.status) ? { ...job, pending: PENDING_KEY } : job;
+    await this.doc.send(new PutCommand({ TableName: JOBS, Item: item }));
     return job;
   }
 
@@ -289,11 +307,23 @@ export class DynamoStore implements DataStore {
       values[`:${k}`] = (fields as Record<string, unknown>)[k];
       sets.push(`#${k} = :${k}`);
     }
+    // Keep the sparse work-queue key in step whenever a status is written
+    // here (fail() is the path that matters).
+    let remove = "";
+    if (fields.status !== undefined) {
+      names["#p"] = "pending";
+      if (isLive(fields.status)) {
+        values[":p"] = PENDING_KEY;
+        sets.push("#p = :p");
+      } else {
+        remove = " REMOVE #p";
+      }
+    }
     await this.doc.send(
       new UpdateCommand({
         TableName: JOBS,
         Key: { id },
-        UpdateExpression: `SET ${sets.join(", ")}`,
+        UpdateExpression: `SET ${sets.join(", ")}${remove}`,
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
       })
@@ -301,15 +331,20 @@ export class DynamoStore implements DataStore {
   }
 
   async claimJob(id: string, from: JobStatus, to: JobStatus): Promise<boolean> {
+    const live = isLive(to);
     try {
       await this.doc.send(
         new UpdateCommand({
           TableName: JOBS,
           Key: { id },
-          UpdateExpression: "SET #s = :to, updated_at = :now",
+          UpdateExpression: live
+            ? "SET #s = :to, updated_at = :now, #p = :p"
+            : "SET #s = :to, updated_at = :now REMOVE #p",
           ConditionExpression: "#s = :from",
-          ExpressionAttributeNames: { "#s": "status" },
-          ExpressionAttributeValues: { ":to": to, ":from": from, ":now": Date.now() },
+          ExpressionAttributeNames: { "#s": "status", "#p": "pending" },
+          ExpressionAttributeValues: live
+            ? { ":to": to, ":from": from, ":now": Date.now(), ":p": PENDING_KEY }
+            : { ":to": to, ":from": from, ":now": Date.now() },
         })
       );
       return true;
@@ -319,23 +354,27 @@ export class DynamoStore implements DataStore {
     }
   }
 
+  // Oldest first, straight off the sparse index: cost is proportional to the
+  // number of unfinished jobs, not to how many have ever been created.
   async jobsInFlight(limit = 200): Promise<Job[]> {
     const items: Job[] = [];
     let lastKey: Record<string, unknown> | undefined;
     do {
       const r = await this.doc.send(
-        new ScanCommand({
+        new QueryCommand({
           TableName: JOBS,
-          FilterExpression: "#s IN (:q, :g, :u)",
-          ExpressionAttributeNames: { "#s": "status" },
-          ExpressionAttributeValues: { ":q": "queued", ":g": "generating", ":u": "upscaling" },
+          IndexName: "pending",
+          KeyConditionExpression: "#p = :p",
+          ExpressionAttributeNames: { "#p": "pending" },
+          ExpressionAttributeValues: { ":p": PENDING_KEY },
+          ScanIndexForward: true,
           ExclusiveStartKey: lastKey,
         })
       );
       items.push(...((r.Items ?? []) as Job[]));
       lastKey = r.LastEvaluatedKey;
     } while (lastKey && items.length < limit);
-    return items.sort((a, b) => a.created_at - b.created_at).slice(0, limit);
+    return items.slice(0, limit);
   }
 
   async deleteJob(id: string) {
