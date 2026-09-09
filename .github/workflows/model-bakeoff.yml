@@ -37,6 +37,10 @@ on:
         description: "Motion prompt (blank = the default bicycle shot)"
         type: string
         default: ""
+      models:
+        description: "Only these model ids, comma separated (blank = all). Use with reuse_run_id to redo one without re-paying for the rest."
+        type: string
+        default: ""
 
 permissions:
   id-token: write
@@ -102,6 +106,7 @@ jobs:
           BAKEOFF_DURATION_S: ${{ inputs.duration }}
           KEY_IMAGE_URL: ${{ inputs.key_image_url }}
           BAKEOFF_PROMPT: ${{ inputs.prompt }}
+          BAKEOFF_MODELS: ${{ inputs.models }}
           SEED_CLIP_PATH: ${{ github.workspace }}/bakeoff/seed-clip.mp4
         run: |
           set -euo pipefail

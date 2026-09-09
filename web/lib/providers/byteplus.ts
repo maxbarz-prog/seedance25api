@@ -104,12 +104,23 @@ export function buildGenerationBody(req: GenerationRequest): Record<string, unkn
       });
     }
   }
+  // A first- or last-frame image fixes the output ratio: the provider takes
+  // it from the image and rejects any explicit ratio outright —
+  //   "For first-frame or first-last-frame generation, the output ratio
+  //    follows the first-frame image."
+  // Found by the model bake-off, which lost a Seedance 2.5 render to it.
+  // Sending the member's chosen ratio alongside a start image fails the whole
+  // request at submit, so it is dropped in favour of adaptive.
+  const framePinned = (req.inputs ?? []).some(
+    (i) => i.role === "first_frame" || i.role === "last_frame"
+  );
   return {
     model: upstreamModel(req.model),
     content,
     resolution: req.resolution,
-    // Extension tasks must run at the source clip's own ratio.
-    ratio: extending ? "adaptive" : req.aspect,
+    // Extension tasks must run at the source clip's own ratio, and so must
+    // anything whose ratio is already pinned by a supplied frame.
+    ratio: extending || framePinned ? "adaptive" : req.aspect,
     duration: req.durationS,
     generate_audio: req.audio,
     watermark: false,

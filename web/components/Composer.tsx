@@ -81,6 +81,11 @@ export default function Composer() {
   // 2.0 Fast and 2.0 Mini have no 1080p output at the provider, so the native
   // option is not offered for them at all.
   const canNative = (NATIVE_1080P_MODEL_IDS as readonly string[]).includes(model);
+  // A supplied first or last frame fixes the output ratio at the provider, so
+  // offering an aspect choice alongside one would be a lie.
+  const framePinned = images.some(
+    (i) => i.role === "first_frame" || i.role === "last_frame"
+  );
 
   async function addImages(files: FileList | null, kind: "image" | "video" | "audio" = "image") {
     if (!files || !files.length) return;
@@ -408,7 +413,13 @@ export default function Composer() {
           <select
             value={aspect}
             onChange={(e) => setAspect(e.target.value)}
-            className="rounded-lg border border-line bg-bg px-2 py-1"
+            disabled={framePinned}
+            title={
+              framePinned
+                ? "A first or last frame sets the aspect — the video matches your image."
+                : undefined
+            }
+            className="rounded-lg border border-line bg-bg px-2 py-1 disabled:opacity-50"
           >
             {ASPECT_RATIOS.map((a) => (
               <option key={a}>{a}</option>

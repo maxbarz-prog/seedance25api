@@ -53,6 +53,10 @@ const MODELS = [
   { id: "seedance-2.0-mini", label: "Seedance 2.0 Mini", upstream: "dreamina-seedance-2-0-mini-260615", perMillion: 3.5, discount: { pct: 0.6, until: "2026-10-07T06:00:00Z" } },
 ];
 
+// BAKEOFF_MODELS limits the run to named models, so a failure in one does not
+// mean paying again for the ones that already succeeded.
+const ONLY = (process.env.BAKEOFF_MODELS || "").split(/[,\s]+/).filter(Boolean);
+
 const UPSCALE_PER_SEC = 0.0072;
 // Our own price formula, from web/lib/pricing.ts.
 const DELIVERY = 0.01, OVERHEAD = 0.1, PROCESSING = 0.035, CREDIT = 0.01;
@@ -243,7 +247,9 @@ async function generate(m, imageUrl) {
         : []),
     ],
     resolution: "480p",
-    ratio: RATIO,
+    // With a first-frame image the provider takes the ratio from that image
+    // and rejects an explicit one. Same rule as production (byteplus.ts).
+    ratio: imageUrl ? "adaptive" : RATIO,
     duration: DURATION_S,
     generate_audio: false,
     watermark: false,
@@ -353,7 +359,7 @@ async function main() {
   }
   const imageUrl = await keyImage();
 
-  for (const m of MODELS) {
+  for (const m of MODELS.filter((m) => !ONLY.length || ONLY.includes(m.id))) {
     const rec = await generate(m, imageUrl);
     if (rec.status === "succeeded") {
       const p = await download(rec.videoUrl, `${m.id}-480p.mp4`);
