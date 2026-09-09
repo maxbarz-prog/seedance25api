@@ -228,6 +228,40 @@ which are a different provider. `ssm-cost.yml` sets or deletes them;
 `stage-check.yml` reads a deployed stage's quotes for free (no auth, no
 generation) and asserts the 1.5 Pro audio rule and the 2.0 Fast refusal.
 
+## Model bake-off, 2026-09-09 (run 34376740213, $1.42 spent)
+
+Four models, same key frame, same prompt, same seed, 5s at 480p then upscaled
+to 1080p. Both versions of every clip are in the run's artifact.
+
+| Model | Tokens | 480p frame | Cost to us | We charge | Margin | Gen |
+|---|---|---|---|---|---|---|
+| Seedance 2.5 | 48,437 | 854x480 | $0.5543 | $0.67 | ok | 247 s |
+| Seedance 2.0 | 50,638 | 864x496 | $0.3905 | $0.46 | ok | 111 s |
+| Seedance 2.0 Fast | 50,638 | 864x496 | $0.2487 | $0.30 | ok | 101 s |
+| Seedance 2.0 Mini | 50,638 | 864x496 | $0.1069 | $0.14 | ok | 79 s |
+
+What it settled:
+
+1. **The token formula is right to 0.03%.** Predicted 50,622 for a 5.04 s
+   864x496 clip, billed 50,638.
+2. **480p is not one frame size.** The 2.0 family renders 864x496; 2.5
+   renders 854x480. `TOKENS_PER_SEC.p480` uses the larger, so a 2.5 quote
+   runs about 4.5% high — the safe direction, by design.
+3. **No render was priced below cost**, and the margin guard's arithmetic now
+   has real provider-reported tokens behind it, not just fixtures.
+4. **2.5 is slow**: 247 s against 79-111 s for the 2.0 family, before the
+   upscale. Worth knowing before it is made the default for long clips.
+5. The upscaler preserves the source aspect rather than padding to 1920 —
+   1880x1080 from 864x496, 1918x1080 from 854x480 — and moves 24 fps to 30.
+
+**The bug it found, which was live:** a first- or last-frame image pins the
+output ratio at the provider, and sending an explicit `ratio` alongside one
+fails the whole request at submit ("For first-frame or first-last-frame
+generation, the output ratio follows the first-frame image"). Any member
+attaching a start image and leaving the aspect on its 16:9 default would have
+had the generation rejected. `buildGenerationBody` now sends `adaptive`
+whenever a frame is supplied, as it already did for extensions.
+
 ## ModelArk facts confirmed on the live key
 
 1. **1080p on `dreamina-seedance-2-5-260628` works** and renders a true
