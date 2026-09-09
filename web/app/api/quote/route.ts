@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { quote } from "@/lib/pricing";
-import { DEFAULT_MODEL, EXTEND_CONTEXT_S, MIN_DURATION_S, MODELS, ModelId } from "@/lib/config";
+import { DEFAULT_MODEL, EXTEND_CONTEXT_S, MIN_DURATION_S, MODEL_IDS, MODELS, ModelId } from "@/lib/config";
 
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams;
   const modelParam = p.get("model") ?? DEFAULT_MODEL;
-  if (!(modelParam in MODELS)) {
+  // MODEL_IDS, not MODELS: a model defined without a confirmed provider rate
+  // cannot be quoted at all, and asking for one is a bad request, not a 500.
+  if (!(MODEL_IDS as string[]).includes(modelParam)) {
     return NextResponse.json({ error: "Unknown model." }, { status: 400 });
   }
   const model = modelParam as ModelId;

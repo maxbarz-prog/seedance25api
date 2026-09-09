@@ -1,0 +1,60 @@
+name: Stage smoke check
+
+# Reads the public endpoints of a deployed stage: the quote API for every
+# sold model and the pricing page. No auth, no writes, no generation, so it
+# costs nothing and can be run freely to confirm what a deploy actually
+# serves. The heavier browser run is dev-e2e.yml.
+
+on:
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+    paths:
+      - ".github/workflows/stage-check.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage to read (dev -> https://dev.remerged.click)"
+        type: string
+        default: dev
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Quote every sold model
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -uo pipefail
+          base="https://$STAGE.remerged.click"
+          [ "$STAGE" = "prod" ] && base="https://remerged.click"
+          echo "base=$base"
+          fail=0
+          printf '%-22s %-16s %6s %10s\n' MODEL MODE DUR PRICE
+          for model in seedance-2.5 seedance-2.0 seedance-2.0-fast; do
+            for mode in upscaled-1080p native-1080p; do
+              for d in 5 15; do
+                body=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=$d&mode=$mode")
+                usd=$(printf '%s' "$body" | jq -r '.usd // ("ERR " + (.error // "?"))')
+                printf '%-22s %-16s %6s %10s\n' "$model" "$mode" "${d}s" "$usd"
+                case "$usd" in ERR*) fail=1 ;; esac
+              done
+            done
+          done
+          # An unpriced model must be refused cleanly, not 500.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+            "$base/api/quote?model=seedance-1.5-pro&duration=5")
+          echo "unpriced model -> HTTP $code (expect 400)"
+          [ "$code" = "400" ] || fail=1
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "$base/pricing")
+          echo "pricing page   -> HTTP $code (expect 200)"
+          [ "$code" = "200" ] || fail=1
+          exit $fail

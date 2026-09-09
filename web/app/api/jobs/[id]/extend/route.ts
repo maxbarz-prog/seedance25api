@@ -4,7 +4,17 @@ import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { addLedger, balance, createJob, jobById, storageUsedBytes } from "@/lib/db";
 import { quote } from "@/lib/pricing";
-import { EXTEND_CONTEXT_S, EXTEND_MAX_S, EXTEND_MIN_S, MAX_PROMPT_CHARS, MODELS, PLANS } from "@/lib/config";
+import {
+  DEFAULT_MODEL,
+  EXTEND_CONTEXT_S,
+  EXTEND_MAX_S,
+  EXTEND_MIN_S,
+  MAX_PROMPT_CHARS,
+  MODEL_IDS,
+  MODELS,
+  ModelId,
+  PLANS,
+} from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
 
 // Continue an existing (ready) clip by N more seconds. The result is a new
@@ -47,7 +57,11 @@ export async function POST(
     );
   }
   const b = parsed.data;
-  const model = (source.model in MODELS ? source.model : "seedance-2.5") as keyof typeof MODELS;
+  // An extension is quoted like any other render, so the source's model has to
+  // be one we can still price — fall back if it has since been withdrawn.
+  const model = (
+    (MODEL_IDS as string[]).includes(source.model) ? source.model : DEFAULT_MODEL
+  ) as ModelId;
   const q = quote({
     model,
     durationS: b.durationS,
