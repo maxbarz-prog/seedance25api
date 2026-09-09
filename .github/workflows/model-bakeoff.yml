@@ -26,7 +26,7 @@ on:
         type: string
         default: "5"
       key_image_url:
-        description: "Reuse a key frame from an earlier run (blank = generate a new one, ~$0.03)"
+        description: "Reuse a key frame from an earlier run (blank = render a new one, ~$0.08)"
         type: string
         default: ""
       prompt:

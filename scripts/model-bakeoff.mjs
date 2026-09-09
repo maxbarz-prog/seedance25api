@@ -105,30 +105,107 @@ async function arkPoll(id, label, timeoutMs = 25 * 60_000) {
   }
 }
 
-// One key frame, generated once and reused by every model, so the comparison
-// is of the models rather than of seven different opening shots.
+// One key frame, reused by every model, so the comparison is of the models
+// rather than of seven different opening shots.
+//
+// No image-generation model is activated on this account, so the frame is
+// made from a video model instead: the cheapest one renders a short clip,
+// and its first frame becomes the shared starting point. That costs a few
+// cents, uses only what we already have, and produces a photographic frame
+// rather than a synthetic test card — which matters, because how a model
+// handles real texture and light is most of what we are comparing.
+//
+// The frame has to be somewhere the provider can fetch, so it goes to our
+// own media bucket behind a presigned URL that expires the same day.
+//
+// KEY_IMAGE_URL short-circuits all of this, which is how a later run is made
+// directly comparable to an earlier one: pass back the frame it used.
+
+// Cheapest model on the list, and the shortest clip it will take: this is a
+// means to a still image, not something anyone will watch.
+const SEED_MODEL = { id: "seedance-1.0-pro-fast", upstream: "seedance-1-0-pro-fast-251015", perMillion: 1.0 };
+const SEED_CLIP_S = 4;
+
+function sh(cmd, args) {
+  return execFileSync(cmd, args, { encoding: "utf8" }).trim();
+}
+
+// SST names the bucket for us, so find it rather than hard-coding a name
+// that changes with every stack.
+function mediaBucket() {
+  if (process.env.VIDEO_BUCKET) return process.env.VIDEO_BUCKET;
+  const out = sh("aws", [
+    "s3api", "list-buckets",
+    "--query", "Buckets[].Name", "--output", "text",
+  ]);
+  const found = out
+    .split(/\s+/)
+    .find((b) => /remerged/i.test(b) && /media/i.test(b));
+  if (!found) throw new Error("could not find the media bucket");
+  return found;
+}
+
+async function uploadFrame(localPath) {
+  const bucket = mediaBucket();
+  const key = `tmp/bakeoff/${Date.now()}-key-frame.png`;
+  sh("aws", ["s3", "cp", localPath, `s3://${bucket}/${key}`, "--content-type", "image/png"]);
+  const url = sh("aws", ["s3", "presign", `s3://${bucket}/${key}`, "--expires-in", "43200"]);
+  log(`key frame uploaded to ${bucket}/${key}`);
+  return url;
+}
+
 async function keyImage() {
   if (process.env.KEY_IMAGE_URL) {
-    log("key image: reusing", process.env.KEY_IMAGE_URL.slice(0, 60));
-    return process.env.KEY_IMAGE_URL;
+    const url = process.env.KEY_IMAGE_URL.trim();
+    // Check it is fetchable before spending anything on renders that would
+    // all fail the same way.
+    const probe = await fetch(url).catch((e) => ({ ok: false, status: String(e) }));
+    if (!probe.ok) throw new Error(`KEY_IMAGE_URL is not fetchable: ${probe.status}`);
+    log("key frame: reusing the supplied one");
+    summary.keyImageUrl = url;
+    summary.keyImageSource = "supplied";
+    return url;
   }
-  log("key image: generating with", IMAGE_MODEL);
-  const r = await req(`${ARK}/images/generations`, {
+
+  log(`key frame: rendering a ${SEED_CLIP_S}s seed clip with ${SEED_MODEL.id}`);
+  const sub = await req(`${ARK}/contents/generations/tasks`, {
     method: "POST",
     headers: arkHeaders(),
     body: JSON.stringify({
-      model: IMAGE_MODEL,
-      prompt: IMAGE_PROMPT,
-      size: "2K",
-      response_format: "url",
+      model: SEED_MODEL.upstream,
+      content: [{ type: "text", text: IMAGE_PROMPT }],
+      // 720p: comfortably sharper than the 480p renders it seeds, without
+      // paying 1080p prices for a frame nobody watches.
+      resolution: "720p",
+      ratio: RATIO,
+      duration: SEED_CLIP_S,
+      generate_audio: false,
       watermark: false,
+      seed: SEED,
     }),
   });
-  if (!r.ok) throw new Error(`key image failed ${r.status}: ${r.text.slice(0, 300)}`);
-  const url = r.json?.data?.[0]?.url;
-  if (!url) throw new Error(`key image: no url in ${r.text.slice(0, 300)}`);
+  if (!sub.ok) {
+    throw new Error(`seed clip submit failed ${sub.status}: ${(sub.json?.error?.message || sub.text).slice(0, 300)}`);
+  }
+  const done = await arkPoll(sub.json.id, "seed-clip");
+  if (done.status !== "succeeded") {
+    throw new Error(`seed clip ${done.status}: ${JSON.stringify(done.error || {}).slice(0, 300)}`);
+  }
+  summary.seedClip = {
+    model: SEED_MODEL.id,
+    tokens: done.usage?.total_tokens,
+    usd: ((done.usage?.total_tokens ?? 0) * SEED_MODEL.perMillion) / 1e6,
+  };
+  log(`seed clip done: ${summary.seedClip.tokens} tokens, $${summary.seedClip.usd.toFixed(4)}`);
+
+  const clip = await download(done.content?.video_url, "seed-clip.mp4");
+  if (!clip) throw new Error("seed clip could not be downloaded");
+  const framePath = join(OUT_DIR, "key-frame.png");
+  // Frame 0 exactly — the same still every model starts from.
+  execFileSync("ffmpeg", ["-y", "-i", clip, "-vf", "select=eq(n\\,0)", "-vframes", "1", framePath]);
+  const url = await uploadFrame(framePath);
   summary.keyImageUrl = url;
-  log("key image ready");
+  summary.keyImageSource = `frame 0 of a ${SEED_CLIP_S}s ${SEED_MODEL.id} clip`;
   return url;
 }
 
@@ -138,7 +215,9 @@ async function generate(m, imageUrl) {
     model: m.upstream,
     content: [
       { type: "text", text: PROMPT },
-      { type: "image_url", image_url: { url: imageUrl }, role: "first_frame" },
+      ...(imageUrl
+        ? [{ type: "image_url", image_url: { url: imageUrl }, role: "first_frame" }]
+        : []),
     ],
     resolution: "480p",
     ratio: RATIO,
@@ -265,11 +344,13 @@ async function main() {
     Object.assign(rec, verdictFor(m, rec));
     summary.models.push(rec);
   }
-  await download(summary.keyImageUrl, "key-frame.png");
+  if (summary.keyImageUrl) await download(summary.keyImageUrl, "key-frame.png");
 
   const ok = summary.models.filter((r) => r.tokens);
+  const seedUsd = summary.seedClip?.usd ?? 0;
   summary.totals = {
-    providerUsd: Number(ok.reduce((a, r) => a + (r.providerUsd || 0), 0).toFixed(4)),
+    seedClipUsd: Number(seedUsd.toFixed(4)),
+    providerUsd: Number((ok.reduce((a, r) => a + (r.providerUsd || 0), 0) + seedUsd).toFixed(4)),
     chargedUsd: Number(ok.reduce((a, r) => a + (r.chargedUsd || 0), 0).toFixed(2)),
     losses: summary.models.filter((r) => r.verdict === "LOSS").map((r) => r.id),
   };
@@ -282,6 +363,8 @@ async function main() {
       const p4 = r.probe480 || {}, p10 = r.probe1080 || {};
       return `| ${r.label} | ${r.tokens ?? "—"} | ${r.providerUsd ? "$" + r.providerUsd.toFixed(4) : "—"} | ${r.chargedUsd ? "$" + r.chargedUsd.toFixed(2) : "—"} | ${r.verdict ?? "—"} | ${p4.width ? `${p4.width}x${p4.height}` : r.error ? "failed" : "—"} | ${p10.width ? `${p10.width}x${p10.height}` : r.upscaleError ? "failed" : "—"} | ${r.wallS ? r.wallS + "s" : "—"} |`;
     }),
+    "",
+    `Key frame: ${summary.keyImageSource}. Prompt seed ${SEED}, ${DURATION_S}s, 480p then upscaled to 1080p.`,
     "",
     `**Spent: $${summary.totals.providerUsd}** across ${ok.length} renders. Members would have paid $${summary.totals.chargedUsd}.`,
     summary.totals.losses.length
