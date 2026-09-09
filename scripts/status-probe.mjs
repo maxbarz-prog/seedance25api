@@ -105,6 +105,28 @@ async function main() {
     out.providers.push(await probe("fal:app-meta", `https://fal.run/${FAL_MODEL}`, { headers: h, method: "GET" }));
   }
 
+  // The model catalogue: which video models this account may actually call.
+  // Used to choose what to offer members rather than guessing from docs.
+  if (ark) {
+    const r = await probe("ark:catalogue", `${ARK}/models`, {
+      headers: { Authorization: `Bearer ${ark}`, "Content-Type": "application/json" },
+    });
+    try {
+      const res = await fetch(`${ARK}/models`, { headers: { Authorization: `Bearer ${ark}` } });
+      const body = await res.json();
+      const all = body?.data ?? [];
+      out.catalogue = {
+        total: all.length,
+        byDomain: all.reduce((acc, m) => ((acc[m.domain || "?"] = (acc[m.domain || "?"] || 0) + 1), acc), {}),
+        video: all
+          .filter((m) => /video|seedance|dreamina/i.test(`${m.id} ${m.domain ?? ""}`))
+          .map((m) => ({ id: m.id, domain: m.domain, created: m.created })),
+      };
+    } catch (e) {
+      out.catalogue = { error: String(e).slice(0, 200), probe: r };
+    }
+  }
+
   console.log(JSON.stringify(out, null, 2));
   if (process.env.GITHUB_STEP_SUMMARY) {
     const { appendFileSync } = await import("node:fs");
