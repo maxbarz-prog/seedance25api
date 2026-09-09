@@ -15,9 +15,12 @@ import {
   MAX_PROMPT_CHARS,
   MAX_VARIATIONS,
   MIN_DURATION_S,
+  MODEL_IDS,
   MODELS,
   ModelId,
 } from "@/lib/config";
+import CreditsDialog, { CreditsBlock } from "./CreditsDialog";
+import { BALANCE_EVENT } from "./Header";
 
 const ROLE_LABELS: Record<ImageRole, string> = {
   reference: "Reference",
@@ -44,6 +47,7 @@ export default function Composer() {
   const [q, setQ] = useState<Quote | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [block, setBlock] = useState<CreditsBlock | null>(null);
   const [uploadsEnabled, setUploadsEnabled] = useState(false);
   const [images, setImages] = useState<
     { key: string; preview: string; role: InputRole; name: string }[]
@@ -66,6 +70,13 @@ export default function Composer() {
   const imageCount = images.filter((i) => !i.role.startsWith("reference_")).length;
   const videoCount = images.filter((i) => i.role === "reference_video").length;
   const audioCount = images.filter((i) => i.role === "reference_audio").length;
+
+  // Some models take only one kind of prompt (the lite pair is split into a
+  // text-to-video and an image-to-video build), so the model list has to
+  // follow what has actually been attached.
+  const needs: "text" | "image" = imageCount > 0 ? "image" : "text";
+  const compatible = (m: ModelId) =>
+    (MODELS[m].accepts as readonly string[]).includes(needs);
 
   async function addImages(files: FileList | null, kind: "image" | "video" | "audio" = "image") {
     if (!files || !files.length) return;
@@ -149,7 +160,7 @@ export default function Composer() {
       if (raw) {
         const d = JSON.parse(raw);
         if (d.prompt) setPrompt(d.prompt);
-        if (d.model && d.model in MODELS) setModel(d.model);
+        if (d.model && MODEL_IDS.includes(d.model)) setModel(d.model);
         if (d.durationS) setDurationS(d.durationS);
         if (d.aspect) setAspect(d.aspect);
         if (typeof d.audio === "boolean") setAudio(d.audio);
@@ -169,6 +180,14 @@ export default function Composer() {
   useEffect(() => {
     if (durationS > maxDuration) setDurationS(maxDuration);
   }, [durationS, maxDuration]);
+
+  useEffect(() => {
+    if (!compatible(model)) {
+      const fallback = MODEL_IDS.find(compatible);
+      if (fallback) setModel(fallback);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needs, model]);
 
   useEffect(() => {
     const ctl = new AbortController();
@@ -212,7 +231,14 @@ export default function Composer() {
         return;
       }
       if (res.status === 402) {
-        router.push(data.error === "membership_required" ? "/account?join=1" : "/account?topup=1");
+        setBlock({
+          reason:
+            data.error === "membership_required"
+              ? "membership_required"
+              : "insufficient_credits",
+          needed: data.needed,
+          balance: data.balance,
+        });
         return;
       }
       if (!res.ok) {
@@ -222,6 +248,7 @@ export default function Composer() {
       try {
         localStorage.removeItem(DRAFT_KEY);
       } catch {}
+      window.dispatchEvent(new Event(BALANCE_EVENT));
       router.push(variations > 1 ? "/library" : `/jobs/${data.id}`);
     } finally {
       setBusy(false);
@@ -230,6 +257,7 @@ export default function Composer() {
 
   return (
     <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
+      <CreditsDialog block={block} onClose={() => setBlock(null)} />
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT_CHARS))}
@@ -321,17 +349,32 @@ export default function Composer() {
 
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
         <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
-          {(Object.values(MODELS) as (typeof MODELS)[ModelId][]).map((m) => (
-            <button
-              key={m.id}
-              onClick={() => setModel(m.id)}
-              className={`rounded-full px-3 py-1 ${
-                model === m.id ? "bg-accent text-accent-ink" : "text-muted"
-              }`}
-            >
-              {m.label}
-            </button>
-          ))}
+          {MODEL_IDS.map((id) => {
+            const ok = compatible(id);
+            return (
+              <button
+                key={id}
+                onClick={() => setModel(id)}
+                disabled={!ok}
+                title={
+                  ok
+                    ? undefined
+                    : needs === "image"
+                      ? `${MODELS[id].label} is text-to-video only.`
+                      : `${MODELS[id].label} needs a starting image.`
+                }
+                className={`rounded-full px-3 py-1 ${
+                  model === id
+                    ? "bg-accent text-accent-ink"
+                    : ok
+                      ? "text-muted"
+                      : "cursor-not-allowed text-muted/40"
+                }`}
+              >
+                {MODELS[id].label}
+              </button>
+            );
+          })}
         </div>
 
         <label className="flex items-center gap-2">

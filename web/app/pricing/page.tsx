@@ -1,20 +1,26 @@
+import { Fragment } from "react";
 import Link from "next/link";
-import { MIN_TOPUP_USD, MODELS, PLANS, SITE_NAME } from "@/lib/config";
+import { MIN_TOPUP_USD, MODEL_IDS, MODELS, ModelId, PLANS, SITE_NAME } from "@/lib/config";
 import { fmtUsd, quote, rates } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
 export default function PricingPage() {
   const r = rates();
-  const durations = [5, 15, 30];
-  const price = (model: keyof typeof MODELS, d: number) =>
+  const durations = [5, 10, 15, 30];
+  const price = (model: ModelId, d: number) =>
     d <= MODELS[model].maxDurationS
       ? fmtUsd(quote({ model, durationS: d, mode: "upscaled-1080p", upscaleFactor: 2 }).usd)
       : "—";
-  const nativePrice = (model: keyof typeof MODELS, d: number) =>
+  const nativePrice = (model: ModelId, d: number) =>
     d <= MODELS[model].maxDurationS
       ? fmtUsd(quote({ model, durationS: d, mode: "native-1080p" }).usd)
       : "—";
+  const inputs = (model: ModelId) => {
+    const a = MODELS[model].accepts as readonly string[];
+    if (a.includes("text") && a.includes("image")) return "text + image";
+    return a.includes("image") ? "image only" : "text only";
+  };
 
   return (
     <div className="py-10">
@@ -33,7 +39,7 @@ export default function PricingPage() {
             <span className="text-base font-normal text-muted">/month</span>
           </p>
           <ul className="mt-3 space-y-1 text-sm text-muted">
-            <li>Seedance 2.0 &amp; 2.5, up to 30s clips</li>
+            <li>Every Seedance model we can run, up to 30s clips</li>
             <li>{PLANS.monthly.storageGb} GB video storage</li>
             <li>Credits never expire</li>
           </ul>
@@ -71,34 +77,38 @@ export default function PricingPage() {
               </tr>
             </thead>
             <tbody>
-              {(Object.keys(MODELS) as (keyof typeof MODELS)[]).map((m) => (
-                <>
-                  <tr key={`${m}-up`} className="border-b border-line">
-                    <td className="p-4">{MODELS[m].label}</td>
-                    <td className="p-4 text-muted">1080p upscaled (default)</td>
+              {MODEL_IDS.map((m) => (
+                <Fragment key={m}>
+                  <tr className="border-b border-line/50">
+                    <td className="p-4 pb-1 align-bottom" rowSpan={2}>
+                      <div className="font-medium">{MODELS[m].label}</div>
+                      <div className="text-xs text-muted">
+                        up to {MODELS[m].maxDurationS}s · {inputs(m)}
+                      </div>
+                    </td>
+                    <td className="p-4 pb-1 text-muted">1080p upscaled (default)</td>
                     {durations.map((d) => (
-                      <td key={d} className="p-4 font-medium">
+                      <td key={d} className="p-4 pb-1 font-medium tabular-nums">
                         {price(m, d)}
                       </td>
                     ))}
                   </tr>
-                  <tr key={`${m}-native`} className="border-b border-line last:border-0">
-                    <td className="p-4"></td>
-                    <td className="p-4 text-muted">1080p native</td>
+                  <tr className="border-b border-line last:border-0">
+                    <td className="px-4 pb-4 pt-0 text-muted">1080p native</td>
                     {durations.map((d) => (
-                      <td key={d} className="p-4">
+                      <td key={d} className="px-4 pb-4 pt-0 tabular-nums">
                         {nativePrice(m, d)}
                       </td>
                     ))}
                   </tr>
-                </>
+                </Fragment>
               ))}
             </tbody>
           </table>
         </div>
         <p className="mt-2 text-xs text-muted">
           Live rates — these numbers move when our costs move, in both
-          directions. Seedance 2.0 supports up to 15s; Seedance 2.5 up to 30s.
+          directions. A dash means the model does not go that long.
         </p>
       </section>
 

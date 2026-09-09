@@ -77,6 +77,25 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+  // Model input compatibility: the lite pair is split into a text-to-video
+  // and an image-to-video build, so a request has to match what the chosen
+  // model actually takes.
+  const hasImage = b.images.some(
+    (i) => i.role !== "reference_video" && i.role !== "reference_audio"
+  );
+  const accepts = MODELS[model].accepts as readonly string[];
+  if (hasImage && !accepts.includes("image")) {
+    return NextResponse.json(
+      { error: `${MODELS[model].label} is text-to-video only — remove the image.` },
+      { status: 400 }
+    );
+  }
+  if (!hasImage && !accepts.includes("text")) {
+    return NextResponse.json(
+      { error: `${MODELS[model].label} needs a starting image.` },
+      { status: 400 }
+    );
+  }
   if (b.images.some((i) => !i.key.startsWith(`uploads/${user.id}/`))) {
     return NextResponse.json({ error: "Invalid image reference." }, { status: 400 });
   }

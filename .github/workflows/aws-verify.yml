@@ -24,3 +24,15 @@ jobs:
 
       - name: Who am I
         run: aws sts get-caller-identity
+
+      # Parameter NAMES only — never values. Enough to see which cost
+      # overrides exist in SSM, since an override silently wins over the rate
+      # derived in code and would keep an old (wrong) price in force.
+      - name: List /remerged parameter names
+        run: |
+          set -euo pipefail
+          for stage in dev prod; do
+            echo "--- /remerged/$stage ---"
+            aws ssm get-parameters-by-path --path "/remerged/$stage" \
+              --query 'Parameters[].Name' --output text | tr '\t' '\n' | sort || true
+          done

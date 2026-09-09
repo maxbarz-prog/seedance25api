@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { EXTEND_CONTEXT_S, EXTEND_MAX_S, EXTEND_MIN_S } from "@/lib/config";
+import CreditsDialog, { CreditsBlock } from "@/components/CreditsDialog";
+import { BALANCE_EVENT } from "@/components/Header";
 
 interface Job {
   id: string;
@@ -46,6 +48,7 @@ export default function JobView({ id }: { id: string }) {
   const [extendQuote, setExtendQuote] = useState<number | null>(null);
   const [extending, setExtending] = useState(false);
   const [extendError, setExtendError] = useState<string | null>(null);
+  const [block, setBlock] = useState<CreditsBlock | null>(null);
 
   useEffect(() => {
     if (!job || !extendOpen) return;
@@ -71,13 +74,21 @@ export default function JobView({ id }: { id: string }) {
       });
       const data = await res.json();
       if (res.status === 402) {
-        router.push(data.error === "membership_required" ? "/account?join=1" : "/account?topup=1");
+        setBlock({
+          reason:
+            data.error === "membership_required"
+              ? "membership_required"
+              : "insufficient_credits",
+          needed: data.needed,
+          balance: data.balance,
+        });
         return;
       }
       if (!res.ok) {
         setExtendError(data.message || data.error || "Something went wrong.");
         return;
       }
+      window.dispatchEvent(new Event(BALANCE_EVENT));
       router.push(`/jobs/${data.id}`);
     } finally {
       setExtending(false);
@@ -125,6 +136,7 @@ export default function JobView({ id }: { id: string }) {
 
   return (
     <div className="py-10">
+      <CreditsDialog block={block} onClose={() => setBlock(null)} />
       <p className="text-sm text-muted">
         “{job.prompt.slice(0, 140)}
         {job.prompt.length > 140 ? "…" : ""}”

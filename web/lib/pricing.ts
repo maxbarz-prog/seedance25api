@@ -1,4 +1,4 @@
-import { CREDIT_USD, ModelId } from "./config";
+import { CREDIT_USD, MODELS, ModelId, TOKENS_PER_SEC } from "./config";
 
 // The pricing model. Every number here is a COST INPUT: provider rates per
 // model, a delivery allocation for storage/egress, an operations overhead
@@ -6,9 +6,17 @@ import { CREDIT_USD, ModelId } from "./config";
 // support), and a payment-processing recovery factor. The public pricing
 // page renders the same formula this module computes with.
 //
-// Rates are env-overridable so production can track upstream price changes
-// without a deploy. Generation defaults are provisional until the validation
-// run reads real provider billing; they err on the high side.
+// Generation cost is DERIVED, not tabulated. The provider bills tokens:
+//     tokens = duration x width x height x fps / 1024
+// and charges a published price per million of them, so cost per output
+// second is that price times TOKENS_PER_SEC — arithmetic, not a guess. The
+// per-model rates live in config.ts next to the model definition, which is
+// the only place a new model has to be described.
+//
+// Every derived rate is still env-overridable so production can track an
+// upstream price change without a deploy (COST_<MODEL>_480P_PER_SEC etc.,
+// where <MODEL> is the model id shortened the way envKey() below does it:
+// seedance-2.0-fast -> SD20_FAST).
 
 function envNum(name: string, fallback: number): number {
   const v = process.env[name];
@@ -17,36 +25,47 @@ function envNum(name: string, fallback: number): number {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+// seedance-2.5 -> SD25, seedance-2.0-fast -> SD20_FAST,
+// seedance-1.0-lite-t2v -> SD10_LITE_T2V. Keeps the COST_SD25_* /
+// COST_SD20_* names already set in SSM working unchanged.
+function envKey(model: ModelId): string {
+  const [version, ...rest] = model.replace(/^seedance-/, "").split("-");
+  return ["SD" + version.replace(".", ""), ...rest.map((s) => s.toUpperCase())].join("_");
+}
+
 export type UpscaleFactor = 2 | 4;
 
-export function rates() {
+export interface GenRates {
+  p480: number;
+  p1080: number;
+  // Requests carrying a reference video (extensions) bill at a lower price
+  // per token, but the reference clip's seconds count as input. These are the
+  // with-video rate over the plain rate, per resolution.
+  videoInputRatio480: number;
+  videoInputRatio1080: number;
+}
+
+// Per-second provider cost for one model, from its token rate, with each
+// number overridable from the environment.
+function genRates(model: ModelId): GenRates | null {
+  const per = MODELS[model].perMillion;
+  // A model with no confirmed token rate is not sellable: we sell at cost and
+  // cannot cost what we do not know.
+  if (!per) return null;
+  const k = envKey(model);
   return {
-    // Provider: generation per output second, by model and resolution.
-    gen: {
-      "seedance-2.5": {
-        p480: envNum("COST_SD25_480P_PER_SEC", 0.1028),
-        p1080: envNum("COST_SD25_1080P_PER_SEC", 0.5202),
-        // Requests that carry a reference video (extensions) are billed at a
-        // lower per-token price, but the reference clip's seconds count as
-        // input. Ratio of the with-video to the plain rate ($6.40 / $10.70).
-        videoInputRatio: envNum("COST_SD25_VIDEO_INPUT_RATIO", 0.598),
-      },
-      "seedance-2.0": {
-        p480: envNum("COST_SD20_480P_PER_SEC", 0.0432),
-        p1080: envNum("COST_SD20_1080P_PER_SEC", 0.2091),
-        videoInputRatio: envNum("COST_SD20_VIDEO_INPUT_RATIO", 1),
-      },
-      // NOT YET MEASURED. Defaults deliberately mirror Seedance 2.0 rather
-      // than guessing lower: a fast variant is normally cheaper, so this errs
-      // towards charging slightly too much rather than selling below cost.
-      // Measure with provider-check before this model goes to production and
-      // set COST_SD20_FAST_* in SSM.
-      "seedance-2.0-fast": {
-        p480: envNum("COST_SD20_FAST_480P_PER_SEC", 0.0432),
-        p1080: envNum("COST_SD20_FAST_1080P_PER_SEC", 0.2091),
-        videoInputRatio: envNum("COST_SD20_FAST_VIDEO_INPUT_RATIO", 1),
-      },
-    } satisfies Record<ModelId, { p480: number; p1080: number; videoInputRatio: number }>,
+    p480: envNum(`COST_${k}_480P_PER_SEC`, (per.sd * TOKENS_PER_SEC.p480) / 1e6),
+    p1080: envNum(`COST_${k}_1080P_PER_SEC`, (per.hd * TOKENS_PER_SEC.p1080) / 1e6),
+    videoInputRatio480: envNum(`COST_${k}_VIDEO_INPUT_RATIO`, per.withVideo / per.sd),
+    videoInputRatio1080: envNum(`COST_${k}_VIDEO_INPUT_RATIO_1080P`, per.withVideo / per.hd),
+  };
+}
+
+export function rates() {
+  const gen = {} as Record<ModelId, GenRates | null>;
+  for (const id of Object.keys(MODELS) as ModelId[]) gen[id] = genRates(id);
+  return {
+    gen,
     // Provider: upscaler, per source second. ByteDance Video Upscaler via fal,
     // published 30fps rates: $0.0072/s to 1080p, $0.0288/s to 4K.
     upscale2xPerSec: envNum("COST_UPSCALE_2X_PER_SEC", 0.0072),
@@ -86,14 +105,14 @@ export function quote(input: QuoteInput): Quote {
   const d = input.durationS;
   const ctx = input.contextS ?? 0;
   const gen = r.gen[input.model];
+  if (!gen) throw new Error(`no confirmed provider rate for ${input.model}`);
   const genSeconds = d + ctx;
-  const ratio = ctx > 0 ? gen.videoInputRatio : 1;
   let providerUsd: number;
   if (input.mode === "native-1080p") {
-    providerUsd = gen.p1080 * genSeconds * ratio;
+    providerUsd = gen.p1080 * genSeconds * (ctx > 0 ? gen.videoInputRatio1080 : 1);
   } else {
     const up = input.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec;
-    providerUsd = gen.p480 * genSeconds * ratio + up * d;
+    providerUsd = gen.p480 * genSeconds * (ctx > 0 ? gen.videoInputRatio480 : 1) + up * d;
   }
   const usd =
     ((providerUsd + r.deliveryPerVideo) * (1 + r.overheadPct)) / (1 - r.processingPct);

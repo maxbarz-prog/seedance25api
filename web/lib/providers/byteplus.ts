@@ -1,3 +1,4 @@
+import { MODELS, ModelId } from "../config";
 import {
   GenerationRequest,
   ProviderBusyError,
@@ -46,15 +47,18 @@ const BASE =
   process.env.BYTEPLUS_API_BASE ||
   "https://ark.ap-southeast.bytepluses.com/api/v3";
 
-// Product model id -> ModelArk model id (env-overridable).
+// Product model id -> ModelArk model id. The mapping lives in the model
+// registry (lib/config.ts) so adding a model is a single edit there; each id
+// stays individually env-overridable for the day the provider bumps a version
+// suffix, e.g. BYTEPLUS_SEEDANCE_2_0_FAST_MODEL.
 function upstreamModel(productModel: string): string {
-  if (productModel === "seedance-2.0") {
-    return process.env.BYTEPLUS_SEEDANCE_20_MODEL || "dreamina-seedance-2-0-260128";
-  }
-  if (productModel === "seedance-2.0-fast") {
-    return process.env.BYTEPLUS_SEEDANCE_20_FAST_MODEL || "dreamina-seedance-2-0-fast-260128";
-  }
-  return process.env.BYTEPLUS_SEEDANCE_25_MODEL || "dreamina-seedance-2-5-260628";
+  const envName =
+    "BYTEPLUS_" + productModel.toUpperCase().replace(/[-.]/g, "_") + "_MODEL";
+  const override = process.env[envName];
+  if (override) return override;
+  const entry = MODELS[productModel as ModelId];
+  if (!entry) throw new Error(`unknown model ${productModel}`);
+  return entry.upstream;
 }
 
 function headers() {

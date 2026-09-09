@@ -32,19 +32,115 @@ export const PLANS = {
 
 export type PlanId = keyof typeof PLANS;
 
-// Generation models on offer, best first. Duration ceilings mirror each
-// model's contract. Each model version carries its own concurrency quota at
-// the provider, so offering more than one also widens the throughput we can
-// draw on, not just the choice a member gets.
+// Every video model this account can call, newest first.
+//
+// `perMillion` is the provider's own token rate, in USD per million tokens,
+// which is how it actually bills:
+//     tokens = duration x width x height x fps / 1024
+// That formula reproduces our measured usage to within 0.04%, so a model's
+// cost per second is arithmetic rather than something to guess — but only
+// once its rate is known. A model with `perMillion: null` is defined here
+// and deliberately NOT offered, because we sell at cost and must not price
+// what we cannot cost. Fill in the rate from the provider console
+// (Activation Management shows per-model pricing) and it appears by itself.
+//
+// `sd` covers renders up to 720p, `hd` is 1080p, and `withVideo` is the
+// lower rate charged when a reference video rides along (an extension).
+//
+// Each model version also carries its own concurrency quota at the provider,
+// so offering several widens total throughput, not just member choice.
 export const MODELS = {
-  "seedance-2.5": { id: "seedance-2.5", label: "Seedance 2.5", maxDurationS: 30 },
-  "seedance-2.0": { id: "seedance-2.0", label: "Seedance 2.0", maxDurationS: 15 },
-  "seedance-2.0-fast": { id: "seedance-2.0-fast", label: "Seedance 2.0 Fast", maxDurationS: 15 },
+  "seedance-2.5": {
+    id: "seedance-2.5",
+    label: "Seedance 2.5",
+    upstream: "dreamina-seedance-2-5-260628",
+    maxDurationS: 30,
+    accepts: ["text", "image"],
+    perMillion: { sd: 10.7, hd: 10.7, withVideo: 6.4 },
+  },
+  "seedance-2.0": {
+    id: "seedance-2.0",
+    label: "Seedance 2.0",
+    upstream: "dreamina-seedance-2-0-260128",
+    maxDurationS: 15,
+    accepts: ["text", "image"],
+    perMillion: { sd: 7.0, hd: 7.7, withVideo: 4.3 },
+  },
+  "seedance-2.0-fast": {
+    id: "seedance-2.0-fast",
+    label: "Seedance 2.0 Fast",
+    upstream: "dreamina-seedance-2-0-fast-260128",
+    maxDurationS: 15,
+    accepts: ["text", "image"],
+    perMillion: { sd: 5.6, hd: 5.6, withVideo: 3.3 },
+  },
+  // --- available on the account, awaiting a confirmed token rate ---
+  "seedance-2.0-mini": {
+    id: "seedance-2.0-mini",
+    label: "Seedance 2.0 Mini",
+    upstream: "dreamina-seedance-2-0-mini-260615",
+    maxDurationS: 15,
+    accepts: ["text", "image"],
+    perMillion: null,
+  },
+  "seedance-1.5-pro": {
+    id: "seedance-1.5-pro",
+    label: "Seedance 1.5 Pro",
+    upstream: "seedance-1-5-pro-251215",
+    maxDurationS: 10,
+    accepts: ["text", "image"],
+    perMillion: null,
+  },
+  "seedance-1.0-pro": {
+    id: "seedance-1.0-pro",
+    label: "Seedance 1.0 Pro",
+    upstream: "seedance-1-0-pro-250528",
+    maxDurationS: 10,
+    accepts: ["text", "image"],
+    perMillion: null,
+  },
+  "seedance-1.0-pro-fast": {
+    id: "seedance-1.0-pro-fast",
+    label: "Seedance 1.0 Pro Fast",
+    upstream: "seedance-1-0-pro-fast-251015",
+    maxDurationS: 10,
+    accepts: ["text", "image"],
+    perMillion: null,
+  },
+  // The lite pair is split by input type — the model id says so — so each
+  // only accepts one kind of prompt.
+  "seedance-1.0-lite-t2v": {
+    id: "seedance-1.0-lite-t2v",
+    label: "Seedance 1.0 Lite (text)",
+    upstream: "seedance-1-0-lite-t2v-250428",
+    maxDurationS: 10,
+    accepts: ["text"],
+    perMillion: null,
+  },
+  "seedance-1.0-lite-i2v": {
+    id: "seedance-1.0-lite-i2v",
+    label: "Seedance 1.0 Lite (image)",
+    upstream: "seedance-1-0-lite-i2v-250428",
+    maxDurationS: 10,
+    accepts: ["image"],
+    perMillion: null,
+  },
 } as const;
 
 export type ModelId = keyof typeof MODELS;
-export const MODEL_IDS = Object.keys(MODELS) as ModelId[];
+
+// Only models we can cost are sold. Everything else stays defined but inert.
+export const MODEL_IDS = (Object.keys(MODELS) as ModelId[]).filter(
+  (id) => MODELS[id].perMillion !== null
+);
+export const ALL_MODEL_IDS = Object.keys(MODELS) as ModelId[];
 export const DEFAULT_MODEL: ModelId = "seedance-2.5";
+
+// Billing units per second of output, from the provider's token formula.
+export const TOKENS_PER_SEC = {
+  p480: (854 * 480 * 24) / 1024,
+  p1080: (1920 * 1080 * 24) / 1024,
+} as const;
 
 export const MIN_DURATION_S = 4;
 export const MAX_DURATION_S = 30; // absolute ceiling (Seedance 2.5)
