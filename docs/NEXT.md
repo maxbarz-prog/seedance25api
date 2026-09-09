@@ -153,24 +153,59 @@ values and an override beats the rate derived in code, so it would have kept
 fix, since with no override the rate comes from the token price in
 `lib/config.ts`.
 
-## Model catalogue and what is still unpriced
+## Model catalogue and provider rates (authoritative, 2026-09-09)
 
-All nine video models the account can call are defined in `web/lib/config.ts`
-with their upstream ModelArk id, max duration, accepted inputs and token
-rate. `MODEL_IDS` is the subset with a known rate — the only models offered,
-because we sell at cost and must not price what we cannot cost.
+Source: the ModelArk pricing page, docs.byteplus.com/en/docs/ModelArk/1544106.
+Every rate below reproduces that page's own worked price examples exactly —
+checked, not assumed. All values are USD per million tokens. `sd` covers 480p
+and 720p output; `hd` is 1080p; "+video" is the lower rate when a reference
+video rides along (an extension), whose seconds bill as input.
 
-Sold: `seedance-2.5` ($10.70/M sd, $10.70 hd, $6.40 with video),
-`seedance-2.0` ($7.00 / $7.70 / $4.30), `seedance-2.0-fast`
-($5.60 / $5.60 / $3.30).
+| Model | sd | sd +video | hd | hd +video |
+|---|---|---|---|---|
+| `dreamina-seedance-2-5-260628` | 10.70 | 6.40 | **11.70** | **7.00** |
+| `dreamina-seedance-2-0-260128` | 7.00 | 4.30 | 7.70 | **4.70** |
+| `dreamina-seedance-2-0-fast-260128` | 5.60 | 3.30 | — | — |
+| `dreamina-seedance-2-0-mini-260615` | 3.50 | 2.10 | — | — |
+| `seedance-1-5-pro-251215` | 1.20 silent / 2.40 with audio (flat) |||| 
+| `seedance-1-0-pro-250528` | 2.50 (flat) ||||
+| `seedance-1-0-pro-fast-251015` | 1.00 (flat) ||||
 
-Defined but not offered, awaiting a confirmed rate from the BytePlus console
-(Activation Management shows per-model pricing): `seedance-2.0-mini`,
-`seedance-1.5-pro`, `seedance-1.0-pro`, `seedance-1.0-pro-fast`,
-`seedance-1.0-lite-t2v` (text input only), `seedance-1.0-lite-i2v` (image
-input only). Filling in `perMillion` for one is the whole job — the picker,
-the pricing table, the API validator and the BytePlus client all read the
-registry.
+Traps in that table, each of which had already cost us money or would have:
+
+1. **2.5's 1080p rate is 11.70, not 10.70.** 10.70 is the 480p/720p tier.
+   Same shape as the 2.0 mistake: a cheaper tier read as the whole price.
+2. **2.0's with-video rate at 1080p is 4.70, not 4.30**, for the same reason.
+3. **2.0 Fast and 2.0 Mini have no 1080p or 4K output at all.** Offering a
+   native-1080p option for them quoted a render the provider will not do.
+   Both API routes now refuse it and the composer hides the option.
+4. **1.5 Pro prices by soundtrack, not resolution.** Quotes take the audio
+   flag through the composer, both routes and the extend flow.
+5. **Frame sizes are not what the docs' headline resolutions suggest.** 480p
+   comes back 864x496 on the 2.0 series (measured: 40,594 tokens for 4.04 s)
+   and 1080p is 1920x1088 on the 1.0 Pro pair (the provider's own token
+   table). `TOKENS_PER_SEC` uses the larger of each, so a quote errs high
+   rather than selling under.
+6. **Minimum token consumption** applies to the 2.0 series and 2.5 when the
+   input includes video: below roughly 4 s of input, the bill is floored.
+   `EXTEND_CONTEXT_S` is 5 s, above the floor, so extensions are unaffected —
+   but lowering it would silently stop reducing cost.
+
+Time-limited promotions live in the registry with their expiry and apply only
+while running, so a rate returns to list by itself when one lapses:
+2.5 1080p 28% off to 2026-09-17; 2.0 Fast 25% and 2.0 Mini 60% off to
+2026-10-07. Baking a discounted number into a table is how a price silently
+goes below cost.
+
+Still unsold: `seedance-1-0-lite-t2v-250428` and `seedance-1-0-lite-i2v-250428`.
+Neither appears on the pricing page, so neither can be costed. They stay
+defined in the registry with `perMillion: null` and are excluded from
+`MODEL_IDS`.
+
+No `COST_*` model overrides remain in SSM — only the two fal upscaler rates,
+which are a different provider. `ssm-cost.yml` sets or deletes them;
+`stage-check.yml` reads a deployed stage's quotes for free (no auth, no
+generation) and asserts the 1.5 Pro audio rule and the 2.0 Fast refusal.
 
 ## ModelArk facts confirmed on the live key
 
