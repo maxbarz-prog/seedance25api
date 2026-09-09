@@ -97,7 +97,10 @@ export default $config({
       environment,
       permissions: [{ actions: ["ses:SendEmail"], resources: ["*"] }],
       transform: {
-        server: { timeout: "120 seconds", memory: "1536 MB" },
+        // nodejs22.x rather than the default: the AWS SDK v3 drops support for
+        // Node 20 in January 2027, and the running Lambda already warns about
+        // it on every cold start.
+        server: { timeout: "120 seconds", memory: "1536 MB", runtime: "nodejs22.x" },
       },
     });
 
@@ -107,6 +110,7 @@ export default $config({
       schedule: "rate(1 minute)",
       function: {
         handler: "functions/advance.handler",
+        runtime: "nodejs22.x",
         timeout: "60 seconds",
         environment: {
           SITE_URL: $interpolate`https://${domain.name}`,
@@ -146,6 +150,7 @@ export default $config({
       });
       const forwarder = new sst.aws.Function("MailForwarder", {
         handler: "functions/mail-forward.handler",
+        runtime: "nodejs22.x",
         timeout: "30 seconds",
         link: [inbound],
         permissions: [{ actions: ["ses:SendEmail", "ses:SendRawEmail"], resources: ["*"] }],
