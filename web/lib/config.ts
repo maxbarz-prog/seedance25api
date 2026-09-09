@@ -60,6 +60,14 @@ export type PlanId = keyof typeof PLANS;
 // A model with `perMillion: null` is defined here and deliberately NOT
 // offered: we sell at cost and must not price what we cannot cost.
 //
+// `activated: false` means the provider lists and prices the model but this
+// account may not call it — a submit answers 404 ModelNotOpen. Appearing in
+// the /models catalogue does NOT mean it is callable; all nine of these are
+// in that catalogue and only four work. Offering one a member cannot use
+// gives them a failed generation, so these are excluded from MODEL_IDS too.
+// Verified by .github/workflows/model-activation.yml, which is free to run:
+// activate a model in the Ark Console, re-run it, and flip the flag.
+//
 // Each model version also carries its own concurrency quota at the provider,
 // so offering several widens total throughput, not just member choice.
 
@@ -128,6 +136,7 @@ export const MODELS = {
     // Priced by soundtrack, not resolution.
     perMillion: { sd: 1.2, hd: 1.2, sdWithVideo: 1.2, hdWithVideo: 1.2 },
     audio: { sd: 2.4, hd: 2.4, sdWithVideo: 2.4, hdWithVideo: 2.4 },
+    activated: false,
   },
   "seedance-1.0-pro": {
     id: "seedance-1.0-pro",
@@ -136,6 +145,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text", "image"],
     perMillion: { sd: 2.5, hd: 2.5, sdWithVideo: 2.5, hdWithVideo: 2.5 },
+    activated: false,
   },
   "seedance-1.0-pro-fast": {
     id: "seedance-1.0-pro-fast",
@@ -144,6 +154,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text", "image"],
     perMillion: { sd: 1.0, hd: 1.0, sdWithVideo: 1.0, hdWithVideo: 1.0 },
+    activated: false,
   },
   // The lite pair is split by input type — the model id says so — so each
   // only accepts one kind of prompt. Neither appears on the provider's
@@ -155,6 +166,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text"],
     perMillion: null,
+    activated: false,
   },
   "seedance-1.0-lite-i2v": {
     id: "seedance-1.0-lite-i2v",
@@ -163,14 +175,18 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["image"],
     perMillion: null,
+    activated: false,
   },
 } as const;
 
 export type ModelId = keyof typeof MODELS;
 
-// Only models we can cost are sold. Everything else stays defined but inert.
+// Sold only if we can cost it AND this account can actually call it.
+// Everything else stays defined but inert.
 export const MODEL_IDS = (Object.keys(MODELS) as ModelId[]).filter(
-  (id) => MODELS[id].perMillion !== null
+  (id) =>
+    MODELS[id].perMillion !== null &&
+    (MODELS[id] as { activated?: boolean }).activated !== false
 );
 export const ALL_MODEL_IDS = Object.keys(MODELS) as ModelId[];
 export const DEFAULT_MODEL: ModelId = "seedance-2.5";

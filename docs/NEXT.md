@@ -197,10 +197,31 @@ while running, so a rate returns to list by itself when one lapses:
 2026-10-07. Baking a discounted number into a table is how a price silently
 goes below cost.
 
-Still unsold: `seedance-1-0-lite-t2v-250428` and `seedance-1-0-lite-i2v-250428`.
-Neither appears on the pricing page, so neither can be costed. They stay
-defined in the registry with `perMillion: null` and are excluded from
-`MODEL_IDS`.
+## Activation: listed and priced is not the same as callable (2026-09-09)
+
+Only FOUR models can actually be called on account 3003868753:
+`dreamina-seedance-2-5-260628`, `dreamina-seedance-2-0-260128`,
+`dreamina-seedance-2-0-fast-260128`, `dreamina-seedance-2-0-mini-260615`.
+
+These five are listed on the pricing page AND present in the `/models`
+catalogue, but a submit answers **404 ModelNotOpen**:
+`seedance-1-5-pro-251215`, `seedance-1-0-pro-250528`,
+`seedance-1-0-pro-fast-251015`, `seedance-1-0-lite-t2v-250428`,
+`seedance-1-0-lite-i2v-250428`. So is every Seedream image model, which is
+why the bake-off cannot generate its own key frame from a still model.
+
+**The `/models` catalogue is not an activation check** — all nine Seedance
+models appear in it. Only a real submit tells them apart. Three of these were
+briefly offered on dev after being added from the pricing page; a member
+choosing one would have got a failed generation.
+
+They carry `activated: false` in the registry, which keeps their verified
+rates but excludes them from `MODEL_IDS`. To turn one on: activate it in the
+Ark Console (Model activation), re-run `model-activation.yml` (free, no
+generation) to confirm, then delete the flag.
+
+Still unpriced regardless of activation: the `1-0-lite` pair, which appears
+nowhere on the pricing page.
 
 No `COST_*` model overrides remain in SSM — only the two fal upscaler rates,
 which are a different provider. `ssm-cost.yml` sets or deletes them;

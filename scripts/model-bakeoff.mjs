@@ -43,14 +43,14 @@ const IMAGE_PROMPT =
 // without video input, in USD per million tokens, and any promotion in force.
 // Mirrors web/lib/config.ts — the point of the run is to check that table
 // against reality, so it is restated here rather than imported.
+// Only models this account can actually call. Being on the price list is not
+// enough: the other five Seedance models are listed and priced but answer 404
+// ModelNotOpen. See .github/workflows/model-activation.yml, which is free.
 const MODELS = [
   { id: "seedance-2.5", label: "Seedance 2.5", upstream: "dreamina-seedance-2-5-260628", perMillion: 10.7 },
   { id: "seedance-2.0", label: "Seedance 2.0", upstream: "dreamina-seedance-2-0-260128", perMillion: 7.0 },
   { id: "seedance-2.0-fast", label: "Seedance 2.0 Fast", upstream: "dreamina-seedance-2-0-fast-260128", perMillion: 5.6, discount: { pct: 0.25, until: "2026-10-07T06:00:00Z" } },
   { id: "seedance-2.0-mini", label: "Seedance 2.0 Mini", upstream: "dreamina-seedance-2-0-mini-260615", perMillion: 3.5, discount: { pct: 0.6, until: "2026-10-07T06:00:00Z" } },
-  { id: "seedance-1.5-pro", label: "Seedance 1.5 Pro", upstream: "seedance-1-5-pro-251215", perMillion: 1.2 },
-  { id: "seedance-1.0-pro", label: "Seedance 1.0 Pro", upstream: "seedance-1-0-pro-250528", perMillion: 2.5 },
-  { id: "seedance-1.0-pro-fast", label: "Seedance 1.0 Pro Fast", upstream: "seedance-1-0-pro-fast-251015", perMillion: 1.0 },
 ];
 
 const UPSCALE_PER_SEC = 0.0072;
@@ -123,7 +123,12 @@ async function arkPoll(id, label, timeoutMs = 25 * 60_000) {
 
 // Cheapest model on the list, and the shortest clip it will take: this is a
 // means to a still image, not something anyone will watch.
-const SEED_MODEL = { id: "seedance-1.0-pro-fast", upstream: "seedance-1-0-pro-fast-251015", perMillion: 1.0 };
+const SEED_MODEL = {
+  id: "seedance-2.0-mini",
+  upstream: "dreamina-seedance-2-0-mini-260615",
+  perMillion: 3.5,
+  discount: { pct: 0.6, until: "2026-10-07T06:00:00Z" },
+};
 const SEED_CLIP_S = 4;
 
 function sh(cmd, args) {
@@ -194,7 +199,7 @@ async function keyImage() {
   summary.seedClip = {
     model: SEED_MODEL.id,
     tokens: done.usage?.total_tokens,
-    usd: ((done.usage?.total_tokens ?? 0) * SEED_MODEL.perMillion) / 1e6,
+    usd: ((done.usage?.total_tokens ?? 0) * liveRate(SEED_MODEL)) / 1e6,
   };
   log(`seed clip done: ${summary.seedClip.tokens} tokens, $${summary.seedClip.usd.toFixed(4)}`);
 
