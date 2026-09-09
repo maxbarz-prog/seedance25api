@@ -120,18 +120,24 @@ the run. Direct navigation to those pages worked. Worth checking under load.
 
 ## Measured provider numbers (live run 2026-09-08, 4 s clips, 16:9, seed 12345)
 
-Source: `provider-check.yml` run 34222147838. Cost = `usage.total_tokens` ×
-ModelArk list price ($10.70/M tokens for Seedance 2.5 without video input,
-$6.40/M with video input, $4.30/M for Seedance 2.0 resource packs). The Ark
-billing console was not reachable from Claude; reconcile the first invoice
-against these.
+Source: `provider-check.yml` run 34222147838. Cost = `usage.total_tokens` x
+the model's price per million tokens. The Ark billing console was not
+reachable from Claude; reconcile the first invoice against these.
+
+**Corrected 2026-09-09.** The Seedance 2.0 rows below were originally costed
+at $4.30/M, which is the *with-video-input* rate. Plain text-to-video bills
+at $7.00/M at 480p and $7.70/M at 1080p, so those two rows were 56% and 79%
+low and we were selling 2.0 below cost. The token counts were always right;
+only the price per million was wrong. Prices are now derived in code from
+the per-model rate in `web/lib/config.ts` rather than tabulated, so this
+class of error cannot recur silently.
 
 | Task | Output | Tokens | Per output second |
 |---|---|---|---|
 | Seedance 2.5, 480p | 854x480 @24 fps, 4.04 s | 38,830 | **$0.1028** |
 | Seedance 2.5, native 1080p | 1920x1080 @24 fps, 4.04 s | 196,425 | **$0.5202** |
-| Seedance 2.0, 480p | 864x496 @24 fps, 4.04 s | 40,594 | **$0.0432** |
-| Seedance 2.0, native 1080p | 1920x1080 @24 fps, 4.04 s | 196,425 | **$0.2091** |
+| Seedance 2.0, 480p | 864x496 @24 fps, 4.04 s | 40,594 | **$0.0673** (was $0.0432) |
+| Seedance 2.0, native 1080p | 1920x1080 @24 fps, 4.04 s | 196,425 | **$0.3742** (was $0.2091) |
 | fal ByteDance upscaler, 480p → 1080p | 1918x1080 @30 fps, 4.0 s, 141 s wall | n/a | **$0.0072** (list, per source second) |
 | Seedance 2.5 extension, +6 s from a 4 s source | 854x480 @24 fps, 6.0 s | 96,075 | $0.1025 per added second (see below) |
 
@@ -139,9 +145,32 @@ Three-way comparison for a 1080p deliverable on Seedance 2.5: 480p→upscale
 $0.110/s versus native $0.520/s, so the upscaled path is 4.7× cheaper.
 Wall-clock: 480p ~160 s + upscale ~140 s versus native ~195 s.
 
-`COST_*` set in SSM (dev and prod): SD25 480p 0.1028, SD25 1080p 0.5202,
-SD20 480p 0.0432, SD20 1080p 0.2091, UPSCALE_2X 0.0072, UPSCALE_4X 0.0288
-(4K is fal's list price, not measured).
+`COST_*` in SSM (dev and prod): SD25 480p 0.1028, SD25 1080p 0.5202,
+UPSCALE_2X 0.0072, UPSCALE_4X 0.0288 (4K is fal's list price, not measured).
+The SD20 pair was **deleted on 2026-09-09** — it held the $4.30/M-derived
+values and an override beats the rate derived in code, so it would have kept
+2.0 mispriced. `ssm-cost.yml` sets or deletes these; deleting is the normal
+fix, since with no override the rate comes from the token price in
+`lib/config.ts`.
+
+## Model catalogue and what is still unpriced
+
+All nine video models the account can call are defined in `web/lib/config.ts`
+with their upstream ModelArk id, max duration, accepted inputs and token
+rate. `MODEL_IDS` is the subset with a known rate — the only models offered,
+because we sell at cost and must not price what we cannot cost.
+
+Sold: `seedance-2.5` ($10.70/M sd, $10.70 hd, $6.40 with video),
+`seedance-2.0` ($7.00 / $7.70 / $4.30), `seedance-2.0-fast`
+($5.60 / $5.60 / $3.30).
+
+Defined but not offered, awaiting a confirmed rate from the BytePlus console
+(Activation Management shows per-model pricing): `seedance-2.0-mini`,
+`seedance-1.5-pro`, `seedance-1.0-pro`, `seedance-1.0-pro-fast`,
+`seedance-1.0-lite-t2v` (text input only), `seedance-1.0-lite-i2v` (image
+input only). Filling in `perMillion` for one is the whole job — the picker,
+the pricing table, the API validator and the BytePlus client all read the
+registry.
 
 ## ModelArk facts confirmed on the live key
 
