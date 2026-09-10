@@ -9,8 +9,7 @@ on:
   # manual runs so a push never spends provider credit.
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
-      - claude/seedance-video-platform-9sp9cn
+      - main
     paths:
       - ".github/workflows/provider-check.yml"
   workflow_dispatch:

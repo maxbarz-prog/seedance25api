@@ -7,7 +7,7 @@ name: Model activation check
 on:
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
+      - main
     paths:
       - ".github/workflows/model-activation.yml"
       - "scripts/model-activation.mjs"

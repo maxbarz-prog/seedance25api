@@ -8,7 +8,7 @@ name: 4K upscale sample
 on:
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
+      - main
     paths:
       - ".github/workflows/upscale-4k.yml"
       - "scripts/upscale-4k.mjs"

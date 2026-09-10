@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - claude/seedance-video-platform-9sp9cn
+      - main
     paths:
       - ".github/workflows/aws-verify.yml"
 

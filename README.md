@@ -1,103 +1,103 @@
-## Hi there 👋
+# Remerged
 
-<!--
-**seedance25api/seedance25api** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+AI video generation, sold at cost. Members pay a membership; generation is
+billed at what the providers charge us plus the real cost of delivering it,
+with no markup on usage.
 
-Here are some ideas to get you started:
+Live at **[remerged.click](https://remerged.click)** (production) and
+**[dev.remerged.click](https://dev.remerged.click)** (staging).
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+> The repository root previously held a marketing README for an unrelated
+> product (reAPI's API gateway). It is preserved at
+> `docs/reapi-profile-readme.md`.
 
+## What it is
 
-<!-- GitHub profile README for github.com/seedance25api (org profile repo
-     seedance25api/seedance25api). Developer-facing, promotes the reAPI
-     Seedance pages ONLY (no seedance25ai.im — user said unrelated).
-     Facts verified 2026-07-31 against reapi.ai/models/seedance-2-5 (marked
-     "Coming soon", per-second credits, four variants, one request shape) and
-     reapi.ai/models/seedance-2-0 (live: 4-15s, 480p-4K, ≤4000-char prompt,
-     from $0.041/s, 1 credit = $0.001, refund on failure). -->
+A Next.js app on AWS Lambda, deployed with SST/OpenNext. Members write a
+prompt, pick a model and an output route, and get a video back. Generation
+runs on BytePlus ModelArk (the Seedance family); upscaling runs on fal.
 
-<div align="center">
+| | |
+|---|---|
+| Web | Next.js App Router → Lambda via SST, behind CloudFront |
+| Data | DynamoDB (users, ledger, jobs) |
+| Media | S3, served by presigned URL |
+| Auth | Clerk |
+| Payments | Stripe (membership + credit top-ups) |
+| Email | SES, inbound and outbound |
+| Video | BytePlus ModelArk; fal for upscaling; ffmpeg-static in the bundle |
 
-# Seedance 2.5 API
+## The pipeline
 
-**Text, photo, video & audio in — short video out.**
+Three routes to a finished video. The member picks; the default is **4K**.
 
-ByteDance's next-generation Seedance 2.5 video model, coming to
-[reAPI](https://reapi.ai/models) as an async, OpenAI-style endpoint —
-same request shape the [Seedance 2.0 API](https://reapi.ai/models/seedance-2-0)
-runs on today.
+| Route | How | Why |
+|---|---|---|
+| **4K** (default) | render 480p → AI upscale ×4 → 3840×2160 | Cheapest good option. The render dominates the bill, so resolution bought at the upscaler costs a fraction of rendering it natively |
+| 1080p | render 480p → AI upscale ×2 → 1920×1080 | Cheapest route to full HD |
+| 1080p native | the model renders 1080p; no upscaler | No interpolated frames. Several times the price. Only on models that offer it |
 
-[**Seedance 2.5 →**](https://reapi.ai/models/seedance-2-5) · [Seedance 2.0 (live)](https://reapi.ai/models/seedance-2-0) · [All models](https://reapi.ai/models) · [Docs](https://reapi.ai/docs)
+A 5-second clip on Seedance 2.0: **$0.59** at 4K, **$0.46** at 1080p
+upscaled, **$2.18** at native 1080p. That ordering is not a mistake — see
+`docs/NEXT.md`.
 
-</div>
+## Pricing
 
----
+Every price is derived, never typed in. The provider bills tokens:
 
-## What the Seedance API does
-
-- **Every input mode in one endpoint** — text-to-video, image-to-video, first/last frame, reference video, and reference audio.
-- **Real people, lip-synced** — the `face` variants combine a reference video with audio to animate real people speaking: voiceovers, explainers, character animation in one call.
-- **Continuous chaining** — set `return_last_frame` and feed the returned frame URL into the next call to chain clips without re-prompting.
-- **Per-second credit pricing** — 1 credit = $0.001. Seedance 2.0 starts at $0.041/s; failed jobs are refunded automatically.
-
-## Quick start (runs today on Seedance 2.0)
-
-Seedance 2.5 will ship on the same request shape, so code written against
-Seedance 2.0 migrates by swapping the model id.
-
-```bash
-# 1. Submit a video task
-curl https://reapi.ai/api/v1/videos/generations \
-  -H "Authorization: Bearer $REAPI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "doubao-seedance-2.0",
-    "prompt": "A barista pours latte art in slow motion, warm cafe lighting, cinematic 35mm look",
-    "duration": 5,
-    "resolution": "720p"
-  }'
-# → {"id": "task_..."}
-
-# 2. Poll until status is "completed", then read output.video_urls
-curl https://reapi.ai/api/v1/tasks/task_xxx \
-  -H "Authorization: Bearer $REAPI_API_KEY"
+```
+tokens = frames × width × height / 1024        frames = duration × fps + 1
 ```
 
-Get a key from the [reAPI dashboard](https://reapi.ai) — free credits on
-signup, no card required.
+`web/lib/config.ts` holds each model's frame sizes and its rate per million
+tokens; `web/lib/pricing.ts` turns that into a price. Estimates are held to
+**0% to +1%** of what the provider actually bills — under is a loss on every
+order, over a percent is money taken for nothing — and the admin status page
+fails red if any drifts outside that band.
 
-## Model variants
+Nothing overrides the model rates from the environment. An override pins one
+number and silently ignores promotions, the audio and video-input tiers and
+the model's frame size, which is how a stale value once sold below cost.
+Delivery, overhead and processing stay tunable from SSM.
 
-| Model id | What it's for |
-|---|---|
-| `doubao-seedance-2.0` | Standard quality, up to 1080p |
-| `doubao-seedance-2.0-fast` | Faster, cheaper renders |
-| `doubao-seedance-2.0-face` | Real-person / lip-sync inputs, up to 4K |
-| `doubao-seedance-2.0-fast-face` | Fast tier of the face variant |
+## Money safety
 
-All four share one request shape: 4–15s clips, 480p–4K, prompts up to 4,000
-characters, optional generated audio, aspect ratios from 21:9 to 9:16 plus
-`adaptive`. Try them in the [playground](https://reapi.ai/models/seedance-2-0)
-without writing code.
+- **Every finished generation is checked** against the tokens the provider
+  actually billed. Charged below cost trips a halt; charged above cost is an
+  alert only and never moves a price by itself.
+- **The halt** stops new spend — jobs are refused before anyone is charged,
+  and the pipeline holds queued work. Jobs already with a provider finish,
+  because that money is spent either way.
+- **Reconciliation** finds charges with no matching spend and refunds them
+  idempotently, from the admin page.
 
-## Seedance 2.5 status
+## Branches and deploys
 
-The [Seedance 2.5 page](https://reapi.ai/models/seedance-2-5) is live with
-positioning, pricing model, and use cases; the API itself is **coming soon**.
-Sign up now and your free credits will cover your first Seedance 2.5
-generations at launch.
+`main` is the branch. Feature work merges to it; **a push to `main` deploys
+the `dev` stage**. Production deploys **only** from a `prod-YYYY-MM-DD` tag,
+so merging can never ship to production by accident.
 
----
+```bash
+git tag prod-2026-09-10 && git push origin prod-2026-09-10   # deploy production
+```
 
-<sub>This is a developer resource for the Seedance API on reAPI, an independent
-API gateway. Not affiliated with, endorsed by, or sponsored by ByteDance.
-Model names belong to their respective owners.</sub>
+## Running locally
 
+```bash
+cd web && npm install && npm run dev     # SQLite backend, mock providers
+```
+
+`DB_BACKEND=dynamo` switches to AWS. `PROVIDER_MODE=mock` avoids spending
+money. See `web/README.md`.
+
+## Operations
+
+This sandbox cannot reach AWS or the providers directly — everything runs
+through GitHub Actions and the OIDC role
+`arn:aws:iam::949228118688:role/remerge-github-deploy`. Each workflow says
+what it costs and which need confirmation before spending. See
+**[`docs/WORKFLOWS.md`](docs/WORKFLOWS.md)**.
+
+**[`docs/NEXT.md`](docs/NEXT.md)** is the running brief: what is verified,
+what the provider's documentation gets wrong, and what is still outstanding.
+Read it before changing pricing or adding a model.

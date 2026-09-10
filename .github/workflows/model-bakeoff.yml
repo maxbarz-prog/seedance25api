@@ -12,7 +12,7 @@ name: Model bake-off
 on:
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
+      - main
     paths:
       - ".github/workflows/model-bakeoff.yml"
   workflow_dispatch:

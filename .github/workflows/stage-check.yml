@@ -8,7 +8,7 @@ name: Stage smoke check
 on:
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
+      - main
     paths:
       - ".github/workflows/stage-check.yml"
   workflow_dispatch:

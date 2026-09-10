@@ -11,7 +11,7 @@ name: Set cost parameters
 on:
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
+      - main
     paths:
       - ".github/workflows/ssm-cost.yml"
   workflow_dispatch:

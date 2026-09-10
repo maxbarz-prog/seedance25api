@@ -7,8 +7,7 @@ on:
   # Push trigger only registers the workflow (gated below); runs are manual.
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
-      - claude/seedance-video-platform-9sp9cn
+      - main
     paths:
       - ".github/workflows/dev-e2e.yml"
   workflow_dispatch:

@@ -8,8 +8,7 @@ on:
   # Push trigger only registers the workflow with GitHub; runs are manual.
   push:
     branches:
-      - claude/seedance-1080p-verify-c8cbha
-      - claude/seedance-video-platform-9sp9cn
+      - main
     paths:
       - ".github/workflows/logs.yml"
   workflow_dispatch:

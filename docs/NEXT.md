@@ -3,6 +3,30 @@
 Handover for the go-live leg. A fresh Claude Code session can be told "read
 docs/NEXT.md and go". Read `web/README.md` and `infra/README.md` first.
 
+## How this repository is laid out and deployed (2026-09-10)
+
+**`main` is the branch.** Until 2026-09-10 it held only a README and every
+line of application code lived on feature branches, so a fresh checkout
+looked like an empty repository and the deployed stack looked like it came
+from nowhere. 84 commits were fast-forwarded onto main; nothing was
+rewritten.
+
+**Deploys.** `deploy.yml` deploys the `dev` stage on a push to `main` that
+touches `web/`, `functions/`, `sst.config.ts` or `package.json`. Production
+deploys ONLY from a tag matching `prod-*` (e.g. `prod-2026-09-10`), so
+merging can never ship to production by accident.
+
+Every other workflow carries a `push: branches: [main]` trigger as well.
+That trigger exists solely so GitHub registers the workflow and makes it
+dispatchable — the jobs themselves are gated on `workflow_dispatch` and skip
+on a push. Until 2026-09-10 those triggers still named long-dead feature
+branches, which is why nothing ever ran automatically and every deploy this
+week was dispatched by hand.
+
+See `docs/WORKFLOWS.md` for what each one does, what it costs, and how to run
+it.
+
+
 ## Where things stand (2026-09-08)
 
 - The whole platform lives on branch `claude/seedance-video-platform-9sp9cn`
