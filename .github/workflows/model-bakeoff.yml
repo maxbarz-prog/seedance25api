@@ -109,6 +109,27 @@ jobs:
             echo "$name=$v" >> "$GITHUB_ENV"
           done
 
+      # Load the script with SPEND_OK unset: it exits 2 before any API call.
+      # `node --check` only parses, so it misses things like using a const
+      # before its declaration — which is exactly what reached a paid run
+      # once. This costs nothing and catches it.
+      - name: Preflight the script (spends nothing)
+        env:
+          BAKEOFF_NATIVE: ${{ inputs.native == 'yes' && '1' || '0' }}
+          BAKEOFF_T2V: ${{ inputs.t2v == 'yes' && '1' || '0' }}
+          BAKEOFF_DURATION_S: ${{ inputs.duration }}
+          BAKEOFF_PROMPT: ${{ inputs.prompt }}
+          BAKEOFF_MODELS: ${{ inputs.models }}
+        run: |
+          set -uo pipefail
+          node scripts/model-bakeoff.mjs
+          code=$?
+          if [ "$code" != "2" ]; then
+            echo "Preflight expected exit 2 (loaded, refused to spend) but got $code"
+            exit 1
+          fi
+          echo "Preflight clean."
+
       - name: Run the bake-off
         env:
           SPEND_OK: "yes"

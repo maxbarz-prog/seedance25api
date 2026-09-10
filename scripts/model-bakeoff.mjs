@@ -45,6 +45,15 @@ const INSTRUCTIONS = [
   "the butterfly settles on her shoulder",
   "the camera pushes in slowly",
 ];
+// Text-to-video: no starting image at all. The provider refuses to animate a
+// photograph of a real person (measured 2026-09-10 — all four models rejected
+// the same portrait at submit), so a shared photographic key frame is not
+// available for anything involving people. Describing the subject in the
+// prompt sidesteps that entirely, and for comparing how well models follow
+// instructions it is arguably the better test: every model gets identical
+// words and an identical seed, with nothing else to differ on.
+const T2V = process.env.BAKEOFF_T2V === "1";
+
 // The subject has to be described when there is no starting image, but the
 // five instructions are the same either way, so scores stay comparable.
 const SUBJECT =
@@ -91,14 +100,6 @@ const MODELS = [
 // what the 4.7x price difference actually buys.
 const NATIVE = process.env.BAKEOFF_NATIVE === "1";
 
-// Text-to-video: no starting image at all. The provider refuses to animate a
-// photograph of a real person (measured 2026-09-10 — all four models rejected
-// the same portrait at submit), so a shared photographic key frame is not
-// available for anything involving people. Describing the subject in the
-// prompt sidesteps that entirely, and for comparing how well models follow
-// instructions it is arguably the better test: every model gets identical
-// words and an identical seed, with nothing else to differ on.
-const T2V = process.env.BAKEOFF_T2V === "1";
 
 // BAKEOFF_MODELS limits the run to named models, so a failure in one does not
 // mean paying again for the ones that already succeeded.
