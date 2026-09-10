@@ -1,4 +1,4 @@
-import { CREDIT_USD, MODELS, ModelId, RateTable, TOKENS_PER_SEC } from "./config";
+import { CREDIT_USD, MODELS, ModelId, RateTable, tokensFor } from "./config";
 
 // The pricing model. Every number here is a COST INPUT: provider rates per
 // model, a delivery allocation for storage/egress, an operations overhead
@@ -12,26 +12,17 @@ import { CREDIT_USD, MODELS, ModelId, RateTable, TOKENS_PER_SEC } from "./config
 // arithmetic. The per-model rates live in config.ts next to the model
 // definition, which is the only place a new model has to be described.
 //
-// Every derived rate is still env-overridable so production can track an
-// upstream price change without a deploy (COST_<MODEL>_480P_PER_SEC and
-// COST_<MODEL>_1080P_PER_SEC, where <MODEL> is the model id shortened the
-// way envKey() below does it: seedance-2.0-fast -> SD20_FAST). An override
-// is a blunt instrument — it pins one number and ignores discounts and the
-// audio/video-input tiers — so prefer correcting config.ts.
+// Provider rates live in config.ts and are NOT env-overridable per model:
+// an override pins one number and silently ignores promotions, the
+// audio/video-input tiers and the model's own frame size, which is how a
+// stale value quietly sold below cost before. Correct config.ts instead.
+// The delivery, overhead and processing terms remain tunable from SSM.
 
 function envNum(name: string, fallback: number): number {
   const v = process.env[name];
   if (v === undefined || v === "") return fallback;
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
-}
-
-// seedance-2.5 -> SD25, seedance-2.0-fast -> SD20_FAST,
-// seedance-1.0-lite-t2v -> SD10_LITE_T2V. Keeps any COST_SD25_* / COST_SD20_*
-// names already set in SSM working unchanged.
-function envKey(model: ModelId): string {
-  const [version, ...rest] = model.replace(/^seedance-/, "").split("-");
-  return ["SD" + version.replace(".", ""), ...rest.map((s) => s.toUpperCase())].join("_");
 }
 
 export type UpscaleFactor = 2 | 4;
@@ -49,13 +40,13 @@ function discountFor(model: ModelId, tier: "sd" | "hd", now: number): number {
 }
 
 export interface GenRates {
-  // USD per second of output, at each resolution tier, already net of any
-  // live promotion.
-  p480: number;
-  p1080: number | null;
-  // The same, for a request that carries a reference video (an extension).
-  p480WithVideo: number;
-  p1080WithVideo: number | null;
+  // USD per million tokens, net of any live promotion. Cost per render is
+  // this times the tokens that render will actually bill, which depends on
+  // the model's own frame size — so there is no single per-second figure.
+  sd: number;
+  hd: number | null;
+  sdWithVideo: number;
+  hdWithVideo: number | null;
 }
 
 export interface RateOptions {
@@ -64,12 +55,8 @@ export interface RateOptions {
   now?: number;
 }
 
-// Per-second provider cost for one model, from its token rate.
 function genRates(model: ModelId, opts: RateOptions = {}): GenRates | null {
-  const entry = MODELS[model] as {
-    perMillion: RateTable | null;
-    audio?: RateTable;
-  };
+  const entry = MODELS[model] as { perMillion: RateTable | null; audio?: RateTable };
   // No confirmed token rate means the model is not sellable: we sell at cost
   // and cannot cost what we do not know.
   if (!entry.perMillion) return null;
@@ -77,19 +64,26 @@ function genRates(model: ModelId, opts: RateOptions = {}): GenRates | null {
   const now = opts.now ?? Date.now();
   const sdOff = 1 - discountFor(model, "sd", now);
   const hdOff = 1 - discountFor(model, "hd", now);
-  const k = envKey(model);
-  const perSec = (rate: number, tier: "sd" | "hd") =>
-    (rate * (tier === "sd" ? sdOff : hdOff) *
-      (tier === "sd" ? TOKENS_PER_SEC.p480 : TOKENS_PER_SEC.p1080)) /
-    1e6;
   return {
-    p480: envNum(`COST_${k}_480P_PER_SEC`, perSec(table.sd, "sd")),
-    // A null hd rate means the provider cannot render 1080p on this model at
-    // all, so there is nothing to override.
-    p1080: table.hd === null ? null : envNum(`COST_${k}_1080P_PER_SEC`, perSec(table.hd, "hd")),
-    p480WithVideo: perSec(table.sdWithVideo, "sd"),
-    p1080WithVideo: table.hdWithVideo === null ? null : perSec(table.hdWithVideo, "hd"),
+    sd: table.sd * sdOff,
+    hd: table.hd === null ? null : table.hd * hdOff,
+    sdWithVideo: table.sdWithVideo * sdOff,
+    hdWithVideo: table.hdWithVideo === null ? null : table.hdWithVideo * hdOff,
   };
+}
+
+// Per-second cost, for the pricing page and anything that wants a headline
+// figure. Derived from the model's own frame size, so it differs per model.
+export function perSecondUsd(
+  model: ModelId,
+  tier: "sd" | "hd",
+  opts: RateOptions = {}
+): number | null {
+  const g = genRates(model, opts);
+  const tokens = tokensFor(model, tier, 1);
+  const rate = tier === "sd" ? g?.sd : g?.hd;
+  if (!g || tokens === null || rate == null) return null;
+  return (rate * tokens) / 1e6;
 }
 
 export function rates(opts: RateOptions = {}) {
@@ -139,17 +133,21 @@ export function quote(input: QuoteInput): Quote {
   const ctx = input.contextS ?? 0;
   const gen = r.gen[input.model];
   if (!gen) throw new Error(`no confirmed provider rate for ${input.model}`);
-  const genSeconds = d + ctx;
-  let providerUsd: number;
-  if (input.mode === "native-1080p") {
-    const rate = ctx > 0 ? gen.p1080WithVideo : gen.p1080;
-    if (rate === null) {
-      throw new Error(`${input.model} cannot render 1080p natively`);
-    }
-    providerUsd = rate * genSeconds;
-  } else {
-    const up = input.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec;
-    providerUsd = (ctx > 0 ? gen.p480WithVideo : gen.p480) * genSeconds + up * d;
+  const native = input.mode === "native-1080p";
+  const tier = native ? "hd" : "sd";
+  // The provider bills the reference clip's seconds as input, so an extension
+  // is one render covering both.
+  const tokens = tokensFor(input.model, tier, d + ctx);
+  const rate = ctx > 0
+    ? native ? gen.hdWithVideo : gen.sdWithVideo
+    : native ? gen.hd : gen.sd;
+  if (tokens === null || rate == null) {
+    throw new Error(`${input.model} cannot render 1080p natively`);
+  }
+  let providerUsd = (rate * tokens) / 1e6;
+  if (!native) {
+    // The upscaler only ever sees the new output seconds.
+    providerUsd += (input.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec) * d;
   }
   const usd =
     ((providerUsd + r.deliveryPerVideo) * (1 + r.overheadPct)) / (1 - r.processingPct);

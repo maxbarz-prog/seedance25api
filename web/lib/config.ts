@@ -95,6 +95,7 @@ export const MODELS = {
     maxDurationS: 30,
     accepts: ["text", "image"],
     perMillion: { sd: 10.7, hd: 11.7, sdWithVideo: 6.4, hdWithVideo: 7.0 },
+    frameSize: { sd: [854, 480], hd: [1920, 1080] },
     // 28% off 1080p only, to 2026-09-17 14:00 UTC+8.
     discount: { pct: 0.28, until: "2026-09-17T06:00:00Z", applies: ["hd"] },
   },
@@ -105,6 +106,7 @@ export const MODELS = {
     maxDurationS: 15,
     accepts: ["text", "image"],
     perMillion: { sd: 7.0, hd: 7.7, sdWithVideo: 4.3, hdWithVideo: 4.7 },
+    frameSize: { sd: [864, 496], hd: [1920, 1080] },
   },
   "seedance-2.0-fast": {
     id: "seedance-2.0-fast",
@@ -114,6 +116,7 @@ export const MODELS = {
     accepts: ["text", "image"],
     // 480p/720p only — the provider does not offer 1080p or 4K here.
     perMillion: { sd: 5.6, hd: null, sdWithVideo: 3.3, hdWithVideo: null },
+    frameSize: { sd: [864, 496], hd: null },
     // 25% off, to 2026-10-07 14:00 UTC+8.
     discount: { pct: 0.25, until: "2026-10-07T06:00:00Z", applies: ["sd"] },
   },
@@ -124,6 +127,7 @@ export const MODELS = {
     maxDurationS: 15,
     accepts: ["text", "image"],
     perMillion: { sd: 3.5, hd: null, sdWithVideo: 2.1, hdWithVideo: null },
+    frameSize: { sd: [864, 496], hd: null },
     // 60% off, to 2026-10-07 14:00 UTC+8.
     discount: { pct: 0.6, until: "2026-10-07T06:00:00Z", applies: ["sd"] },
   },
@@ -135,6 +139,7 @@ export const MODELS = {
     accepts: ["text", "image"],
     // Priced by soundtrack, not resolution.
     perMillion: { sd: 1.2, hd: 1.2, sdWithVideo: 1.2, hdWithVideo: 1.2 },
+    frameSize: { sd: [864, 480], hd: [1920, 1088] },
     audio: { sd: 2.4, hd: 2.4, sdWithVideo: 2.4, hdWithVideo: 2.4 },
     activated: false,
   },
@@ -145,6 +150,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text", "image"],
     perMillion: { sd: 2.5, hd: 2.5, sdWithVideo: 2.5, hdWithVideo: 2.5 },
+    frameSize: { sd: [864, 480], hd: [1920, 1088] },
     activated: false,
   },
   "seedance-1.0-pro-fast": {
@@ -154,6 +160,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text", "image"],
     perMillion: { sd: 1.0, hd: 1.0, sdWithVideo: 1.0, hdWithVideo: 1.0 },
+    frameSize: { sd: [864, 480], hd: [1920, 1088] },
     activated: false,
   },
   // The lite pair is split by input type — the model id says so — so each
@@ -166,6 +173,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text"],
     perMillion: null,
+    frameSize: { sd: [864, 480], hd: [1920, 1088] },
     activated: false,
   },
   "seedance-1.0-lite-i2v": {
@@ -175,6 +183,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["image"],
     perMillion: null,
+    frameSize: { sd: [864, 480], hd: [1920, 1088] },
     activated: false,
   },
 } as const;
@@ -197,15 +206,42 @@ export const NATIVE_1080P_MODEL_IDS = MODEL_IDS.filter(
   (id) => MODELS[id].perMillion?.hd != null
 );
 
-// Billing units per second of output. Frame sizes are the LARGER of the
-// variants these models actually emit — 480p comes back as 864x496 on the
-// 2.0 series (measured) and 1080p as 1920x1088 on the 1.0 Pro pair (the
-// provider's own token table) — so a quote errs a little high rather than
-// selling a render for less than it costs.
-export const TOKENS_PER_SEC = {
-  p480: (864 * 496 * 24) / 1024,
-  p1080: (1920 * 1088 * 24) / 1024,
-} as const;
+// How the provider counts what it bills:
+//
+//     tokens = frames x width x height / 1024
+//
+// Two details that a plain duration x fps gets wrong, both measured against
+// real invoiced token counts in the 2026-09-09 bake-off:
+//
+//   1. A render carries ONE MORE FRAME than duration x fps. A 5 s clip at
+//      24 fps comes back 5.04 s long and bills 121 frames, not 120 — worth
+//      0.83%, and in the direction that costs us money.
+//   2. "480p" is not one frame size. Seedance 2.5 emits 854x480; the 2.0
+//      family emits 864x496 — a 4.5% difference. Each model carries its own
+//      in `frameSize` above, rather than one global guess.
+//
+// Together these reproduce every measured token count exactly:
+//   2.0 family 5 s 480p -> 50,639 predicted, 50,638 billed
+//   2.5        5 s 480p -> 48,438 predicted, 48,437 billed
+//   2.5        4 s 1080p-> 196,425 predicted, 196,425 billed
+export const FPS = 24;
+export const EXTRA_FRAMES = 1;
+// A quote must never come in under what the provider charges, so the estimate
+// carries a deliberate half-percent. That keeps it inside the +1% tolerance
+// while leaving no room to land below cost on a render that runs a frame
+// long.
+export const TOKEN_SAFETY = 1.005;
+
+export function framesFor(seconds: number): number {
+  return Math.round(seconds * FPS) + EXTRA_FRAMES;
+}
+
+// Estimated billed tokens for one render.
+export function tokensFor(model: ModelId, tier: "sd" | "hd", seconds: number): number | null {
+  const size = MODELS[model].frameSize[tier];
+  if (!size) return null;
+  return (framesFor(seconds) * size[0] * size[1] * TOKEN_SAFETY) / 1024;
+}
 
 export const MIN_DURATION_S = 4;
 export const MAX_DURATION_S = 30; // absolute ceiling (Seedance 2.5)

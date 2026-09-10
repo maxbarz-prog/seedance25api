@@ -1,4 +1,4 @@
-import { CREDIT_USD, MODELS, ModelId, TOKENS_PER_SEC } from "./config";
+import { CREDIT_USD, MODELS, ModelId } from "./config";
 import { getSystem, setSystem, Job } from "./db";
 import { rates } from "./pricing";
 
@@ -93,7 +93,8 @@ const OVERCHARGE_RATIO = 1.5;
 const OVERCHARGE_MIN_USD = 0.25;
 
 // What one render actually cost us, from the token count the provider
-// reported rather than from anything we predicted.
+// reported rather than from anything we predicted. Deliberately does NOT go
+// through the frame-size estimate: this is the invoice, not a forecast.
 export function providerCostUsd(opts: {
   model: string;
   tokens: number;
@@ -110,18 +111,15 @@ export function providerCostUsd(opts: {
   const r = rates({ audio: opts.audio, now: opts.now });
   const gen = r.gen[model];
   if (!gen) return null;
-  // Convert the per-second rate back to a per-token one. Both sides come
-  // from the same constants, so this stays correct if the constants change.
-  const perSec = opts.native
+  const rate = opts.native
     ? opts.withVideo
-      ? gen.p1080WithVideo
-      : gen.p1080
+      ? gen.hdWithVideo
+      : gen.hd
     : opts.withVideo
-      ? gen.p480WithVideo
-      : gen.p480;
-  if (perSec === null) return null;
-  const tokensPerSec = opts.native ? TOKENS_PER_SEC.p1080 : TOKENS_PER_SEC.p480;
-  let usd = (perSec / tokensPerSec) * opts.tokens;
+      ? gen.sdWithVideo
+      : gen.sd;
+  if (rate == null) return null;
+  let usd = (rate * opts.tokens) / 1e6;
   if (opts.upscaleSourceS) {
     usd +=
       (opts.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec) *

@@ -3,8 +3,8 @@ import { storageEnabled, storageReachable } from "./storage";
 import { ffmpegAvailable } from "./video";
 import { clerkEnabled } from "./auth";
 import { stripeEnabled } from "./billing";
-import { currentHalt, providerCostUsd } from "./money";
-import { ModelId } from "./config";
+import { currentHalt } from "./money";
+import { ModelId, tokensFor } from "./config";
 
 // System status for the admin page.
 //
@@ -61,36 +61,28 @@ const SD20 = process.env.BYTEPLUS_SEEDANCE_20_MODEL || "dreamina-seedance-2-0-26
 
 let cache: { at: number; value: Status } | null = null;
 
-// Fixtures for the pricing self-test. Each is a row from the provider's own
-// published price examples, so a rate typed wrong, a promotion that lapsed
-// or a model silently withdrawn shows up as a red light here rather than as
-// a loss on a member's invoice.
+// Fixtures for the pricing self-test, from token counts the provider actually
+// billed (bake-off run 34376740213 and the earlier 1080p measurement).
 //
-// The cost of a known token count is token-linear — tokens x rate — so these
-// compare exactly, independently of the per-second constants. The tolerance
-// only absorbs the provider's own rounding in the published examples. Being
-// UNDER the example is never a failure: a live promotion legitimately puts
-// us there, and paying less than expected is not the direction that hurts.
-const PRICING_FIXTURES: {
+// The rule this enforces: our estimate of a render's token count must land
+// between 0% and +1% of what is really billed. Under is a loss on every
+// order; more than a percent over is money taken for nothing. A model whose
+// frame size changes upstream trips this before a member is charged wrongly.
+const TOKEN_FIXTURES: {
   model: ModelId;
-  tokens: number;
-  native: boolean;
-  audio?: boolean;
-  expectUsd: number;
+  tier: "sd" | "hd";
+  seconds: number;
+  billed: number;
 }[] = [
-  // Seedance 2.5, 5s: docs quote $0.514 at 480p and $2.843 at 1080p list.
-  { model: "seedance-2.5", tokens: 48037, native: false, expectUsd: 0.514 },
-  // 1080p carries a 28% promotion until 2026-09-17, so the live figure is
-  // below list while it runs; the fixture tracks whichever is in force.
-  { model: "seedance-2.5", tokens: 243000, native: true, expectUsd: 2.843 },
-  { model: "seedance-2.0", tokens: 48037, native: false, expectUsd: 0.336 },
-  { model: "seedance-2.0", tokens: 243000, native: true, expectUsd: 1.871 },
-  { model: "seedance-1.0-pro", tokens: 244800, native: true, expectUsd: 0.612 },
-  { model: "seedance-1.0-pro-fast", tokens: 244800, native: true, expectUsd: 0.245 },
-  { model: "seedance-1.5-pro", tokens: 243000, native: true, expectUsd: 0.292 },
-  { model: "seedance-1.5-pro", tokens: 243000, native: true, audio: true, expectUsd: 0.583 },
+  { model: "seedance-2.5", tier: "sd", seconds: 5, billed: 48437 },
+  { model: "seedance-2.5", tier: "hd", seconds: 4, billed: 196425 },
+  { model: "seedance-2.0", tier: "sd", seconds: 5, billed: 50638 },
+  { model: "seedance-2.0-fast", tier: "sd", seconds: 5, billed: 50638 },
+  { model: "seedance-2.0-mini", tier: "sd", seconds: 5, billed: 50638 },
 ];
-const PRICING_TOLERANCE = 0.12;
+// Never below the billed count; at most a percent above it.
+const TOKEN_MIN = 0;
+const TOKEN_MAX = 0.01;
 
 async function timed<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<{ ok: true; value: T; ms: number } | { ok: false; error: string; ms: number; status?: number }> {
   const t0 = Date.now();
@@ -187,38 +179,31 @@ async function internalChecks(): Promise<Check[]> {
       : "no money halt in force",
   });
 
-  // Does our rate table still reproduce the provider's published prices? A
-  // discount that lapsed, a rate that moved or a bad token constant all show
-  // up here, before a member is charged the wrong amount.
+  // Does our token estimate still match what the provider bills? A frame
+  // size that moves upstream, or a duration that renders a frame longer than
+  // expected, shows up here before it shows up on an invoice.
   const bad: string[] = [];
-  for (const f of PRICING_FIXTURES) {
-    const got = providerCostUsd({
-      model: f.model,
-      tokens: f.tokens,
-      native: f.native,
-      audio: f.audio,
-    });
-    if (got === null) {
-      bad.push(`${f.model}${f.audio ? " (audio)" : ""}: not priced`);
+  for (const f of TOKEN_FIXTURES) {
+    const est = tokensFor(f.model, f.tier, f.seconds);
+    if (est === null) {
+      bad.push(`${f.model} ${f.tier}: not priced`);
       continue;
     }
-    // A live promotion legitimately puts us under the list example, so only
-    // an overshoot beyond tolerance is a failure.
-    const drift = (got - f.expectUsd) / f.expectUsd;
-    if (drift > PRICING_TOLERANCE) {
+    const drift = (est - f.billed) / f.billed;
+    if (drift < TOKEN_MIN || drift > TOKEN_MAX) {
       bad.push(
-        `${f.model}${f.native ? " 1080p" : " 480p"}${f.audio ? " audio" : ""}: $${got.toFixed(3)} vs $${f.expectUsd.toFixed(3)}`
+        `${f.model} ${f.tier} ${f.seconds}s: estimate ${Math.round(est)} vs ${f.billed} billed (${(drift * 100).toFixed(2)}%)`
       );
     }
   }
   out.push({
-    key: "internal.pricing", group: "internal", label: "Pricing self-test",
-    value: bad.length ? `${bad.length} off` : `${PRICING_FIXTURES.length} ok`,
+    key: "internal.pricing", group: "internal", label: "Token estimate",
+    value: bad.length ? `${bad.length} off` : `${TOKEN_FIXTURES.length} ok`,
     level: bad.length ? "bad" : "good",
     blame: bad.length ? "us" : undefined,
     note: bad.length
-      ? `rate table disagrees with the provider's published prices — ${bad.join("; ")}`
-      : "every rate reproduces the provider's own published price examples",
+      ? `token estimate outside the 0 to +1% tolerance — ${bad.join("; ")}`
+      : `every estimate lands within 0 to +1% of what the provider billed`,
   });
 
   // A read of a key that cannot exist: proves the table, the IAM role and the
