@@ -45,11 +45,15 @@ const INSTRUCTIONS = [
   "the butterfly settles on her shoulder",
   "the camera pushes in slowly",
 ];
-const PROMPT =
-  process.env.BAKEOFF_PROMPT ||
-  "The woman slowly turns her head to her right and breaks into a warm smile. " +
-    "A single yellow butterfly flutters in from the left edge of the frame and settles on her shoulder. " +
-    "The camera pushes in slowly throughout. The background stays still.";
+// The subject has to be described when there is no starting image, but the
+// five instructions are the same either way, so scores stay comparable.
+const SUBJECT =
+  "An elderly woman in an orange and red sari stands in front of a weathered stone wall in warm late-afternoon light. ";
+const ACTION =
+  "She slowly turns her head to her right and breaks into a warm smile. " +
+  "A single yellow butterfly flutters in from the left edge of the frame and settles on her shoulder. " +
+  "The camera pushes in slowly throughout. The background stays still.";
+const PROMPT = process.env.BAKEOFF_PROMPT || (T2V ? SUBJECT + ACTION : ACTION);
 const IMAGE_PROMPT =
   process.env.BAKEOFF_IMAGE_PROMPT ||
   "A red vintage bicycle leaning against a sunlit stone wall, dry leaves on the ground, warm late-afternoon light, cinematic 35mm photograph, 16:9";
@@ -86,6 +90,15 @@ const MODELS = [
 // upscales. Running both against the same key frame is the only way to see
 // what the 4.7x price difference actually buys.
 const NATIVE = process.env.BAKEOFF_NATIVE === "1";
+
+// Text-to-video: no starting image at all. The provider refuses to animate a
+// photograph of a real person (measured 2026-09-10 — all four models rejected
+// the same portrait at submit), so a shared photographic key frame is not
+// available for anything involving people. Describing the subject in the
+// prompt sidesteps that entirely, and for comparing how well models follow
+// instructions it is arguably the better test: every model gets identical
+// words and an identical seed, with nothing else to differ on.
+const T2V = process.env.BAKEOFF_T2V === "1";
 
 // BAKEOFF_MODELS limits the run to named models, so a failure in one does not
 // mean paying again for the ones that already succeeded.
@@ -232,6 +245,11 @@ async function uploadFrame(localPath) {
 }
 
 async function keyImage() {
+  if (T2V) {
+    log("key frame: none — text-to-video, the subject is described in the prompt");
+    summary.keyImageSource = "none (text-to-video)";
+    return null;
+  }
   if (process.env.KEY_IMAGE_URL) {
     const src = process.env.KEY_IMAGE_URL.trim();
     // Fetch it here and re-host it on our own bucket rather than handing the
@@ -531,6 +549,7 @@ async function main() {
       "  <model>--UPSCALED-1080p.mp4 that same clip put through the fal upscaler",
       "  <model>--NATIVE-1080p.mp4   a separate render made at 1080p, no upscaler",
       "  key-frame.png               the identical first frame every model started from",
+      "                              (absent on a text-to-video run — there is none)",
       "  seed-clip.mp4               scaffolding only, not part of the comparison",
       "",
       "UPSCALED and NATIVE are different renders. A model with only one of them",

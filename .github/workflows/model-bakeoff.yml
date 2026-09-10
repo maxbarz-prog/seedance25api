@@ -46,6 +46,11 @@ on:
         type: choice
         options: ["no", "yes"]
         default: "no"
+      t2v:
+        description: 'Text-to-video with no starting image ("yes"). Needed for anything involving people — the provider refuses photographs of real people.'
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
 
 permissions:
   id-token: write
@@ -113,6 +118,7 @@ jobs:
           BAKEOFF_PROMPT: ${{ inputs.prompt }}
           BAKEOFF_MODELS: ${{ inputs.models }}
           BAKEOFF_NATIVE: ${{ inputs.native == 'yes' && '1' || '0' }}
+          BAKEOFF_T2V: ${{ inputs.t2v == 'yes' && '1' || '0' }}
           SEED_CLIP_PATH: ${{ github.workspace }}/bakeoff/seed-clip.mp4
         run: |
           set -euo pipefail
