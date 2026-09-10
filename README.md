@@ -98,6 +98,9 @@ through GitHub Actions and the OIDC role
 what it costs and which need confirmation before spending. See
 **[`docs/WORKFLOWS.md`](docs/WORKFLOWS.md)**.
 
+**[`docs/TESTING.md`](docs/TESTING.md)** is the manual checklist for a dev
+pass before production, with the cost of each step.
+
 **[`docs/NEXT.md`](docs/NEXT.md)** is the running brief: what is verified,
 what the provider's documentation gets wrong, and what is still outstanding.
 Read it before changing pricing or adding a model.
