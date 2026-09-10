@@ -1,4 +1,4 @@
-import { CREDIT_USD, MODELS, ModelId, RateTable, tokensFor } from "./config";
+import { CREDIT_USD, MODELS, ModelId, OUTPUT_MODES, OutputMode, RateTable, tokensFor } from "./config";
 
 // The pricing model. Every number here is a COST INPUT: provider rates per
 // model, a delivery allocation for storage/egress, an operations overhead
@@ -108,8 +108,7 @@ export function rates(opts: RateOptions = {}) {
 export interface QuoteInput {
   model: ModelId;
   durationS: number;
-  mode: "upscaled-1080p" | "native-1080p";
-  upscaleFactor?: UpscaleFactor;
+  mode: OutputMode;
   // Extensions only: seconds of reference video sent with the request. The
   // provider bills those as input, at the with-video rate for the whole
   // request; the upscaler only ever sees the new output seconds.
@@ -133,21 +132,25 @@ export function quote(input: QuoteInput): Quote {
   const ctx = input.contextS ?? 0;
   const gen = r.gen[input.model];
   if (!gen) throw new Error(`no confirmed provider rate for ${input.model}`);
-  const native = input.mode === "native-1080p";
-  const tier = native ? "hd" : "sd";
+  const out = OUTPUT_MODES[input.mode];
+  // Native renders the deliverable itself; everything else renders at 480p
+  // and buys resolution at the upscaler, which is much the cheaper pixel.
+  const tier = out.native ? "hd" : "sd";
   // The provider bills the reference clip's seconds as input, so an extension
   // is one render covering both.
   const tokens = tokensFor(input.model, tier, d + ctx);
   const rate = ctx > 0
-    ? native ? gen.hdWithVideo : gen.sdWithVideo
-    : native ? gen.hd : gen.sd;
+    ? out.native ? gen.hdWithVideo : gen.sdWithVideo
+    : out.native ? gen.hd : gen.sd;
   if (tokens === null || rate == null) {
-    throw new Error(`${input.model} cannot render 1080p natively`);
+    throw new Error(`${input.model} cannot render ${out.label} natively`);
   }
   let providerUsd = (rate * tokens) / 1e6;
-  if (!native) {
-    // The upscaler only ever sees the new output seconds.
-    providerUsd += (input.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec) * d;
+  if (!out.native) {
+    // The upscaler only ever sees the new output seconds, and its rate is
+    // per source second regardless of the target.
+    providerUsd +=
+      (out.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec) * d;
   }
   const usd =
     ((providerUsd + r.deliveryPerVideo) * (1 + r.overheadPct)) / (1 - r.processingPct);

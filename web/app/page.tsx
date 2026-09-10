@@ -1,20 +1,11 @@
+import { DEFAULT_MODE, DEFAULT_MODEL } from "@/lib/config";
 import Composer from "@/components/Composer";
 import Link from "next/link";
 import { fmtUsd, quote } from "@/lib/pricing";
 
 export default function Home() {
-  const q5 = quote({
-    model: "seedance-2.5",
-    durationS: 5,
-    mode: "upscaled-1080p",
-    upscaleFactor: 2,
-  });
-  const q30 = quote({
-    model: "seedance-2.5",
-    durationS: 30,
-    mode: "upscaled-1080p",
-    upscaleFactor: 2,
-  });
+  const q5 = quote({ model: DEFAULT_MODEL, durationS: 5, mode: DEFAULT_MODE });
+  const q30 = quote({ model: DEFAULT_MODEL, durationS: 30, mode: DEFAULT_MODE });
 
   return (
     <div className="py-10">

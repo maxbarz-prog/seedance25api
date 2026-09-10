@@ -3,7 +3,15 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { EXTEND_CONTEXT_S, EXTEND_MAX_S, EXTEND_MIN_S } from "@/lib/config";
+import {
+  EXTEND_CONTEXT_S,
+  EXTEND_MAX_S,
+  EXTEND_MIN_S,
+  MODELS,
+  ModelId,
+  OUTPUT_MODES,
+  OutputMode,
+} from "@/lib/config";
 import CreditsDialog, { CreditsBlock } from "@/components/CreditsDialog";
 import { BALANCE_EVENT } from "@/components/Header";
 
@@ -140,8 +148,15 @@ export default function JobView({ id }: { id: string }) {
       <p className="text-sm text-muted">
         “{job.prompt.slice(0, 140)}
         {job.prompt.length > 140 ? "…" : ""}”
-        {job.model === "seedance-2.0" ? " · Seedance 2.0" : " · Seedance 2.5"} ·{" "}
-        {job.duration_s}s · {job.aspect} · ${(job.quote_credits * 0.01).toFixed(2)}
+        {" · "}
+        {job.model && job.model in MODELS
+          ? MODELS[job.model as ModelId].label
+          : job.model}{" "}
+        · {job.duration_s}s · {job.aspect} ·{" "}
+        {job.mode in OUTPUT_MODES
+          ? `${OUTPUT_MODES[job.mode as OutputMode].label} (${OUTPUT_MODES[job.mode as OutputMode].resolution})`
+          : job.mode}{" "}
+        · ${(job.quote_credits * 0.01).toFixed(2)}
       </p>
 
       {job.status === "failed" ? (

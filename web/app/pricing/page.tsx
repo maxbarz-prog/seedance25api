@@ -6,6 +6,10 @@ import {
   MODELS,
   ModelId,
   NATIVE_1080P_MODEL_IDS,
+  OUTPUT_MODES,
+  OUTPUT_MODE_IDS,
+  OutputMode,
+  DEFAULT_MODE,
   PLANS,
   SITE_NAME,
 } from "@/lib/config";
@@ -16,15 +20,16 @@ export const dynamic = "force-dynamic";
 export default function PricingPage() {
   const r = rates();
   const durations = [5, 10, 15, 30];
-  const price = (model: ModelId, d: number) =>
-    d <= MODELS[model].maxDurationS
-      ? fmtUsd(quote({ model, durationS: d, mode: "upscaled-1080p", upscaleFactor: 2 }).usd)
-      : "—";
-  const nativePrice = (model: ModelId, d: number) =>
-    d <= MODELS[model].maxDurationS &&
-    (NATIVE_1080P_MODEL_IDS as readonly string[]).includes(model)
-      ? fmtUsd(quote({ model, durationS: d, mode: "native-1080p" }).usd)
-      : "—";
+  const priceFor = (model: ModelId, mode: OutputMode, d: number) => {
+    if (d > MODELS[model].maxDurationS) return "—";
+    if (
+      OUTPUT_MODES[mode].native &&
+      !(NATIVE_1080P_MODEL_IDS as readonly string[]).includes(model)
+    ) {
+      return "—";
+    }
+    return fmtUsd(quote({ model, durationS: d, mode }).usd);
+  };
   // Seedance 1.5 Pro is the one model priced by soundtrack rather than
   // resolution, so its rows would otherwise understate a video with audio.
   const hasAudioRate = (model: ModelId) => "audio" in MODELS[model];
@@ -97,39 +102,56 @@ export default function PricingPage() {
             <tbody>
               {MODEL_IDS.map((m) => (
                 <Fragment key={m}>
-                  <tr className="border-b border-line/50">
-                    <td className="p-4 pb-1 align-bottom" rowSpan={2}>
-                      <div className="font-medium">{MODELS[m].label}</div>
-                      <div className="text-xs text-muted">
-                        up to {MODELS[m].maxDurationS}s · {inputs(m)}
-                        {hasAudioRate(m) && " · sound doubles the rate"}
-                      </div>
-                      {live(m) && (
-                        <div className="mt-1 text-xs text-accent">
-                          {Math.round(live(m)!.pct * 100)}% provider discount, passed
-                          on until{" "}
-                          {new Date(live(m)!.until).toLocaleDateString(undefined, {
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </div>
+                  {OUTPUT_MODE_IDS.map((mode, i) => (
+                    <tr
+                      key={`${m}-${mode}`}
+                      className={
+                        i === OUTPUT_MODE_IDS.length - 1
+                          ? "border-b border-line last:border-0"
+                          : "border-b border-line/40"
+                      }
+                    >
+                      {i === 0 && (
+                        <td className="p-4 align-top" rowSpan={OUTPUT_MODE_IDS.length}>
+                          <div className="font-medium">{MODELS[m].label}</div>
+                          <div className="text-xs text-muted">
+                            up to {MODELS[m].maxDurationS}s · {inputs(m)}
+                            {hasAudioRate(m) && " · sound doubles the rate"}
+                          </div>
+                          {live(m) && (
+                            <div className="mt-1 text-xs text-accent">
+                              {Math.round(live(m)!.pct * 100)}% provider discount, passed on
+                              until{" "}
+                              {new Date(live(m)!.until).toLocaleDateString(undefined, {
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </div>
+                          )}
+                        </td>
                       )}
-                    </td>
-                    <td className="p-4 pb-1 text-muted">1080p upscaled (default)</td>
-                    {durations.map((d) => (
-                      <td key={d} className="p-4 pb-1 font-medium tabular-nums">
-                        {price(m, d)}
+                      <td className="p-4 text-muted">
+                        {OUTPUT_MODES[mode].label}
+                        {mode === DEFAULT_MODE && (
+                          <span className="ml-2 rounded-full bg-accent px-2 py-0.5 text-[10px] text-accent-ink">
+                            default
+                          </span>
+                        )}
+                        <div className="text-xs opacity-70">
+                          rendered at {OUTPUT_MODES[mode].renderedAt}
+                          {OUTPUT_MODES[mode].native ? ", no upscaler" : ", then upscaled"}
+                        </div>
                       </td>
-                    ))}
-                  </tr>
-                  <tr className="border-b border-line last:border-0">
-                    <td className="px-4 pb-4 pt-0 text-muted">1080p native</td>
-                    {durations.map((d) => (
-                      <td key={d} className="px-4 pb-4 pt-0 tabular-nums">
-                        {nativePrice(m, d)}
-                      </td>
-                    ))}
-                  </tr>
+                      {durations.map((d) => (
+                        <td
+                          key={d}
+                          className={`p-4 tabular-nums ${mode === DEFAULT_MODE ? "font-medium" : ""}`}
+                        >
+                          {priceFor(m, mode, d)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
                 </Fragment>
               ))}
             </tbody>
@@ -137,10 +159,15 @@ export default function PricingPage() {
         </div>
         <p className="mt-2 text-xs text-muted">
           Live rates — these numbers move when our costs move, in both
-          directions. A dash means the model does not offer that: 2.0 Fast and
-          2.0 Mini have no native 1080p (the upscaled route is theirs), and no
-          model is priced past its maximum length. Prices shown are for silent
-          video; Seedance 1.5 Pro charges double with a soundtrack.
+          directions. A dash means the model does not offer that: only some
+          models render 1080p themselves, and none is priced past its maximum
+          length. Prices are for silent video.
+          {" "}
+          <span className="text-ink">
+            4K is the default because it is the cheapest good option, not the
+            dearest: the render is the expensive part, so buying more pixels at
+            the upscaler costs far less than rendering at 1080p natively.
+          </span>
           {anyDiscount &&
             " Where our provider is running a promotion we pass it on, and the price returns to normal by itself when it ends."}
         </p>

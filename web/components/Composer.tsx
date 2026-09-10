@@ -19,6 +19,10 @@ import {
   MODELS,
   ModelId,
   NATIVE_1080P_MODEL_IDS,
+  OUTPUT_MODES,
+  OUTPUT_MODE_IDS,
+  OutputMode,
+  DEFAULT_MODE,
 } from "@/lib/config";
 import CreditsDialog, { CreditsBlock } from "./CreditsDialog";
 import { BALANCE_EVENT } from "./Header";
@@ -44,7 +48,7 @@ export default function Composer() {
   const [durationS, setDurationS] = useState(DEFAULT_DURATION_S);
   const [aspect, setAspect] = useState<string>("16:9");
   const [audio, setAudio] = useState(false);
-  const [mode, setMode] = useState<"upscaled-1080p" | "native-1080p">("upscaled-1080p");
+  const [mode, setMode] = useState<OutputMode>(DEFAULT_MODE);
   const [q, setQ] = useState<Quote | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,6 +85,7 @@ export default function Composer() {
   // 2.0 Fast and 2.0 Mini have no 1080p output at the provider, so the native
   // option is not offered for them at all.
   const canNative = (NATIVE_1080P_MODEL_IDS as readonly string[]).includes(model);
+  const modeAvailable = (m: OutputMode) => !OUTPUT_MODES[m].native || canNative;
   // A supplied first or last frame fixes the output ratio at the provider, so
   // offering an aspect choice alongside one would be a lie.
   const framePinned = images.some(
@@ -199,12 +204,13 @@ export default function Composer() {
   }, [needs, model]);
 
   useEffect(() => {
-    if (!canNative && mode === "native-1080p") setMode("upscaled-1080p");
+    if (!modeAvailable(mode)) setMode(DEFAULT_MODE);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canNative, mode]);
 
   useEffect(() => {
     const ctl = new AbortController();
-    const effectiveMode = canNative ? mode : "upscaled-1080p";
+    const effectiveMode = modeAvailable(mode) ? mode : DEFAULT_MODE;
     const qs = new URLSearchParams({
       model,
       duration: String(Math.min(durationS, maxDuration)),
@@ -236,7 +242,6 @@ export default function Composer() {
           aspect,
           audio,
           mode,
-          upscaleFactor: 2,
           images: images.map((i) => ({ key: i.key, role: i.role })),
           seed: seed.trim() === "" ? undefined : Number(seed),
           cameraFixed,
@@ -438,48 +443,35 @@ export default function Composer() {
         </label>
 
         <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
-          <button
-            onClick={() => setMode("upscaled-1080p")}
-            className={`rounded-full px-3 py-1 ${
-              mode === "upscaled-1080p" ? "bg-accent text-accent-ink" : "text-muted"
-            }`}
-          >
-            1080p upscaled
-          </button>
-          {canNative && (
+          {OUTPUT_MODE_IDS.filter(modeAvailable).map((m) => (
             <button
-              onClick={() => setMode("native-1080p")}
+              key={m}
+              onClick={() => setMode(m)}
               className={`rounded-full px-3 py-1 ${
-                mode === "native-1080p" ? "bg-accent text-accent-ink" : "text-muted"
+                mode === m ? "bg-accent text-accent-ink" : "text-muted"
               }`}
             >
-              1080p native
+              {OUTPUT_MODES[m].label}
             </button>
-          )}
+          ))}
         </div>
       </div>
 
-      {framePinned && (
-        <p className="mt-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
-          <span className="font-medium">Photos of real people are refused.</span>{" "}
-          Our video provider will not animate a photograph of an actual person —
-          the generation is rejected before it starts, and you are not charged.
-          Illustrations, drawings and objects are fine. To feature a person,
-          describe them in the prompt instead of uploading a photo.
-        </p>
-      )}
-
-      {mode === "upscaled-1080p" ? (
-        <p className="mt-2 text-xs text-muted">
-          Rendered at 480p, AI-upscaled to 1080p — same length, sharp result,
-          a fraction of native cost.
-          {!canNative && ` ${MODELS[model].label} has no native 1080p, so this is the only 1080p route.`}
-        </p>
-      ) : (
-        <p className="mt-2 text-xs text-muted">
-          Rendered natively at 1080p for maximum fidelity.
-        </p>
-      )}
+      {/* The pipeline, stated plainly: what gets rendered, at what size, and
+          what happens to it afterwards. */}
+      <p className="mt-2 text-xs text-muted">
+        <span className="font-medium text-ink">
+          {MODELS[model].label} at {OUTPUT_MODES[mode].renderedAt}
+          {OUTPUT_MODES[mode].native
+            ? " — delivered as rendered"
+            : ` → AI upscale → ${OUTPUT_MODES[mode].resolution}`}
+        </span>
+        <br />
+        {OUTPUT_MODES[mode].blurb}
+        {!canNative && (
+          <> {MODELS[model].label} does not render 1080p itself, so that option is not shown.</>
+        )}
+      </p>
 
       <div className="mt-3 text-xs">
         <button

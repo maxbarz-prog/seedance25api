@@ -29,8 +29,11 @@ function headers() {
   return { Authorization: `Key ${key}`, "Content-Type": "application/json" };
 }
 
-export function targetResolution(factor: 2 | 4): "1080p" | "4K" {
-  return factor === 4 ? "4K" : "1080p";
+// Lowercase "4k" is the spelling the API actually accepts — verified
+// 2026-09-10 against a real upscale (run 34438351572), which returned a true
+// 3840x2160. "4K" was never tested and is not worth guessing at.
+export function targetResolution(factor: 2 | 4): "1080p" | "4k" {
+  return factor === 4 ? "4k" : "1080p";
 }
 
 export class FalUpscaler implements VideoUpscaler {

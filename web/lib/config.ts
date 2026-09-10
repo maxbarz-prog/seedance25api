@@ -243,6 +243,54 @@ export function tokensFor(model: ModelId, tier: "sd" | "hd", seconds: number): n
   return (framesFor(seconds) * size[0] * size[1] * TOKEN_SAFETY) / 1024;
 }
 
+// How a finished video is produced. Three routes to a deliverable, and the
+// member picks; nothing here is hidden from them.
+//
+// The default is 480p upscaled to 4K. It is not a compromise: measured
+// 2026-09-10, the upscaler turns a 480p render into a true 3840x2160 for
+// $0.0288 per source second, while a native 1080p render of the same clip
+// costs 4-5x as much in provider tokens and comes back at a lower
+// resolution. The generation dominates the bill either way, so buying more
+// pixels at the upscaler is the cheapest quality available.
+//
+// `upscaleFactor` is what the upscaler is asked for; `native` means the model
+// renders the final resolution itself and the upscaler is not used at all.
+export const OUTPUT_MODES = {
+  "upscaled-4k": {
+    id: "upscaled-4k",
+    label: "4K",
+    resolution: "3840x2160",
+    renderedAt: "480p",
+    upscaleFactor: 4 as const,
+    native: false,
+    blurb:
+      "Rendered at 480p, then AI-upscaled to 4K. Sharpest result and, because the render is cheap, far less than a native 1080p pass.",
+  },
+  "upscaled-1080p": {
+    id: "upscaled-1080p",
+    label: "1080p",
+    resolution: "1920x1080",
+    renderedAt: "480p",
+    upscaleFactor: 2 as const,
+    native: false,
+    blurb: "Rendered at 480p, then AI-upscaled to 1080p. The cheapest way to a full-HD clip.",
+  },
+  "native-1080p": {
+    id: "native-1080p",
+    label: "1080p native",
+    resolution: "1920x1080",
+    renderedAt: "1080p",
+    upscaleFactor: 2 as const,
+    native: true,
+    blurb:
+      "Rendered at 1080p by the model itself, with no upscaler involved. No interpolated frames, but several times the price. Not offered on every model.",
+  },
+} as const;
+
+export type OutputMode = keyof typeof OUTPUT_MODES;
+export const OUTPUT_MODE_IDS = Object.keys(OUTPUT_MODES) as OutputMode[];
+export const DEFAULT_MODE: OutputMode = "upscaled-4k";
+
 export const MIN_DURATION_S = 4;
 export const MAX_DURATION_S = 30; // absolute ceiling (Seedance 2.5)
 export const DEFAULT_DURATION_S = 5;

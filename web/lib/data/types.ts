@@ -5,7 +5,7 @@
 
 export type Membership = "none" | "monthly" | "annual";
 export type JobStatus = "queued" | "generating" | "upscaling" | "ready" | "failed";
-export type JobMode = "upscaled-1080p" | "native-1080p";
+export type JobMode = "upscaled-4k" | "upscaled-1080p" | "native-1080p";
 
 export interface User {
   id: string;

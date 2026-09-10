@@ -15,9 +15,13 @@ import {
   MAX_PROMPT_CHARS,
   MAX_VARIATIONS,
   MIN_DURATION_S,
+  DEFAULT_MODE,
   MODEL_IDS,
   MODELS,
   NATIVE_1080P_MODEL_IDS,
+  OUTPUT_MODES,
+  OUTPUT_MODE_IDS,
+  OutputMode,
   PLANS,
 } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
@@ -30,8 +34,7 @@ const Body = z.object({
   durationS: z.number().int().min(MIN_DURATION_S).max(MAX_DURATION_S),
   aspect: z.enum(ASPECT_RATIOS),
   audio: z.boolean().default(false),
-  mode: z.enum(["upscaled-1080p", "native-1080p"]).default("upscaled-1080p"),
-  upscaleFactor: z.union([z.literal(2), z.literal(4)]).default(2),
+  mode: z.enum(OUTPUT_MODE_IDS as [string, ...string[]]).default(DEFAULT_MODE),
   images: z
     .array(
       z.object({
@@ -146,7 +149,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (b.mode === "native-1080p" && !(NATIVE_1080P_MODEL_IDS as string[]).includes(model)) {
+  const outputMode = b.mode as OutputMode;
+  if (OUTPUT_MODES[outputMode].native && !(NATIVE_1080P_MODEL_IDS as string[]).includes(model)) {
     return NextResponse.json(
       {
         error: `${MODELS[model].label} does not render 1080p natively — use the upscaled option.`,
@@ -154,13 +158,7 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const q = quote({
-    model,
-    durationS: b.durationS,
-    mode: b.mode,
-    upscaleFactor: b.upscaleFactor,
-    audio: b.audio,
-  });
+  const q = quote({ model, durationS: b.durationS, mode: outputMode, audio: b.audio });
   const total = q.credits * b.variations;
   const bal = await balance(user.id);
   if (bal < total) {
@@ -196,8 +194,9 @@ export async function POST(req: NextRequest) {
       duration_s: b.durationS,
       aspect: b.aspect,
       audio: b.audio ? 1 : 0,
-      mode: b.mode,
-      upscale_factor: b.upscaleFactor,
+      mode: outputMode,
+      // Kept in step with the mode so the pipeline never has to re-derive it.
+      upscale_factor: OUTPUT_MODES[outputMode].upscaleFactor,
       status: "queued",
       quote_credits: q.credits,
       provider_task_id: null,

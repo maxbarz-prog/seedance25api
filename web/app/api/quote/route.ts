@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { quote } from "@/lib/pricing";
 import {
+  DEFAULT_MODE,
   DEFAULT_MODEL,
   EXTEND_CONTEXT_S,
   MIN_DURATION_S,
@@ -8,6 +9,9 @@ import {
   MODELS,
   ModelId,
   NATIVE_1080P_MODEL_IDS,
+  OUTPUT_MODES,
+  OUTPUT_MODE_IDS,
+  OutputMode,
 } from "@/lib/config";
 
 export async function GET(req: NextRequest) {
@@ -20,16 +24,19 @@ export async function GET(req: NextRequest) {
   }
   const model = modelParam as ModelId;
   const durationS = Number(p.get("duration") || 5);
-  const mode = p.get("mode") === "native-1080p" ? "native-1080p" : "upscaled-1080p";
+  const modeParam = p.get("mode") ?? DEFAULT_MODE;
+  if (!(OUTPUT_MODE_IDS as string[]).includes(modeParam)) {
+    return NextResponse.json({ error: "Unknown output mode." }, { status: 400 });
+  }
+  const mode = modeParam as OutputMode;
   // 2.0 Fast and 2.0 Mini have no 1080p output at the provider at all; they
   // reach 1080p only through the upscaler.
-  if (mode === "native-1080p" && !(NATIVE_1080P_MODEL_IDS as string[]).includes(model)) {
+  if (OUTPUT_MODES[mode].native && !(NATIVE_1080P_MODEL_IDS as string[]).includes(model)) {
     return NextResponse.json(
       { error: `${MODELS[model].label} does not render 1080p natively.` },
       { status: 400 }
     );
   }
-  const factor = p.get("factor") === "4" ? 4 : 2;
   const audio = p.get("audio") === "1";
   if (
     !Number.isInteger(durationS) ||
@@ -42,5 +49,5 @@ export async function GET(req: NextRequest) {
   // along as the reference video (capped server-side to EXTEND_CONTEXT_S).
   const contextRaw = Number(p.get("context") || 0);
   const contextS = Number.isFinite(contextRaw) && contextRaw > 0 ? Math.min(contextRaw, EXTEND_CONTEXT_S) : 0;
-  return NextResponse.json(quote({ model, durationS, mode, upscaleFactor: factor, contextS, audio }));
+  return NextResponse.json(quote({ model, durationS, mode, contextS, audio }));
 }

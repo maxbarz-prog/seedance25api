@@ -5,6 +5,7 @@ import { currentUser } from "@/lib/auth";
 import { addLedger, balance, createJob, jobById, storageUsedBytes } from "@/lib/db";
 import { quote } from "@/lib/pricing";
 import {
+  DEFAULT_MODE,
   DEFAULT_MODEL,
   EXTEND_CONTEXT_S,
   EXTEND_MAX_S,
@@ -13,6 +14,8 @@ import {
   MODEL_IDS,
   MODELS,
   ModelId,
+  OUTPUT_MODE_IDS,
+  OutputMode,
   PLANS,
 } from "@/lib/config";
 import { advanceJob } from "@/lib/pipeline";
@@ -78,8 +81,10 @@ export async function POST(
   const q = quote({
     model,
     durationS: b.durationS,
-    mode: source.mode,
-    upscaleFactor: source.upscale_factor === 4 ? 4 : 2,
+    // An extension keeps the source's output path, so the two halves match.
+    mode: (OUTPUT_MODE_IDS as string[]).includes(source.mode)
+      ? (source.mode as OutputMode)
+      : DEFAULT_MODE,
     audio: !!source.audio,
     // The pipeline sends only the last EXTEND_CONTEXT_S of the source.
     contextS: Math.min(source.duration_s, EXTEND_CONTEXT_S),
