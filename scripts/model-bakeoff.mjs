@@ -46,12 +46,31 @@ const IMAGE_PROMPT =
 // Only models this account can actually call. Being on the price list is not
 // enough: the other five Seedance models are listed and priced but answer 404
 // ModelNotOpen. See .github/workflows/model-activation.yml, which is free.
+// `perMillion` is the 480p/720p rate, `perMillionHd` the 1080p one (null
+// where the model has no native 1080p at all). Frame sizes are what these
+// models actually emit, measured — 480p is not one size across the range.
 const MODELS = [
-  { id: "seedance-2.5", label: "Seedance 2.5", upstream: "dreamina-seedance-2-5-260628", perMillion: 10.7 },
-  { id: "seedance-2.0", label: "Seedance 2.0", upstream: "dreamina-seedance-2-0-260128", perMillion: 7.0 },
-  { id: "seedance-2.0-fast", label: "Seedance 2.0 Fast", upstream: "dreamina-seedance-2-0-fast-260128", perMillion: 5.6, discount: { pct: 0.25, until: "2026-10-07T06:00:00Z" } },
-  { id: "seedance-2.0-mini", label: "Seedance 2.0 Mini", upstream: "dreamina-seedance-2-0-mini-260615", perMillion: 3.5, discount: { pct: 0.6, until: "2026-10-07T06:00:00Z" } },
+  { id: "seedance-2.5", label: "Seedance 2.5", upstream: "dreamina-seedance-2-5-260628",
+    perMillion: 10.7, perMillionHd: 11.7,
+    hdDiscount: { pct: 0.28, until: "2026-09-17T06:00:00Z" },
+    frame: { sd: [854, 480], hd: [1920, 1080] } },
+  { id: "seedance-2.0", label: "Seedance 2.0", upstream: "dreamina-seedance-2-0-260128",
+    perMillion: 7.0, perMillionHd: 7.7,
+    frame: { sd: [864, 496], hd: [1920, 1080] } },
+  { id: "seedance-2.0-fast", label: "Seedance 2.0 Fast", upstream: "dreamina-seedance-2-0-fast-260128",
+    perMillion: 5.6, perMillionHd: null,
+    discount: { pct: 0.25, until: "2026-10-07T06:00:00Z" },
+    frame: { sd: [864, 496], hd: null } },
+  { id: "seedance-2.0-mini", label: "Seedance 2.0 Mini", upstream: "dreamina-seedance-2-0-mini-260615",
+    perMillion: 3.5, perMillionHd: null,
+    discount: { pct: 0.6, until: "2026-10-07T06:00:00Z" },
+    frame: { sd: [864, 496], hd: null } },
 ];
+
+// NATIVE renders at 1080p with no upscaler; the default renders at 480p and
+// upscales. Running both against the same key frame is the only way to see
+// what the 4.7x price difference actually buys.
+const NATIVE = process.env.BAKEOFF_NATIVE === "1";
 
 // BAKEOFF_MODELS limits the run to named models, so a failure in one does not
 // mean paying again for the ones that already succeeded.
@@ -62,21 +81,38 @@ const UPSCALE_PER_SEC = 0.0072;
 const DELIVERY = 0.01, OVERHEAD = 0.1, PROCESSING = 0.035, CREDIT = 0.01;
 
 const now = Date.now();
-const liveRate = (m) =>
-  m.discount && Date.parse(m.discount.until) > now
-    ? m.perMillion * (1 - m.discount.pct)
-    : m.perMillion;
+// The rate actually in force for the tier this run uses, net of a promotion
+// that is still running.
+function liveRate(m) {
+  const list = NATIVE ? m.perMillionHd : m.perMillion;
+  if (list === null || list === undefined) return null;
+  const d = NATIVE ? m.hdDiscount : m.discount;
+  return d && Date.parse(d.until) > now ? list * (1 - d.pct) : list;
+}
+// The provider bills frames, and a render carries one more than
+// duration x fps: a 5 s clip at 24 fps comes back 5.04 s and bills 121.
+const framesFor = (sec) => Math.round(sec * 24) + 1;
+function estTokens(m, sec) {
+  const size = NATIVE ? m.frame.hd : m.frame.sd;
+  if (!size) return null;
+  return (framesFor(sec) * size[0] * size[1]) / 1024;
+}
 
-// What we would charge a member for this render (480p + 2x upscale).
+// What we would charge a member for this render. Mirrors web/lib/pricing.ts,
+// including the half-percent the estimate carries so a quote never lands
+// under what the provider bills.
+const TOKEN_SAFETY = 1.005;
 function ourPriceUsd(m, durationS) {
-  // 864x496 at 24fps, the larger 480p frame the 2.0 series emits.
-  const tokensPerSec = (864 * 496 * 24) / 1024;
-  const provider = (liveRate(m) * tokensPerSec * durationS) / 1e6 + UPSCALE_PER_SEC * durationS;
+  const rate = liveRate(m);
+  const tokens = estTokens(m, durationS);
+  if (rate === null || tokens === null) return null;
+  let provider = (rate * tokens * TOKEN_SAFETY) / 1e6;
+  if (!NATIVE) provider += UPSCALE_PER_SEC * durationS;
   const usd = ((provider + DELIVERY) * (1 + OVERHEAD)) / (1 - PROCESSING);
   return Math.ceil(usd / CREDIT) * CREDIT;
 }
 
-const summary = { startedAt: new Date().toISOString(), prompt: PROMPT, seed: SEED, durationS: DURATION_S, models: [], totals: {} };
+const summary = { startedAt: new Date().toISOString(), mode: NATIVE ? "native-1080p" : "upscaled-1080p", prompt: PROMPT, seed: SEED, durationS: DURATION_S, models: [], totals: {} };
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -246,7 +282,7 @@ async function generate(m, imageUrl) {
         ? [{ type: "image_url", image_url: { url: imageUrl }, role: "first_frame" }]
         : []),
     ],
-    resolution: "480p",
+    resolution: NATIVE ? "1080p" : "480p",
     // With a first-frame image the provider takes the ratio from that image
     // and rejects an explicit one. Same rule as production (byteplus.ts).
     ratio: imageUrl ? "adaptive" : RATIO,
@@ -343,8 +379,18 @@ function probe(path) {
 // The margin guard's own decision, applied to the tokens actually billed.
 function verdictFor(m, rec) {
   if (!rec.tokens) return { verdict: "unknown" };
-  const providerUsd = (rec.tokens * liveRate(m)) / 1e6 + UPSCALE_PER_SEC * DURATION_S;
+  const rate = liveRate(m);
+  if (rate === null) return { verdict: "unknown" };
+  let providerUsd = (rec.tokens * rate) / 1e6;
+  if (!NATIVE) providerUsd += UPSCALE_PER_SEC * DURATION_S;
   const chargedUsd = ourPriceUsd(m, DURATION_S);
+  // How far our token estimate sat from what was actually billed. Tolerance
+  // is 0 to +1%: under is a loss on every order, over a percent is money
+  // taken for nothing.
+  const est = estTokens(m, DURATION_S);
+  rec.estTokens = est === null ? null : Math.round(est * TOKEN_SAFETY);
+  rec.estDriftPct =
+    est === null ? null : Number((((est * TOKEN_SAFETY - rec.tokens) / rec.tokens) * 100).toFixed(2));
   let verdict = "ok";
   if (chargedUsd < providerUsd) verdict = "LOSS";
   else if (chargedUsd < providerUsd * 1.05) verdict = "thin";
@@ -362,13 +408,20 @@ async function main() {
   for (const m of MODELS.filter((m) => !ONLY.length || ONLY.includes(m.id))) {
     const rec = await generate(m, imageUrl);
     if (rec.status === "succeeded") {
-      const p = await download(rec.videoUrl, `${m.id}-480p.mp4`);
-      rec.file480 = p && p.split("/").pop();
-      rec.probe480 = probe(p);
-      await upscale(rec);
-      const up = await download(rec.upscaledUrl, `${m.id}-1080p.mp4`);
-      rec.file1080 = up && up.split("/").pop();
-      rec.probe1080 = probe(up);
+      if (NATIVE) {
+        // Nothing to upscale: this IS the 1080p render.
+        const p = await download(rec.videoUrl, `${m.id}-1080p-native.mp4`);
+        rec.fileNative = p && p.split("/").pop();
+        rec.probeNative = probe(p);
+      } else {
+        const p = await download(rec.videoUrl, `${m.id}-480p.mp4`);
+        rec.file480 = p && p.split("/").pop();
+        rec.probe480 = probe(p);
+        await upscale(rec);
+        const up = await download(rec.upscaledUrl, `${m.id}-1080p.mp4`);
+        rec.file1080 = up && up.split("/").pop();
+        rec.probe1080 = probe(up);
+      }
     }
     Object.assign(rec, verdictFor(m, rec));
     summary.models.push(rec);
@@ -383,17 +436,21 @@ async function main() {
     chargedUsd: Number(ok.reduce((a, r) => a + (r.chargedUsd || 0), 0).toFixed(2)),
     losses: summary.models.filter((r) => r.verdict === "LOSS").map((r) => r.id),
   };
-  writeFileSync(join(OUT_DIR, "bakeoff.json"), JSON.stringify(summary, null, 2));
+  writeFileSync(join(OUT_DIR, NATIVE ? "bakeoff-native.json" : "bakeoff.json"), JSON.stringify(summary, null, 2));
 
   const rows = [
-    "| Model | Tokens | Cost to us | We charge | Margin | 480p | 1080p | Gen |",
-    "|---|---|---|---|---|---|---|---|",
+    `| Model | Tokens | Est | Drift | Cost to us | We charge | Margin | ${NATIVE ? "1080p native" : "480p source | 1080p upscaled"} | Gen |`,
+    NATIVE ? "|---|---|---|---|---|---|---|---|---|" : "|---|---|---|---|---|---|---|---|---|---|",
     ...summary.models.map((r) => {
-      const p4 = r.probe480 || {}, p10 = r.probe1080 || {};
-      return `| ${r.label} | ${r.tokens ?? "—"} | ${r.providerUsd ? "$" + r.providerUsd.toFixed(4) : "—"} | ${r.chargedUsd ? "$" + r.chargedUsd.toFixed(2) : "—"} | ${r.verdict ?? "—"} | ${p4.width ? `${p4.width}x${p4.height}` : r.error ? "failed" : "—"} | ${p10.width ? `${p10.width}x${p10.height}` : r.upscaleError ? "failed" : "—"} | ${r.wallS ? r.wallS + "s" : "—"} |`;
+      const p4 = r.probe480 || {}, p10 = r.probe1080 || {}, pn = r.probeNative || {};
+      const dim = (p) => (p.width ? `${p.width}x${p.height}` : "—");
+      const shape = NATIVE
+        ? (pn.width ? dim(pn) : r.error ? "failed" : "—")
+        : `${p4.width ? dim(p4) : r.error ? "failed" : "—"} | ${p10.width ? dim(p10) : r.upscaleError ? "failed" : "—"}`;
+      return `| ${r.label} | ${r.tokens ?? "—"} | ${r.estTokens ?? "—"} | ${r.estDriftPct === null || r.estDriftPct === undefined ? "—" : r.estDriftPct + "%"} | ${r.providerUsd ? "$" + r.providerUsd.toFixed(4) : "—"} | ${r.chargedUsd ? "$" + r.chargedUsd.toFixed(2) : "—"} | ${r.verdict ?? "—"} | ${shape} | ${r.wallS ? r.wallS + "s" : "—"} |`;
     }),
     "",
-    `Key frame: ${summary.keyImageSource}. Prompt seed ${SEED}, ${DURATION_S}s, 480p then upscaled to 1080p.`,
+    `Key frame: ${summary.keyImageSource}. Prompt seed ${SEED}, ${DURATION_S}s, ${NATIVE ? "rendered natively at 1080p (no upscaler)" : "rendered at 480p then upscaled to 1080p"}.`,
     "",
     `**Spent: $${summary.totals.providerUsd}** across ${ok.length} renders. Members would have paid $${summary.totals.chargedUsd}.`,
     summary.totals.losses.length

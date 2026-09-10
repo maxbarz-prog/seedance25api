@@ -41,6 +41,11 @@ on:
         description: "Only these model ids, comma separated (blank = all). Use with reuse_run_id to redo one without re-paying for the rest."
         type: string
         default: ""
+      native:
+        description: 'Render natively at 1080p with no upscaler ("yes"), instead of 480p + upscale. Only 2.5 and 2.0 can.'
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
 
 permissions:
   id-token: write
@@ -107,6 +112,7 @@ jobs:
           KEY_IMAGE_URL: ${{ inputs.key_image_url }}
           BAKEOFF_PROMPT: ${{ inputs.prompt }}
           BAKEOFF_MODELS: ${{ inputs.models }}
+          BAKEOFF_NATIVE: ${{ inputs.native == 'yes' && '1' || '0' }}
           SEED_CLIP_PATH: ${{ github.workspace }}/bakeoff/seed-clip.mp4
         run: |
           set -euo pipefail
