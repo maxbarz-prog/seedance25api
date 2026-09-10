@@ -240,8 +240,44 @@ async function keyImage() {
     // fail every render identically after the money was committed. This also
     // pins the frame: the same bytes for every model, and for any re-run.
     log("key frame: fetching the supplied image");
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`KEY_IMAGE_URL is not fetchable: ${res.status}`);
+    // Stock sites gate their download endpoints on looking like a browser.
+    // Try that first, then a plain request, and report both failures rather
+    // than one — knowing which shape was refused is what tells you whether
+    // to find another host.
+    const attempts = [
+      {
+        label: "browser-like",
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36",
+          Accept: "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: new URL(src).origin + "/",
+        },
+      },
+      { label: "plain", headers: {} },
+    ];
+    let res = null;
+    const failures = [];
+    for (const a of attempts) {
+      const r = await fetch(src, { headers: a.headers, redirect: "follow" }).catch((e) => ({
+        ok: false,
+        status: String(e).slice(0, 80),
+      }));
+      if (r.ok) {
+        res = r;
+        log(`key frame: fetched with the ${a.label} request`);
+        break;
+      }
+      failures.push(`${a.label} -> ${r.status}`);
+    }
+    if (!res) {
+      throw new Error(
+        `KEY_IMAGE_URL is not fetchable (${failures.join(", ")}). ` +
+          `Stock-site download links often refuse anything but a signed-in browser — ` +
+          `use a direct CDN link, a GitHub attachment URL, or upload the image to the site and pass its URL.`
+      );
+    }
     const bytes = Buffer.from(await res.arrayBuffer());
     if (bytes.length < 1024) throw new Error(`KEY_IMAGE_URL returned only ${bytes.length} bytes`);
     const local = join(OUT_DIR, "key-frame.png");
