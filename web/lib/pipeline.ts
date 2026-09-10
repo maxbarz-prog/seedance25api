@@ -25,6 +25,44 @@ import { checkMargin, currentHalt } from "./money";
 const GENERIC_FAILURE =
   "Generation failed and your credits were refunded. Please try again.";
 
+// Some failures will happen again on every retry, so telling a member to try
+// again wastes their time and hides the real reason. These map an upstream
+// rejection onto something they can act on, without repeating the vendor's
+// wording or naming them.
+//
+// The real-person rule is the one that bites: the provider refuses to
+// animate a photograph of an actual person at all — measured 2026-09-10,
+// all four models rejecting the same portrait at submit. A member uploading
+// a photo of themselves, which is an obvious thing to do, hits it every
+// time.
+const PERMANENT_FAILURES: { match: RegExp; message: string }[] = [
+  {
+    match: /real person|realistic person|real human/i,
+    message:
+      "Our video provider will not animate photographs of real people. Try an illustration or a drawing as the starting image, or describe the person in the prompt instead of uploading a photo. You have not been charged.",
+  },
+  {
+    match: /moderation|sensitive|policy violation|prohibited|not allowed/i,
+    message:
+      "This prompt or image was rejected by automated content moderation. Adjust it and start a new generation. You have not been charged.",
+  },
+  {
+    match: /copyright|infring/i,
+    message:
+      "This prompt or image was rejected as possibly infringing. Adjust it and start a new generation. You have not been charged.",
+  },
+];
+
+// What the member sees. A retryable fault keeps the generic wording; a
+// permanent one says what to change.
+function userFacingFailure(internalError?: string): string {
+  if (!internalError) return GENERIC_FAILURE;
+  for (const f of PERMANENT_FAILURES) {
+    if (f.match.test(internalError)) return f.message;
+  }
+  return GENERIC_FAILURE;
+}
+
 // Jobs stuck in flight past this are failed and refunded.
 const STALE_MS = 45 * 60 * 1000;
 
@@ -319,7 +357,11 @@ async function finalize(job: Job, providerUrl: string) {
 async function fail(job: Job, internalError?: string) {
   if (internalError) console.error(`job ${job.id} failed upstream:`, internalError);
   await cleanupContext(job);
-  await updateJob(job.id, { status: "failed", error: GENERIC_FAILURE, provider_task_id: null });
+  await updateJob(job.id, {
+    status: "failed",
+    error: userFacingFailure(internalError),
+    provider_task_id: null,
+  });
   await addLedger(job.user_id, job.quote_credits, "refund", {
     jobId: job.id,
     memo: "Automatic refund: generation failed",

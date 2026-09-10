@@ -459,6 +459,16 @@ export default function Composer() {
         </div>
       </div>
 
+      {framePinned && (
+        <p className="mt-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+          <span className="font-medium">Photos of real people are refused.</span>{" "}
+          Our video provider will not animate a photograph of an actual person —
+          the generation is rejected before it starts, and you are not charged.
+          Illustrations, drawings and objects are fine. To feature a person,
+          describe them in the prompt instead of uploading a photo.
+        </p>
+      )}
+
       {mode === "upscaled-1080p" ? (
         <p className="mt-2 text-xs text-muted">
           Rendered at 480p, AI-upscaled to 1080p — same length, sharp result,
