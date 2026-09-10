@@ -19,6 +19,8 @@ export interface AdminOverview {
   };
   users: import("./data/types").AdminUserRow[];
   jobs: import("./data/types").AdminJobRow[];
+  // Per-model generation speed, measured from finished jobs.
+  modelTiming: import("./data/types").ModelTiming[];
 }
 
 export async function adminOverview(): Promise<AdminOverview> {
@@ -41,5 +43,6 @@ export async function adminOverview(): Promise<AdminOverview> {
     },
     users: d.users,
     jobs: d.jobs,
+    modelTiming: d.modelTiming,
   };
 }

@@ -11,6 +11,7 @@ import {
 } from "@aws-sdk/lib-dynamodb";
 import { randomUUID } from "crypto";
 import { findMoneyIssues, MoneyIssue } from "./reconcile";
+import { modelTimings } from "./timing";
 import {
   AddLedgerOpts,
   AdminData,
@@ -559,6 +560,7 @@ export class DynamoStore implements DataStore {
         .length,
       users: userRows,
       jobs: jobRows,
+      modelTiming: modelTimings(jobs),
     };
   }
 }

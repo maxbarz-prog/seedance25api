@@ -17,6 +17,7 @@ interface Overview {
     jobsFailed: number;
     jobsInFlight: number;
   };
+  modelTiming?: ModelTiming[];
   users: {
     id: string;
     email: string;
@@ -97,6 +98,16 @@ function Tile({ label, value, detail }: { label: string; value: string; detail?:
       {detail && <p className="mt-0.5 text-xs text-muted">{detail}</p>}
     </div>
   );
+}
+
+interface ModelTiming {
+  model: string;
+  mode: string;
+  samples: number;
+  medianSecPerOutputSec: number;
+  p90SecPerOutputSec: number;
+  queueSharePct: number | null;
+  medianTotalS: number;
 }
 
 interface MoneyIssue {
@@ -426,6 +437,60 @@ export default function AdminPage() {
           </div>
         )}
       </section>
+
+      {!!data?.modelTiming?.length && (
+        <section className="rounded-2xl border border-line bg-surface p-5">
+          <h2 className="font-medium">Generation speed</h2>
+          <p className="mt-1 text-sm text-muted">
+            Seconds of waiting per second of finished video, from real jobs.
+            Median, so one stuck job cannot move it. A high queue share is the
+            provider being busy rather than the model being slow — that is what
+            a rate-limit increase buys back.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-muted">
+                  <th className="py-2 font-normal">Model</th>
+                  <th className="py-2 font-normal">Output</th>
+                  <th className="py-2 font-normal">s per output s</th>
+                  <th className="py-2 font-normal">p90</th>
+                  <th className="py-2 font-normal">Typical job</th>
+                  <th className="py-2 font-normal">Queued</th>
+                  <th className="py-2 font-normal">Jobs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.modelTiming!.map((t) => (
+                  <tr key={`${t.model}-${t.mode}`} className="border-b border-line last:border-0">
+                    <td className="py-2">{t.model}</td>
+                    <td className="py-2 text-muted">
+                      {t.mode === "native-1080p" ? "1080p native" : "1080p upscaled"}
+                    </td>
+                    <td className="py-2 font-medium tabular-nums">
+                      {t.medianSecPerOutputSec.toFixed(1)}x
+                    </td>
+                    <td className="py-2 tabular-nums text-muted">
+                      {t.p90SecPerOutputSec.toFixed(1)}x
+                    </td>
+                    <td className="py-2 tabular-nums text-muted">{t.medianTotalS}s</td>
+                    <td className="py-2 tabular-nums">
+                      {t.queueSharePct === null ? (
+                        <span className="text-muted">—</span>
+                      ) : (
+                        <span className={t.queueSharePct >= 50 ? "text-amber-500" : "text-muted"}>
+                          {t.queueSharePct}%
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 tabular-nums text-muted">{t.samples}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <Tile label="Users" value={String(t.users)} />

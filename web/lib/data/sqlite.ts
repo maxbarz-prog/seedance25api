@@ -1,6 +1,7 @@
 import type Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import { findMoneyIssues, MoneyIssue } from "./reconcile";
+import { modelTimings } from "./timing";
 import fs from "fs";
 import path from "path";
 import {
@@ -91,6 +92,9 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE jobs ADD COLUMN source_job_id TEXT`,
       `ALTER TABLE jobs ADD COLUMN camera_fixed INTEGER`,
       `ALTER TABLE jobs ADD COLUMN provider_phase TEXT`,
+      `ALTER TABLE jobs ADD COLUMN provider_submitted_at INTEGER`,
+      `ALTER TABLE jobs ADD COLUMN provider_started_at INTEGER`,
+      `ALTER TABLE jobs ADD COLUMN provider_done_at INTEGER`,
       `ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT`,
       `ALTER TABLE users ADD COLUMN reset_token_hash TEXT`,
       `ALTER TABLE users ADD COLUMN reset_expires_at INTEGER`,
@@ -345,6 +349,9 @@ export class SqliteStore implements DataStore {
       ),
       users,
       jobs,
+      modelTiming: modelTimings(
+        this.db().prepare(`SELECT * FROM jobs WHERE status = 'ready'`).all() as Job[]
+      ),
     };
   }
 }

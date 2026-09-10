@@ -111,15 +111,29 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
       }
       // A freshly submitted task sits in the provider's queue until a slot
       // frees up, so start there rather than claiming to be rendering.
-      await updateJob(id, { provider_task_id: taskId, provider_phase: "queued" });
+      await updateJob(id, {
+        provider_task_id: taskId,
+        provider_phase: "queued",
+        // Start of the clock for the per-model speed stats.
+        provider_submitted_at: Date.now(),
+      });
     } else if (job.status === "generating") {
       if (!job.provider_task_id) return job; // claimed by someone mid-submit
       const result = await generator().pollTask(job.provider_task_id);
       // Only write when it changes: this runs every minute per in-flight job.
       if (result.phase && result.phase !== job.provider_phase) {
-        await updateJob(id, { provider_phase: result.phase });
+        await updateJob(id, {
+          provider_phase: result.phase,
+          // First sighting of "running" is when they picked the task up.
+          // Everything before it was queueing, which is the provider being
+          // busy rather than the model being slow.
+          ...(result.phase === "running" && !job.provider_started_at
+            ? { provider_started_at: Date.now() }
+            : {}),
+        });
       }
       if (result.status === "succeeded") {
+        if (!job.provider_done_at) await updateJob(id, { provider_done_at: Date.now() });
         if (result.tokens !== undefined) {
           // Billing basis for the measured rates (see docs/NEXT.md), and the
           // input to the margin check: this is what the provider actually

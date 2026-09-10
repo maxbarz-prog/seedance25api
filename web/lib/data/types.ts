@@ -47,8 +47,31 @@ export interface Job {
   camera_fixed?: number | null;
   size_bytes: number | null;
   error: string | null;
+  // Provider timing, for the per-model speed stats on the admin page. Three
+  // points, so a slow render can be told apart from a long wait for a slot:
+  // when we handed the task over, when they actually started it, when it
+  // came back.
+  provider_submitted_at?: number | null;
+  provider_started_at?: number | null;
+  provider_done_at?: number | null;
   created_at: number;
   updated_at: number;
+}
+
+// How long one model takes, per second of video it produces. The figure that
+// matters to a member is seconds of waiting per second of output.
+export interface ModelTiming {
+  model: string;
+  mode: string;
+  samples: number;
+  // Wall time from handing the task over to getting it back, divided by the
+  // output length. Median, because a single stuck job should not move it.
+  medianSecPerOutputSec: number;
+  p90SecPerOutputSec: number;
+  // Share of that wall time spent waiting for a slot rather than rendering.
+  // High means the provider is busy — which a rate-limit increase fixes.
+  queueSharePct: number | null;
+  medianTotalS: number;
 }
 
 export interface LedgerEntry {
@@ -96,6 +119,7 @@ export interface AdminData {
   jobsInFlight: number;
   users: AdminUserRow[];
   jobs: AdminJobRow[];
+  modelTiming: ModelTiming[];
 }
 
 export interface AddLedgerOpts {
