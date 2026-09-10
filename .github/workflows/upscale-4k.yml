@@ -1,0 +1,113 @@
+name: 4K upscale sample
+
+# Upscales one clip from an earlier bake-off run to 4K and publishes it as
+# its own small artifact — one file to look at, not a zip of everything.
+#
+# SPENDS MONEY, about $0.03 per source second.
+
+on:
+  push:
+    branches:
+      - claude/seedance-1080p-verify-c8cbha
+    paths:
+      - ".github/workflows/upscale-4k.yml"
+      - "scripts/upscale-4k.mjs"
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "spend" to confirm (about $0.15 for a 5s clip)'
+        type: string
+        default: ""
+      source_run_id:
+        description: "Bake-off run id holding the source clip"
+        type: string
+        default: "34433768931"
+      source_file:
+        description: "Which file in that artifact to upscale"
+        type: string
+        default: "seedance-2.5--source-480p.mp4"
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  upscale:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check the confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "spend" ]; then
+            echo "Not confirmed — type \"spend\" to run this."
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install ffprobe
+        run: |
+          set -euo pipefail
+          npm install --no-save ffprobe-static
+          echo "FFPROBE_PATH=$(node -p "require('ffprobe-static').path")" >> "$GITHUB_ENV"
+
+      - name: Fetch the source clip
+        uses: actions/download-artifact@v4
+        with:
+          name: model-bakeoff
+          path: source
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load the fal key from SSM
+        run: |
+          set -euo pipefail
+          v=$(aws ssm get-parameter --name "/remerged/dev/FAL_KEY" --with-decryption \
+            --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "FAL_KEY=$v" >> "$GITHUB_ENV"
+
+      - name: Preflight (spends nothing)
+        env:
+          SOURCE_FILE: source/${{ inputs.source_file }}
+        run: |
+          set -uo pipefail
+          code=0
+          node scripts/upscale-4k.mjs || code=$?
+          if [ "$code" != "2" ]; then
+            echo "Preflight expected exit 2 but got $code"
+            exit 1
+          fi
+          echo "Preflight clean."
+
+      - name: Upscale to 4K
+        env:
+          SPEND_OK: "yes"
+          SOURCE_FILE: source/${{ inputs.source_file }}
+          OUT_DIR: ${{ github.workspace }}/4k
+        run: |
+          set -euo pipefail
+          ls -la source/ | head
+          node scripts/upscale-4k.mjs
+
+      # Its own artifact name, so downloading this does not drag along the
+      # whole bake-off.
+      - name: Upload just the 4K clip
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 4k-sample
+          path: 4k/
+          retention-days: 30
+          overwrite: true
