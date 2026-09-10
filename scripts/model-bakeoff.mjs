@@ -31,10 +31,25 @@ const OUT_DIR = process.env.BAKEOFF_OUT || mkdtempSync(join(tmpdir(), "bakeoff-"
 const DURATION_S = Number(process.env.BAKEOFF_DURATION_S || 5);
 const SEED = Number(process.env.BAKEOFF_SEED || 12345);
 const RATIO = "16:9";
+// How often the provider is polled. Coarse enough not to hammer them, fine
+// enough that the queued/rendering split means something.
+const POLL_MS = Number(process.env.BAKEOFF_POLL_MS || 5000);
 
+// Five discrete, checkable instructions. The point is not that the video
+// looks nice — it is whether the model did the five things it was told, so
+// each clip can be scored the same way rather than judged on vibes.
+const INSTRUCTIONS = [
+  "she turns her head to her right",
+  "she breaks into a warm smile",
+  "a yellow butterfly enters from the left edge",
+  "the butterfly settles on her shoulder",
+  "the camera pushes in slowly",
+];
 const PROMPT =
   process.env.BAKEOFF_PROMPT ||
-  "A red vintage bicycle leaning against a sunlit stone wall, dry leaves drifting past on a light breeze, slow camera push-in, warm late-afternoon light, cinematic 35mm";
+  "The woman slowly turns her head to her right and breaks into a warm smile. " +
+    "A single yellow butterfly flutters in from the left edge of the frame and settles on her shoulder. " +
+    "The camera pushes in slowly throughout. The background stays still.";
 const IMAGE_PROMPT =
   process.env.BAKEOFF_IMAGE_PROMPT ||
   "A red vintage bicycle leaning against a sunlit stone wall, dry leaves on the ground, warm late-afternoon light, cinematic 35mm photograph, 16:9";
@@ -112,7 +127,7 @@ function ourPriceUsd(m, durationS) {
   return Math.ceil(usd / CREDIT) * CREDIT;
 }
 
-const summary = { startedAt: new Date().toISOString(), mode: NATIVE ? "native-1080p" : "upscaled-1080p", prompt: PROMPT, seed: SEED, durationS: DURATION_S, models: [], totals: {} };
+const summary = { startedAt: new Date().toISOString(), instructions: INSTRUCTIONS, mode: NATIVE ? "native-1080p" : "upscaled-1080p", prompt: PROMPT, seed: SEED, durationS: DURATION_S, models: [], totals: {} };
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -133,15 +148,27 @@ const falHeaders = () => ({ Authorization: `Key ${need("FAL_KEY")}`, "Content-Ty
 
 async function arkPoll(id, label, timeoutMs = 25 * 60_000) {
   const t0 = Date.now();
+  // Split the wall time into "sitting in their queue" and "actually
+  // rendering". Without this a slow model and a busy provider look identical,
+  // and there is no way to say whether the delay is ours to fix.
+  let startedAt = null;
   for (;;) {
     const r = await req(`${ARK}/contents/generations/tasks/${id}`, { headers: arkHeaders() });
     if (!r.ok) throw new Error(`${label}: poll ${r.status} ${r.text.slice(0, 200)}`);
     const s = r.json.status;
+    if (s === "running" && startedAt === null) startedAt = Date.now();
     if (["succeeded", "failed", "cancelled", "expired"].includes(s)) {
-      return { ...r.json, elapsedS: Math.round((Date.now() - t0) / 1000) };
+      const end = Date.now();
+      return {
+        ...r.json,
+        elapsedS: Math.round((end - t0) / 1000),
+        // Polling granularity is 10 s, so treat these as +/- 10 s.
+        queuedS: startedAt === null ? null : Math.round((startedAt - t0) / 1000),
+        renderS: startedAt === null ? null : Math.round((end - startedAt) / 1000),
+      };
     }
     if (Date.now() - t0 > timeoutMs) throw new Error(`${label}: timed out in ${s}`);
-    await sleep(10_000);
+    await sleep(POLL_MS);
   }
 }
 
@@ -314,7 +341,12 @@ async function generate(m, imageUrl) {
   rec.videoUrl = done.content?.video_url;
   rec.tokens = done.usage?.total_tokens ?? done.usage?.completion_tokens;
   rec.wallS = Math.round((Date.now() - t0) / 1000);
-  log(m.id, `generated in ${rec.wallS}s, ${rec.tokens} tokens`);
+  rec.queuedS = done.queuedS;
+  rec.renderS = done.renderS;
+  log(
+    m.id,
+    `generated in ${rec.wallS}s (queued ${rec.queuedS ?? "?"}s, rendering ${rec.renderS ?? "?"}s), ${rec.tokens} tokens`
+  );
   return rec;
 }
 
@@ -410,15 +442,15 @@ async function main() {
     if (rec.status === "succeeded") {
       if (NATIVE) {
         // Nothing to upscale: this IS the 1080p render.
-        const p = await download(rec.videoUrl, `${m.id}-1080p-native.mp4`);
+        const p = await download(rec.videoUrl, `${m.id}--NATIVE-1080p.mp4`);
         rec.fileNative = p && p.split("/").pop();
         rec.probeNative = probe(p);
       } else {
-        const p = await download(rec.videoUrl, `${m.id}-480p.mp4`);
+        const p = await download(rec.videoUrl, `${m.id}--source-480p.mp4`);
         rec.file480 = p && p.split("/").pop();
         rec.probe480 = probe(p);
         await upscale(rec);
-        const up = await download(rec.upscaledUrl, `${m.id}-1080p.mp4`);
+        const up = await download(rec.upscaledUrl, `${m.id}--UPSCALED-1080p.mp4`);
         rec.file1080 = up && up.split("/").pop();
         rec.probe1080 = probe(up);
       }
@@ -438,6 +470,36 @@ async function main() {
   };
   writeFileSync(join(OUT_DIR, NATIVE ? "bakeoff-native.json" : "bakeoff.json"), JSON.stringify(summary, null, 2));
 
+  // The zip outlives the run page, so say what is in it.
+  writeFileSync(
+    join(OUT_DIR, "README.txt"),
+    [
+      `Model bake-off — ${summary.mode}`,
+      `Run started ${summary.startedAt}`,
+      "",
+      "FILE NAMING",
+      "  <model>--source-480p.mp4    the 480p render, straight from the model",
+      "  <model>--UPSCALED-1080p.mp4 that same clip put through the fal upscaler",
+      "  <model>--NATIVE-1080p.mp4   a separate render made at 1080p, no upscaler",
+      "  key-frame.png               the identical first frame every model started from",
+      "  seed-clip.mp4               scaffolding only, not part of the comparison",
+      "",
+      "UPSCALED and NATIVE are different renders. A model with only one of them",
+      "either cannot do native 1080p (2.0 Fast, 2.0 Mini) or was not asked for it.",
+      "",
+      `PROMPT`,
+      `  ${PROMPT}`,
+      "",
+      "SCORE EACH CLIP OUT OF FIVE",
+      ...INSTRUCTIONS.map((i, n) => `  ${n + 1}. ${i}`),
+      "",
+      "TIMING (in bakeoff*.json)",
+      "  queuedS  waiting for a slot at the provider",
+      "  renderS  actually generating",
+      "  Both +/- the poll interval.",
+    ].join("\n")
+  );
+
   const rows = [
     `| Model | Tokens | Est | Drift | Cost to us | We charge | Margin | ${NATIVE ? "1080p native" : "480p source | 1080p upscaled"} | Gen |`,
     NATIVE ? "|---|---|---|---|---|---|---|---|---|" : "|---|---|---|---|---|---|---|---|---|---|",
@@ -447,8 +509,16 @@ async function main() {
       const shape = NATIVE
         ? (pn.width ? dim(pn) : r.error ? "failed" : "—")
         : `${p4.width ? dim(p4) : r.error ? "failed" : "—"} | ${p10.width ? dim(p10) : r.upscaleError ? "failed" : "—"}`;
-      return `| ${r.label} | ${r.tokens ?? "—"} | ${r.estTokens ?? "—"} | ${r.estDriftPct === null || r.estDriftPct === undefined ? "—" : r.estDriftPct + "%"} | ${r.providerUsd ? "$" + r.providerUsd.toFixed(4) : "—"} | ${r.chargedUsd ? "$" + r.chargedUsd.toFixed(2) : "—"} | ${r.verdict ?? "—"} | ${shape} | ${r.wallS ? r.wallS + "s" : "—"} |`;
+      const timing = r.wallS
+        ? `${r.wallS}s (q ${r.queuedS ?? "?"}s / r ${r.renderS ?? "?"}s)`
+        : "—";
+      return `| ${r.label} | ${r.tokens ?? "—"} | ${r.estTokens ?? "—"} | ${r.estDriftPct === null || r.estDriftPct === undefined ? "—" : r.estDriftPct + "%"} | ${r.providerUsd ? "$" + r.providerUsd.toFixed(4) : "—"} | ${r.chargedUsd ? "$" + r.chargedUsd.toFixed(2) : "—"} | ${r.verdict ?? "—"} | ${shape} | ${timing} |`;
     }),
+    "",
+    `Timing is wall time, split into q = waiting in the provider's queue and r = actually rendering.`,
+    "",
+    "Score each clip against the five instructions it was given:",
+    ...INSTRUCTIONS.map((i, n) => `  ${n + 1}. ${i}`),
     "",
     `Key frame: ${summary.keyImageSource}. Prompt seed ${SEED}, ${DURATION_S}s, ${NATIVE ? "rendered natively at 1080p (no upscaler)" : "rendered at 480p then upscaled to 1080p"}.`,
     "",
