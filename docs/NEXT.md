@@ -262,6 +262,42 @@ attaching a start image and leaving the aspect on its 16:9 default would have
 had the generation rejected. `buildGenerationBody` now sends `adaptive`
 whenever a frame is supplied, as it already did for extensions.
 
+## Generation speed: their renderer, not their queue (2026-09-10)
+
+Run 34433768931, text-to-video, 5 s at 480p, all four sold models, one
+prompt, one seed. Queue time is measured from the task's queued -> running
+transition, polled every 5 s.
+
+| Model | Queued | Rendering | Tokens | Est drift |
+|---|---|---|---|---|
+| Seedance 2.5 | **0 s** | **368 s** | 48,437 | +0.50% |
+| Seedance 2.0 | **0 s** | 81 s | 50,638 | +0.50% |
+| Seedance 2.0 Fast | **0 s** | 109 s | 50,638 | +0.50% |
+| Seedance 2.0 Mini | **0 s** | 121 s | 50,638 | +0.50% |
+
+**Queue time was zero on every task.** They pick work up within 5 s; the wait
+is their compute. Two consequences:
+
+1. **The pending rate-limit increase will not make anything faster.** More
+   concurrency raises throughput, not latency. Worth not promising otherwise.
+2. Nothing in our pipeline contributes. We submit and poll; the only overhead
+   we add is the poll interval.
+
+**Do not rank the 2.0 family on speed from these numbers.** The ordering
+inverted between two runs — Mini was the fastest at 79 s on 2026-09-09 and
+the slowest at 121 s on 2026-09-10, on comparable work. One sample each is
+noise. The per-model timing now recorded on every job (admin page, median
+seconds per second of output) is what should settle it, from real traffic.
+
+What IS stable across both runs: **Seedance 2.5 is 2-4.5x slower than the
+whole 2.0 family**, and it got worse on the easier job — 247 s with a start
+image, 368 s without. With the upscale on top that is 8.3 minutes for a
+5-second clip. Relevant before making it the default.
+
+Also measured: the fal upscaler takes 130-170 s regardless of model, and
+always outputs 30 fps from a 24 fps source, so it interpolates frames that
+were never rendered.
+
 ## ModelArk facts confirmed on the live key
 
 1. **1080p on `dreamina-seedance-2-5-260628` works** and renders a true
