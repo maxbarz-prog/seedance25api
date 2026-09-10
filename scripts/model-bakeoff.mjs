@@ -233,14 +233,27 @@ async function uploadFrame(localPath) {
 
 async function keyImage() {
   if (process.env.KEY_IMAGE_URL) {
-    const url = process.env.KEY_IMAGE_URL.trim();
-    // Check it is fetchable before spending anything on renders that would
-    // all fail the same way.
-    const probe = await fetch(url).catch((e) => ({ ok: false, status: String(e) }));
-    if (!probe.ok) throw new Error(`KEY_IMAGE_URL is not fetchable: ${probe.status}`);
-    log("key frame: reusing the supplied one");
+    const src = process.env.KEY_IMAGE_URL.trim();
+    // Fetch it here and re-host it on our own bucket rather than handing the
+    // provider a third-party URL. Stock sites often serve a download link
+    // that works from a browser and 403s for anything else, and that would
+    // fail every render identically after the money was committed. This also
+    // pins the frame: the same bytes for every model, and for any re-run.
+    log("key frame: fetching the supplied image");
+    const res = await fetch(src);
+    if (!res.ok) throw new Error(`KEY_IMAGE_URL is not fetchable: ${res.status}`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length < 1024) throw new Error(`KEY_IMAGE_URL returned only ${bytes.length} bytes`);
+    const local = join(OUT_DIR, "key-frame.png");
+    // Normalise to PNG so the provider gets something predictable whatever
+    // the source served.
+    const raw = join(OUT_DIR, "key-frame-source");
+    writeFileSync(raw, bytes);
+    execFileSync(FFMPEG, ["-y", "-i", raw, "-frames:v", "1", local]);
+    const url = await uploadFrame(local);
+    log(`key frame: re-hosted ${bytes.length} bytes from the supplied image`);
     summary.keyImageUrl = url;
-    summary.keyImageSource = "supplied";
+    summary.keyImageSource = `supplied image, re-hosted (${src.slice(0, 80)})`;
     return url;
   }
 
