@@ -122,13 +122,16 @@ jobs:
           BAKEOFF_MODELS: ${{ inputs.models }}
         run: |
           set -uo pipefail
-          node scripts/model-bakeoff.mjs
-          code=$?
+          # Steps run under `bash -e`, so the script's deliberate exit 2 would
+          # abort this step before the check below. `|| code=$?` keeps it
+          # alive to read the code.
+          code=0
+          node scripts/model-bakeoff.mjs || code=$?
           if [ "$code" != "2" ]; then
             echo "Preflight expected exit 2 (loaded, refused to spend) but got $code"
             exit 1
           fi
-          echo "Preflight clean."
+          echo "Preflight clean: the script loads and refuses to spend."
 
       - name: Run the bake-off
         env:
