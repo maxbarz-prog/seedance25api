@@ -65,14 +65,15 @@ per model); add `"720p"` to that list with the numbers it prints.
 ## Plans
 
 Four tiers, declared in one place (`web/lib/config.ts`). Credit allocations
-deliberately **match Runway's** so a member can compare like for like — the
-difference is that generation here is billed at cost, so the same number of
-credits goes several times further. Annual is 25% off.
+deliberately **match Runway's** where the margin allows, so a member can
+compare like for like — the difference is that generation here is billed at
+cost, so the same number of credits goes several times further. Annual is
+20% off.
 
 | | Free | Standard | Pro | Max |
 |---|---|---|---|---|
 | Per month | $0 | $15 | $35 | $95 |
-| Per year | — | $135 | $315 | $855 |
+| Per year | — | $144 | $336 | $912 |
 | Credits | 125 once | 625/mo | 2,250/mo | 5,875/mo |
 | Storage | 5 GB | 20 GB | 100 GB | 500 GB |
 | Upscaling | yes | yes | yes | yes |
@@ -93,11 +94,14 @@ the plan fee:
 margin = (1 − processing) × (monthly revenue − credits × $0.01)
 ```
 
-**Annual is always the binding case** — the same allocation for 25% less
-money — so a plan has to be set by its annual figure. Max is the one tier not
-on Runway's number: at their 9,500 it earns almost nothing on $855/year, so
-it is set from the margin instead and lands at about **$12/month** if a
-member spends every credit.
+**Annual is always the binding case** — the same allocation for less money —
+so a plan has to be set by its annual figure. Because the allocation is a
+fixed dollar claim, the annual discount comes straight out of margin rather
+than out of revenue proportionally: at 25% it left Pro annual with $3.62 a
+month, which is why `ANNUAL_DISCOUNT` is 20%.
+
+Max is the one tier not on Runway's number: at their 9,500 it would earn
+almost nothing, so it is set from the margin instead.
 
 `web/lib/economics.ts` derives this in both directions — `planMargin()` for
 what a plan earns, `creditsForMargin()` for the allocation that hits a

@@ -29,7 +29,11 @@ export const TOPUP_PRESETS_USD = [10, 20, 50];
 // do. That distinction is load-bearing — see `granted_credits` on the user
 // row — because otherwise a year of allocations could be banked and spent at
 // once, which is exactly what the margin cannot absorb.
-export const ANNUAL_DISCOUNT = 0.25;
+// Paying yearly buys a cheaper month. Kept at 20% rather than 25% because a
+// plan's credit allocation is a fixed dollar claim on the fee: the whole
+// discount comes straight out of margin, and at 25% Pro annual was left with
+// $3.62 a month. See lib/economics.ts.
+export const ANNUAL_DISCOUNT = 0.2;
 
 export const PLANS = {
   free: {
