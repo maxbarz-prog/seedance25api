@@ -88,6 +88,16 @@ export default function CreditsDialog({
         )}
 
         <div className="mt-5 flex items-center justify-end gap-3 text-sm">
+          <Link
+            href={
+              membership
+                ? "/help/plans-billing-credits/plans"
+                : "/help/troubleshooting/not-enough-credits"
+            }
+            className="mr-auto text-muted underline-offset-2 hover:text-ink hover:underline"
+          >
+            Why?
+          </Link>
           <button
             type="button"
             onClick={onClose}

@@ -55,6 +55,9 @@ export default function Header() {
           <Link href="/pricing" className="hidden text-muted hover:text-ink sm:inline">
             Pricing
           </Link>
+          <Link href="/help" className="hidden text-muted hover:text-ink sm:inline">
+            Help
+          </Link>
           {!loaded ? null : me ? (
             <>
               <Link href="/library" className="text-muted hover:text-ink">

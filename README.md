@@ -125,6 +125,25 @@ number and silently ignores promotions, the audio and video-input tiers and
 the model's frame size, which is how a stale value once sold below cost.
 Delivery, overhead and processing stay tunable from SSM.
 
+## Help centre
+
+`/help`, with `help.remerged.click` as an alias that 308s to it — one
+canonical URL per article, no second copy to keep in step.
+
+It is built from `web/lib/help.ts`, which is content as data rather than
+prose: every price, plan figure, limit and model name is **read from the
+registry at render time**. A table of what a plan's credits buy is computed
+from the same `quote()` the checkout charges with. An article cannot quietly
+contradict the product, which is the usual failure mode of a help centre and
+the reason this is not a hosted Zendesk.
+
+Search is client-side over the whole corpus (a few kilobytes, shipped with
+the page), so it answers on the keystroke rather than after a round trip.
+
+Structure follows a conventional help centre — Getting started, Creating,
+Plans/billing/credits, Your account, Troubleshooting, Policies, Contact —
+because that is what people already know how to use.
+
 ## Money safety
 
 - **Every finished generation is checked** against the tokens the provider

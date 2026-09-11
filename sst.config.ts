@@ -55,10 +55,21 @@ export default $config({
       },
     });
 
+    // `help.<domain>` is an alias on the same distribution rather than a
+    // second site: the help centre is pages in this app, reading live prices
+    // from the same code that charges people. Middleware redirects the alias
+    // to /help on the canonical host, so there is one URL per article.
     const domain =
       $app.stage === "prod"
-        ? { name: "remerged.click", redirects: ["www.remerged.click"] }
-        : { name: `${$app.stage}.remerged.click` };
+        ? {
+            name: "remerged.click",
+            redirects: ["www.remerged.click"],
+            aliases: ["help.remerged.click"],
+          }
+        : {
+            name: `${$app.stage}.remerged.click`,
+            aliases: [`help.${$app.stage}.remerged.click`],
+          };
 
     const environment = {
       DB_BACKEND: "dynamo",
