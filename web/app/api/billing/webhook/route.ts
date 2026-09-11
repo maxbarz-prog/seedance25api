@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { BillingInterval, PAID_PLAN_IDS, PlanId } from "@/lib/config";
 import Stripe from "stripe";
 import {
   applyMembership,
@@ -7,7 +8,9 @@ import {
   stripeEnabled,
   syncSubscription,
 } from "@/lib/billing";
-import { setStripeIds, userById } from "@/lib/db";
+import { setStripeIds, userById, userByStripeCustomer } from "@/lib/db";
+import { grantPeriodCredits } from "@/lib/grants";
+import { effectivePlan } from "@/lib/plan";
 
 // Stripe webhook. Credits and membership activate ONLY here (or via the dev
 // mock), i.e. only after funds actually clear. Signature-verified; top-up
@@ -39,7 +42,14 @@ export async function POST(req: NextRequest) {
         if (customerId) await setStripeIds(userId, customerId, null);
       } else if (s.metadata?.kind === "membership") {
         const subId = typeof s.subscription === "string" ? s.subscription : s.subscription?.id ?? null;
-        await applyMembership(userId, s.metadata.plan === "annual" ? "annual" : "monthly");
+        // The plan and billing interval both ride on the session metadata we
+        // set at checkout; anything unrecognised falls back to the cheapest
+        // paid tier rather than granting more than was paid for.
+        const plan = (PAID_PLAN_IDS as string[]).includes(s.metadata.plan ?? "")
+          ? (s.metadata.plan as PlanId)
+          : "standard";
+        const interval: BillingInterval = s.metadata.interval === "year" ? "year" : "month";
+        await applyMembership(userId, plan, interval);
         if (customerId) await setStripeIds(userId, customerId, subId);
         // Pull the authoritative period end straight away.
         if (subId) await syncSubscription(await stripeClient().subscriptions.retrieve(subId));
@@ -56,7 +66,15 @@ export async function POST(req: NextRequest) {
       const inv = event.data.object as Stripe.Invoice;
       const subRef = inv.parent?.subscription_details?.subscription;
       const subId = typeof subRef === "string" ? subRef : subRef?.id;
-      if (subId) await syncSubscription(await stripeClient().subscriptions.retrieve(subId));
+      if (!subId) break;
+      const sub = await stripeClient().subscriptions.retrieve(subId);
+      await syncSubscription(sub);
+      // A renewal's allocation, handed over as soon as the money clears
+      // rather than waiting for the sweep. Idempotent per period, so this and
+      // the sweep cannot both pay out.
+      const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
+      const member = await userByStripeCustomer(customerId);
+      if (member) await grantPeriodCredits(member.id, effectivePlan(member));
       break;
     }
     default:

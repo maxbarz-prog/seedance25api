@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { PLANS, TOPUP_PRESETS_USD } from "@/lib/config";
+import {
+  ANNUAL_DISCOUNT,
+  BillingInterval,
+  PAID_PLAN_IDS,
+  PLANS,
+  PlanId,
+  planPriceUsd,
+  TOPUP_PRESETS_USD,
+} from "@/lib/config";
 
 interface LedgerEntry {
   id: string;
@@ -14,12 +22,17 @@ interface LedgerEntry {
 
 interface Me {
   email: string;
-  membership: "none" | "monthly" | "annual";
+  plan: PlanId;
+  planLabel: string;
+  billingInterval: BillingInterval;
   membershipActive: boolean;
   membershipRenewsAt: number | null;
   balanceCredits: number;
+  grantedCredits: number;
   storageUsedBytes: number;
   storageQuotaBytes: number;
+  canBuyCredits: boolean;
+  canUpscale: boolean;
   ledger: LedgerEntry[];
 }
 
@@ -28,6 +41,7 @@ export default function AccountPanel() {
   const [me, setMe] = useState<Me | null>(null);
   const [authMode, setAuthMode] = useState<"clerk" | "builtin">("builtin");
   const [busy, setBusy] = useState<string | null>(null);
+  const [interval, setInterval] = useState<BillingInterval>("month");
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -61,11 +75,20 @@ export default function AccountPanel() {
     }
   }
 
-  async function subscribe(plan: "monthly" | "annual") {
-    const data = await post("/api/billing/subscribe", { plan }, `sub-${plan}`);
+  async function subscribe(plan: PlanId, billingInterval: BillingInterval) {
+    const key = `sub-${plan}-${billingInterval}`;
+    const data = await post(
+      "/api/billing/subscribe",
+      { plan, interval: billingInterval },
+      key
+    );
     if (!data) return;
     if (data.url.startsWith("/account?mock=")) {
-      await post("/api/billing/mock", { kind: "subscribe", plan }, `sub-${plan}`);
+      await post(
+        "/api/billing/mock",
+        { kind: "subscribe", plan, interval: billingInterval },
+        key
+      );
       refresh();
     } else {
       window.location.href = data.url;
@@ -110,7 +133,7 @@ export default function AccountPanel() {
   }
 
   const joinNudge = params.get("join") === "1" && !me.membershipActive;
-  const topupNudge = params.get("topup") === "1" && me.membershipActive;
+  const topupNudge = params.get("topup") === "1" && me.canBuyCredits;
   const usedGb = me.storageUsedBytes / 1e9;
   const quotaGb = me.storageQuotaBytes / 1e9;
 
@@ -127,46 +150,72 @@ export default function AccountPanel() {
 
       {/* Membership */}
       <section className="rounded-2xl border border-line bg-surface p-5">
-        <h2 className="font-medium">Membership</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="font-medium">Membership</h2>
+          {/* Yearly is a plan-wide choice, not a separate plan, so it sits
+              above the tiers rather than doubling their number. */}
+          {!me.membershipActive && (
+            <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
+              {(["month", "year"] as const).map((i) => (
+                <button
+                  key={i}
+                  onClick={() => setInterval(i)}
+                  className={`rounded-full px-3 py-1 ${
+                    interval === i ? "bg-accent text-accent-ink" : "text-muted"
+                  }`}
+                >
+                  {i === "month" ? "Monthly" : `Yearly · ${Math.round(ANNUAL_DISCOUNT * 100)}% off`}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         {me.membershipActive ? (
           <p className="mt-2 text-sm text-muted">
             <span className="font-medium text-good">Active</span> —{" "}
-            {PLANS[me.membership as "monthly" | "annual"].label} plan, renews{" "}
+            {me.planLabel} plan, {me.billingInterval === "year" ? "billed yearly" : "billed monthly"}, renews{" "}
             {new Date(me.membershipRenewsAt!).toLocaleDateString()}. Storage
             included: {quotaGb.toFixed(0)} GB.{" "}
             <button onClick={portal} className="underline hover:text-ink">
               Manage subscription
-            </button>
+            </button>{" "}
+            — change or cancel your plan there.
           </p>
         ) : (
           <>
             <p className="mt-2 text-sm text-muted">
               {joinNudge
-                ? "One step before your video: join to unlock credits and generation."
-                : "Membership is required to buy credits and generate."}
+                ? "One step before your video: pick a plan."
+                : `You are on the ${me.planLabel} plan: ${PLANS[me.plan].credits.toLocaleString()} credits, ${PLANS[me.plan].storageGb} GB storage, upscaling included. Credit top-ups need a paid plan.`}
             </p>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <button
-                onClick={() => subscribe("monthly")}
-                disabled={busy !== null}
-                className="rounded-xl border border-line px-5 py-3 text-sm hover:border-accent disabled:opacity-50"
-              >
-                <span className="block font-semibold">${PLANS.monthly.priceUsd}/month</span>
-                <span className="text-muted">{PLANS.monthly.storageGb} GB storage</span>
-              </button>
-              <button
-                onClick={() => subscribe("annual")}
-                disabled={busy !== null}
-                className="rounded-xl border border-accent px-5 py-3 text-sm hover:opacity-90 disabled:opacity-50"
-              >
-                <span className="block font-semibold">
-                  ${PLANS.annual.priceUsd}/year{" "}
-                  <span className="ml-1 rounded-full bg-accent px-2 py-0.5 text-xs text-accent-ink">
-                    2 months free
-                  </span>
-                </span>
-                <span className="text-muted">{PLANS.annual.storageGb} GB storage</span>
-              </button>
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              {PAID_PLAN_IDS.map((id) => {
+                const p = PLANS[id];
+                const price = planPriceUsd(id, interval);
+                return (
+                  <button
+                    key={id}
+                    onClick={() => subscribe(id, interval)}
+                    disabled={busy !== null}
+                    className={`rounded-xl border px-5 py-3 text-left text-sm disabled:opacity-50 ${
+                      id === "pro" ? "border-accent" : "border-line hover:border-accent"
+                    }`}
+                  >
+                    <span className="block font-semibold">{p.label}</span>
+                    <span className="block font-semibold">
+                      ${price}
+                      <span className="font-normal text-muted">
+                        /{interval === "year" ? "year" : "month"}
+                      </span>
+                    </span>
+                    <span className="mt-1 block text-muted">
+                      {p.credits.toLocaleString()} credits a month
+                    </span>
+                    <span className="block text-muted">{p.storageGb} GB storage</span>
+                  </button>
+                );
+              })}
             </div>
           </>
         )}
@@ -181,6 +230,18 @@ export default function AccountPanel() {
             {me.balanceCredits.toLocaleString()} credits
           </span>
         </p>
+        {/* Granted credits expire with the plan period; bought ones do not,
+            so the split is worth showing rather than one opaque total. */}
+        {me.grantedCredits > 0 && (
+          <p className="mt-1 text-xs text-muted">
+            {me.grantedCredits.toLocaleString()} from your plan
+            {PLANS[me.plan].rolloverMonths > 0
+              ? ` (carries over for ${PLANS[me.plan].rolloverMonths} month)`
+              : " (expires when the plan renews)"}
+            {me.balanceCredits > me.grantedCredits &&
+              ` · ${(me.balanceCredits - me.grantedCredits).toLocaleString()} bought, never expires`}
+          </p>
+        )}
         {topupNudge && (
           <p className="mt-1 text-sm text-bad">Add credits to run your video.</p>
         )}
@@ -189,21 +250,23 @@ export default function AccountPanel() {
             <button
               key={usd}
               onClick={() => topup(usd)}
-              disabled={busy !== null || !me.membershipActive}
+              disabled={busy !== null || !me.canBuyCredits}
               className="rounded-xl border border-line px-5 py-2 text-sm hover:border-accent disabled:opacity-50"
             >
               +${usd}
             </button>
           ))}
         </div>
-        {!me.membershipActive && (
-          <p className="mt-2 text-xs text-muted">Join above to enable top-ups.</p>
+        {!me.canBuyCredits && (
+          <p className="mt-2 text-xs text-muted">
+            Top-ups need a paid plan — pick one above. Your {me.planLabel} credits
+            still work as they are.
+          </p>
         )}
       </section>
 
       {/* Storage */}
-      {me.membershipActive && (
-        <section className="rounded-2xl border border-line bg-surface p-5">
+      <section className="rounded-2xl border border-line bg-surface p-5">
           <h2 className="font-medium">Storage</h2>
           <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-line">
             <div
@@ -212,10 +275,10 @@ export default function AccountPanel() {
             />
           </div>
           <p className="mt-2 text-sm text-muted">
-            {usedGb.toFixed(2)} GB of {quotaGb.toFixed(0)} GB used
+            {usedGb.toFixed(2)} GB of {quotaGb.toFixed(0)} GB used on{" "}
+            {me.planLabel}
           </p>
-        </section>
-      )}
+      </section>
 
       {/* History */}
       <section className="rounded-2xl border border-line bg-surface p-5">

@@ -1,4 +1,5 @@
-import { addLedger, claimJob, Job, jobById, jobsInFlight, updateJob, userById } from "./db";
+import { claimJob, Job, jobById, jobsInFlight, updateJob, userById } from "./db";
+import { refundCredits } from "./grants";
 import { generator, upscaler } from "./providers";
 import { ProviderBusyError } from "./providers/types";
 import {
@@ -362,7 +363,8 @@ async function fail(job: Job, internalError?: string) {
     error: userFacingFailure(internalError),
     provider_task_id: null,
   });
-  await addLedger(job.user_id, job.quote_credits, "refund", {
+  // Puts back exactly what the charge took, granted and bought alike.
+  await refundCredits(job.user_id, job.quote_credits, {
     jobId: job.id,
     memo: "Automatic refund: generation failed",
   });

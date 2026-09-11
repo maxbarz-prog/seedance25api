@@ -1,5 +1,12 @@
 import Stripe from "stripe";
-import { PLANS, PlanId, MIN_TOPUP_USD } from "./config";
+import {
+  BillingInterval,
+  MIN_TOPUP_USD,
+  PAID_PLAN_IDS,
+  PLANS,
+  PlanId,
+  planPriceUsd,
+} from "./config";
 import {
   addLedger,
   setMembership,
@@ -8,6 +15,7 @@ import {
   userByStripeCustomer,
 } from "./db";
 import { usdToCredits } from "./pricing";
+import { grantPeriodCredits } from "./grants";
 
 // Stripe wrapper with a mock mode: without STRIPE_SECRET_KEY, checkout calls
 // return internal mock-payment URLs so the whole flow is testable locally.
@@ -57,11 +65,12 @@ export async function createTopupCheckout(
 export async function createMembershipCheckout(
   user: User,
   planId: PlanId,
+  interval: BillingInterval,
   origin: string
 ): Promise<{ url: string }> {
   const plan = PLANS[planId];
   if (!stripeEnabled()) {
-    return { url: `/account?mock=subscribe&plan=${planId}` };
+    return { url: `/account?mock=subscribe&plan=${planId}&interval=${interval}` };
   }
   const s = await stripeClient().checkout.sessions.create({
     mode: "subscription",
@@ -69,9 +78,11 @@ export async function createMembershipCheckout(
       {
         price_data: {
           currency: "usd",
-          product_data: { name: `Membership (${plan.label})` },
-          unit_amount: Math.round(plan.priceUsd * 100),
-          recurring: { interval: plan.interval },
+          product_data: {
+            name: `${plan.label} membership${interval === "year" ? ", billed yearly" : ""}`,
+          },
+          unit_amount: Math.round(planPriceUsd(planId, interval) * 100),
+          recurring: { interval },
         },
         quantity: 1,
       },
@@ -79,8 +90,8 @@ export async function createMembershipCheckout(
     ...(user.stripe_customer_id
       ? { customer: user.stripe_customer_id }
       : { customer_email: user.email }),
-    metadata: { userId: user.id, kind: "membership", plan: planId },
-    subscription_data: { metadata: { userId: user.id, plan: planId } },
+    metadata: { userId: user.id, kind: "membership", plan: planId, interval },
+    subscription_data: { metadata: { userId: user.id, plan: planId, interval } },
     success_url: `${origin}/account?membership=success`,
     cancel_url: `${origin}/account?membership=cancelled`,
   });
@@ -111,10 +122,22 @@ export async function applyTopup(
 
 // Used by the dev mock and by the initial checkout completion; renewals and
 // lapses are handled by syncSubscription from webhook events.
-export async function applyMembership(userId: string, planId: PlanId, renewsAt?: number) {
+// Start or renew a membership, and hand over the period's credits.
+//
+// An annual subscriber is billed once but granted monthly: paying up front
+// buys a cheaper month, not a year of allocation to spend on day one. The
+// renewal date is when the SUBSCRIPTION lapses; `grantPeriodCredits` runs
+// once a month regardless.
+export async function applyMembership(
+  userId: string,
+  planId: PlanId,
+  interval: BillingInterval = "month",
+  renewsAt?: number
+) {
   const now = Date.now();
-  const renewMs = planId === "annual" ? 365 * 24 * 3600e3 : 30 * 24 * 3600e3;
-  await setMembership(userId, planId, renewsAt ?? now + renewMs);
+  const renewMs = interval === "year" ? 365 * 24 * 3600e3 : 30 * 24 * 3600e3;
+  await setMembership(userId, planId, renewsAt ?? now + renewMs, interval);
+  await grantPeriodCredits(userId, planId);
 }
 
 // Mirror a Stripe subscription's state onto the member: active/trialing ->
@@ -124,16 +147,25 @@ export async function syncSubscription(sub: Stripe.Subscription): Promise<void> 
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
   const user = await userByStripeCustomer(customerId);
   if (!user) return;
-  const plan: PlanId = sub.metadata?.plan === "annual" ? "annual" : "monthly";
+  // The plan rides on the subscription metadata we set at checkout.
+  // Anything unrecognised falls back to the cheapest paid tier rather than
+  // granting more than was paid for.
+  const plan: PlanId = (PAID_PLAN_IDS as string[]).includes(sub.metadata?.plan ?? "")
+    ? (sub.metadata!.plan as PlanId)
+    : "standard";
+  const interval: BillingInterval =
+    sub.items.data[0]?.price?.recurring?.interval === "year" ? "year" : "month";
   const periodEnd = (sub.items.data[0]?.current_period_end ?? 0) * 1000;
   const active = sub.status === "active" || sub.status === "trialing" || sub.status === "past_due";
   if (active && !sub.cancel_at_period_end) {
-    await setMembership(user.id, plan, periodEnd);
+    await setMembership(user.id, plan, periodEnd, interval);
     await setStripeIds(user.id, customerId, sub.id);
   } else if (active && sub.cancel_at_period_end) {
     // Access continues until period end, then lapses naturally.
-    await setMembership(user.id, plan, periodEnd);
+    await setMembership(user.id, plan, periodEnd, interval);
   } else {
-    await setMembership(user.id, "none", null);
+    // A lapsed subscriber drops to free rather than losing the account:
+    // they keep their library and any credits they bought.
+    await setMembership(user.id, "free", null, null);
   }
 }

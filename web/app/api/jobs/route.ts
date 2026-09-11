@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
-import { addLedger, balance, createJob, jobsFor, storageUsedBytes } from "@/lib/db";
+import { balance, createJob, jobsFor, storageUsedBytes } from "@/lib/db";
+import { chargeCredits } from "@/lib/grants";
 import { quote } from "@/lib/pricing";
 import {
   ASPECT_RATIOS,
@@ -22,8 +23,8 @@ import {
   OUTPUT_MODES,
   OUTPUT_MODE_IDS,
   OutputMode,
-  PLANS,
 } from "@/lib/config";
+import { canBuyCredits, canUpscale, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import { currentHalt } from "@/lib/money";
 import { presentJob } from "@/lib/present";
@@ -60,15 +61,8 @@ export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
 
-  const active =
-    user.membership !== "none" &&
-    (user.membership_renews_at ?? 0) > Date.now();
-  if (!active) {
-    return NextResponse.json(
-      { error: "membership_required", message: "An active membership is required to generate." },
-      { status: 402 }
-    );
-  }
+  // No membership gate: every plan, Free included, can generate. What decides
+  // it is credits — checked below, once there is a price to check against.
 
   // Money safety: if anything is wrong with what we charge or pay, we take
   // no more money until a human has cleared it. Checked before the quote, so
@@ -158,6 +152,17 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+  // Upscaling is a plan allowance. Every current plan has it, so this is
+  // dormant — but it is the plan that decides, not the code.
+  if (!OUTPUT_MODES[outputMode].native && !canUpscale(user)) {
+    return NextResponse.json(
+      {
+        error: "plan_required",
+        message: "Upscaling is not included on your plan — render natively or upgrade.",
+      },
+      { status: 402 }
+    );
+  }
   const q = quote({ model, durationS: b.durationS, mode: outputMode, audio: b.audio });
   const total = q.credits * b.variations;
   const bal = await balance(user.id);
@@ -168,13 +173,15 @@ export async function POST(req: NextRequest) {
         message: "Not enough credits for this request.",
         needed: total,
         balance: bal,
+        // Whether the way out is a top-up or an upgrade — the dialog needs to
+        // offer the one this member can actually do.
+        canBuyCredits: canBuyCredits(user),
       },
       { status: 402 }
     );
   }
 
-  const plan = PLANS[user.membership as keyof typeof PLANS];
-  const quotaBytes = plan.storageGb * 1e9;
+  const quotaBytes = storageQuotaBytes(user);
   const projectedBytes =
     (await storageUsedBytes(user.id)) + b.durationS * 500_000 * b.variations;
   if (projectedBytes > quotaBytes) {
@@ -209,10 +216,11 @@ export async function POST(req: NextRequest) {
       size_bytes: null,
       error: null,
     });
-    await addLedger(user.id, -q.credits, "charge", {
+    // Spends the expiring half of the balance first — see lib/grants.ts.
+    await chargeCredits(user.id, q.credits, {
       jobId: job.id,
       memo:
-        `Video ${b.durationS}s (${b.mode === "native-1080p" ? "native 1080p" : "1080p upscaled"})` +
+        `Video ${b.durationS}s (${OUTPUT_MODES[outputMode].label})` +
         (b.variations > 1 ? ` · variation ${i + 1}/${b.variations}` : ""),
     });
     ids.push(job.id);

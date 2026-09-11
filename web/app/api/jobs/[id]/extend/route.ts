@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
-import { addLedger, balance, createJob, jobById, storageUsedBytes } from "@/lib/db";
+import { balance, createJob, jobById, storageUsedBytes } from "@/lib/db";
+import { chargeCredits } from "@/lib/grants";
 import { quote } from "@/lib/pricing";
 import {
   DEFAULT_MODE,
@@ -12,12 +13,11 @@ import {
   EXTEND_MIN_S,
   MAX_PROMPT_CHARS,
   MODEL_IDS,
-  MODELS,
   ModelId,
   OUTPUT_MODE_IDS,
   OutputMode,
-  PLANS,
 } from "@/lib/config";
+import { canBuyCredits, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import { currentHalt } from "@/lib/money";
 
@@ -35,14 +35,7 @@ export async function POST(
 ) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
-  const active =
-    user.membership !== "none" && (user.membership_renews_at ?? 0) > Date.now();
-  if (!active) {
-    return NextResponse.json(
-      { error: "membership_required", message: "An active membership is required." },
-      { status: 402 }
-    );
-  }
+  // Every plan can extend; credits and storage are what gate it.
 
   const { id } = await params;
   const source = await jobById(id);
@@ -92,16 +85,21 @@ export async function POST(
   const bal = await balance(user.id);
   if (bal < q.credits) {
     return NextResponse.json(
-      { error: "insufficient_credits", message: "Not enough credits.", needed: q.credits, balance: bal },
+      {
+        error: "insufficient_credits",
+        message: "Not enough credits.",
+        needed: q.credits,
+        balance: bal,
+        canBuyCredits: canBuyCredits(user),
+      },
       { status: 402 }
     );
   }
-  const plan = PLANS[user.membership as keyof typeof PLANS];
   // The delivered file is the source plus the new seconds, so size the quota
   // check against the whole thing rather than only what was added.
   if (
     (await storageUsedBytes(user.id)) + (source.duration_s + b.durationS) * 500_000 >
-    plan.storageGb * 1e9
+    storageQuotaBytes(user)
   ) {
     return NextResponse.json(
       { error: "storage_full", message: "Storage quota reached. Delete some videos first." },
@@ -131,7 +129,7 @@ export async function POST(
     size_bytes: null,
     error: null,
   });
-  await addLedger(user.id, -q.credits, "charge", {
+  await chargeCredits(user.id, q.credits, {
     jobId: job.id,
     memo: `Extend video +${b.durationS}s`,
   });

@@ -17,10 +17,12 @@ import {
   AdminData,
   AdminJobRow,
   AdminUserRow,
+  BillingInterval,
   DataStore,
   Job,
   JobStatus,
   LedgerEntry,
+  MemberCount,
   Membership,
   User,
 } from "./types";
@@ -72,10 +74,12 @@ export class DynamoStore implements DataStore {
       id: randomUUID(),
       email: email.toLowerCase().trim(),
       password_hash: passwordHash,
-      membership: "none",
+      membership: "free",
       membership_renews_at: null,
       stripe_customer_id: null,
       balance_credits: 0,
+      granted_credits: 0,
+      billing_interval: null,
       created_at: Date.now(),
     };
     // `stripe_customer_id` is the hash key of the "stripe" GSI, and DynamoDB
@@ -107,13 +111,23 @@ export class DynamoStore implements DataStore {
     return r.Item as User | undefined;
   }
 
-  async setMembership(userId: string, membership: Membership, renewsAt: number | null) {
+  async setMembership(
+    userId: string,
+    membership: Membership,
+    renewsAt: number | null,
+    interval?: BillingInterval | null
+  ) {
     await this.doc.send(
       new UpdateCommand({
         TableName: USERS,
         Key: { id: userId },
-        UpdateExpression: "SET membership = :m, membership_renews_at = :r",
-        ExpressionAttributeValues: { ":m": membership, ":r": renewsAt },
+        UpdateExpression:
+          "SET membership = :m, membership_renews_at = :r, billing_interval = :i",
+        ExpressionAttributeValues: {
+          ":m": membership,
+          ":r": renewsAt,
+          ":i": interval ?? null,
+        },
       })
     );
   }
@@ -276,18 +290,27 @@ export class DynamoStore implements DataStore {
       job_id: opts.jobId ?? null,
       memo: opts.memo ?? null,
       external_id: opts.externalId ?? null,
+      granted_delta: opts.grantedDelta ? Math.round(opts.grantedDelta) : null,
       created_at: Date.now(),
     };
     const item = { ...e, pk: userId, sk: `${String(e.created_at).padStart(15, "0")}#${e.id}` };
     await this.ensureBalance(userId);
     // The ledger row and the running balance move together, so a crash cannot
     // leave the cached total disagreeing with the entries behind it.
+    // A grant or an expiry also moves the granted half of the balance. ADD
+    // treats a missing attribute as zero, so rows written before tiers need
+    // no backfill.
+    const granted = e.granted_delta ?? 0;
     const applyBalance = {
       Update: {
         TableName: USERS,
         Key: { id: userId },
-        UpdateExpression: "ADD balance_credits :d",
-        ExpressionAttributeValues: { ":d": e.delta_credits },
+        UpdateExpression: granted
+          ? "ADD balance_credits :d, granted_credits :g"
+          : "ADD balance_credits :d",
+        ExpressionAttributeValues: granted
+          ? { ":d": e.delta_credits, ":g": granted }
+          : { ":d": e.delta_credits },
       },
     };
     try {
@@ -488,6 +511,10 @@ export class DynamoStore implements DataStore {
     return findMoneyIssues(jobs, entries);
   }
 
+  async allUsers(limit = 20000): Promise<User[]> {
+    return this.scanAll<User>(USERS, limit);
+  }
+
   async adminData(): Promise<AdminData> {
     const now = Date.now();
     const [users, ledger, jobs] = await Promise.all([
@@ -502,8 +529,23 @@ export class DynamoStore implements DataStore {
     );
     const sum = (kind: string) =>
       entries.filter((e) => e.kind === kind).reduce((a, e) => a + Math.abs(e.delta_credits), 0);
-    const active = (u: User, m: Membership) =>
-      u.membership === m && (u.membership_renews_at ?? 0) > now;
+    // Paid members still inside their period, grouped by plan and interval.
+    // "free" and the pre-tier "none" are not memberships and are excluded;
+    // the legacy "monthly"/"annual" values map onto standard, matching
+    // lib/plan.ts.
+    const memberCounts = new Map<string, MemberCount>();
+    for (const u of users) {
+      if ((u.membership_renews_at ?? 0) <= now) continue;
+      const m = u.membership as string;
+      if (m === "free" || m === "none") continue;
+      const plan = m === "monthly" || m === "annual" ? "standard" : m;
+      const interval: BillingInterval =
+        u.billing_interval ?? (m === "annual" ? "year" : "month");
+      const key = `${plan}#${interval}`;
+      const row = memberCounts.get(key) ?? { plan, interval, count: 0 };
+      row.count++;
+      memberCounts.set(key, row);
+    }
 
     const balances = new Map<string, number>();
     for (const e of entries) {
@@ -549,8 +591,7 @@ export class DynamoStore implements DataStore {
 
     return {
       userCount: users.length,
-      monthlyMembers: users.filter((u) => active(u, "monthly")).length,
-      annualMembers: users.filter((u) => active(u, "annual")).length,
+      members: [...memberCounts.values()],
       creditsPurchased: sum("topup") + sum("adjustment"),
       creditsSpent: sum("charge"),
       creditsRefunded: sum("refund"),

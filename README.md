@@ -41,6 +41,50 @@ A 5-second clip on Seedance 2.0: **$0.59** at 4K, **$0.46** at 1080p
 upscaled, **$2.18** at native 1080p. That ordering is not a mistake — see
 `docs/NEXT.md`.
 
+## Plans
+
+Four tiers, declared in one place (`web/lib/config.ts`). Credit allocations
+deliberately **match Runway's** so a member can compare like for like — the
+difference is that generation here is billed at cost, so the same number of
+credits goes several times further. Annual is 25% off.
+
+| | Free | Standard | Pro | Max |
+|---|---|---|---|---|
+| Per month | $0 | $15 | $35 | $95 |
+| Per year | — | $135 | $315 | $855 |
+| Credits | 125 once | 625/mo | 2,250/mo | 7,000/mo |
+| Storage | 5 GB | 20 GB | 100 GB | 500 GB |
+| Upscaling | yes | yes | yes | yes |
+| Buy more credits | no | yes | yes | yes |
+| Unused credits carry over | — | no | no | 1 month |
+| Queue priority | — | 1 | 2 | 3 |
+
+Every plan can generate — Free included. What gates a generation is credits,
+not membership.
+
+### Granted credits expire; bought credits do not
+
+This distinction is load-bearing, because a year of banked allocations spent
+at once is exactly what an at-cost margin cannot absorb.
+
+- A plan's allocation is recorded on the member as `granted_credits`.
+- **Spending takes the granted half first**, so what remains after a spend is
+  the credit they actually paid for (`chargeCredits` in `web/lib/grants.ts`).
+  A refund puts back the same split the charge took, recorded on the ledger
+  entry as `granted_delta`.
+- At a **renewal of the same plan**, granted credits above the plan's
+  rollover ceiling are forfeited — posted to the ledger as its own `expiry`
+  entry, so a member sees what lapsed rather than a balance dropping for no
+  stated reason.
+- **Changing plan never forfeits anything.** Upgrading from Free to Standard
+  carries the leftovers across; only a renewal expires credit.
+- An **annual** subscriber is billed once but granted monthly: paying up
+  front buys a cheaper month, not a year of credits to spend on day one.
+  Monthly renewals are granted from the `invoice.paid` webhook; annual ones
+  from a once-a-month sweep in the cron (`sweepPeriodGrants`). Both are
+  idempotent on a `grant#<user>#<plan>#<period>` id, so they cannot both pay
+  out.
+
 ## Pricing
 
 Every price is derived, never typed in. The provider bills tokens:

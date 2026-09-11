@@ -10,7 +10,10 @@ import {
   OUTPUT_MODE_IDS,
   OutputMode,
   DEFAULT_MODE,
+  ANNUAL_DISCOUNT,
   PLANS,
+  PLAN_IDS,
+  planPriceUsd,
   SITE_NAME,
 } from "@/lib/config";
 import { fmtUsd, quote, rates } from "@/lib/pricing";
@@ -54,35 +57,60 @@ export default function PricingPage() {
         revenue.
       </p>
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-line bg-surface p-6">
-          <h2 className="font-medium">{PLANS.monthly.label}</h2>
-          <p className="mt-2 text-3xl font-semibold">
-            ${PLANS.monthly.priceUsd}
-            <span className="text-base font-normal text-muted">/month</span>
-          </p>
-          <ul className="mt-3 space-y-1 text-sm text-muted">
-            <li>Every Seedance model we can run, up to 30s clips</li>
-            <li>{PLANS.monthly.storageGb} GB video storage</li>
-            <li>Credits never expire</li>
-          </ul>
-        </div>
-        <div className="rounded-2xl border border-accent bg-surface p-6">
-          <h2 className="font-medium">{PLANS.annual.label}</h2>
-          <p className="mt-2 text-3xl font-semibold">
-            ${PLANS.annual.priceUsd}
-            <span className="text-base font-normal text-muted">/year</span>
-            <span className="ml-2 align-middle rounded-full bg-accent px-2 py-0.5 text-xs text-accent-ink">
-              2 months free
-            </span>
-          </p>
-          <ul className="mt-3 space-y-1 text-sm text-muted">
-            <li>Everything in Monthly</li>
-            <li>{PLANS.annual.storageGb} GB video storage</li>
-            <li>Credits never expire</li>
-          </ul>
-        </div>
+      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {PLAN_IDS.map((id) => {
+          const p = PLANS[id];
+          const yearly = planPriceUsd(id, "year");
+          return (
+            <div
+              key={id}
+              className={`rounded-2xl border bg-surface p-6 ${
+                id === "pro" ? "border-accent" : "border-line"
+              }`}
+            >
+              <h2 className="font-medium">{p.label}</h2>
+              <p className="mt-2 text-3xl font-semibold">
+                ${p.monthlyUsd}
+                <span className="text-base font-normal text-muted">
+                  {p.monthlyUsd === 0 ? "" : "/month"}
+                </span>
+              </p>
+              {p.monthlyUsd > 0 && (
+                <p className="mt-1 text-xs text-muted">
+                  or ${yearly}/year — ${(yearly / 12).toFixed(2)}/month,{" "}
+                  {Math.round(ANNUAL_DISCOUNT * 100)}% off
+                </p>
+              )}
+              <ul className="mt-3 space-y-1 text-sm text-muted">
+                <li className="text-ink">
+                  {p.credits.toLocaleString()} credits
+                  {p.recurring ? " a month" : ", once"}
+                </li>
+                <li>{p.storageGb} GB storage</li>
+                <li>{p.canUpscale ? "Upscaling to 4K included" : "No upscaling"}</li>
+                <li>
+                  {p.canBuyCredits
+                    ? "Buy more credits any time — bought credits never expire"
+                    : "No credit top-ups on this plan"}
+                </li>
+                {p.rolloverMonths > 0 && (
+                  <li>
+                    Unused credits carry over for {p.rolloverMonths} month
+                    {p.rolloverMonths > 1 ? "s" : ""}
+                  </li>
+                )}
+                {p.priority > 0 && <li>Priority {p.priority} in the queue</li>}
+              </ul>
+            </div>
+          );
+        })}
       </section>
+
+      <p className="mt-3 text-xs text-muted">
+        Monthly credits are granted each month and do not accumulate beyond
+        what your plan carries over; credits you buy never expire. An annual
+        plan buys a cheaper month, not a year of credits up front.
+      </p>
 
       <section className="mt-10">
         <h2 className="text-xl font-medium">What videos cost</h2>
@@ -188,8 +216,10 @@ processing  ${(r.processingPct * 100).toFixed(1)}% payment fees`}
         </pre>
         <p className="mt-3 text-sm text-muted">
           Minimum top-up is ${MIN_TOPUP_USD} — small card charges are mostly
-          processing fees. Failed generations are refunded automatically.
-          Credits never expire.
+          processing fees, and top-ups need a paid plan. Failed generations are
+          refunded automatically. Credits you buy never expire; credits
+          included with a plan expire when the plan renews, beyond whatever
+          your plan carries over.
         </p>
       </section>
 

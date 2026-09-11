@@ -4,12 +4,16 @@ import Link from "next/link";
 import { CREDIT_USD } from "@/lib/config";
 
 // Shown instead of silently bouncing the member to /account when a generation
-// is refused for money reasons. Two causes, one dialog: no active membership,
-// or not enough credits — the second tells them exactly how short they are.
+// is refused for money reasons. Three causes, one dialog: the plan does not
+// include what was asked for, or there are not enough credits — the second
+// tells them exactly how short they are, and whether the fix is a top-up or
+// an upgrade (a free member cannot buy credits).
 export interface CreditsBlock {
-  reason: "membership_required" | "insufficient_credits";
+  reason: "membership_required" | "plan_required" | "insufficient_credits";
   needed?: number;
   balance?: number;
+  canBuyCredits?: boolean;
+  message?: string;
 }
 
 function usd(credits: number) {
@@ -27,7 +31,11 @@ export default function CreditsDialog({
   onClose: () => void;
 }) {
   if (!block) return null;
-  const membership = block.reason === "membership_required";
+  const membership =
+    block.reason === "membership_required" || block.reason === "plan_required";
+  // Short of credits on a plan that cannot buy them: the only way forward is
+  // a paid plan, so offer that instead of a purchase that would be refused.
+  const upgrade = membership || block.canBuyCredits === false;
   const short =
     block.needed !== undefined && block.balance !== undefined
       ? Math.max(0, block.needed - block.balance)
@@ -46,12 +54,12 @@ export default function CreditsDialog({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 id="credits-dialog-title" className="text-lg font-semibold">
-          {membership ? "Membership required" : "Not enough credits"}
+          {membership ? "Your plan does not include this" : "Not enough credits"}
         </h2>
 
         {membership ? (
           <p className="mt-2 text-sm text-muted">
-            Generating needs an active membership. Join and your draft is kept.
+            {block.message ?? "Pick a plan that includes it — your draft is kept."}
           </p>
         ) : (
           <>
@@ -63,8 +71,17 @@ export default function CreditsDialog({
             </p>
             {short !== undefined && short > 0 && (
               <p className="mt-1 text-sm text-muted">
-                Add at least <span className="font-medium text-ink">{usd(short)}</span> to
-                continue.
+                {upgrade ? (
+                  <>
+                    You are {usd(short)} short. Your plan does not include credit
+                    top-ups — a paid plan adds credits every month.
+                  </>
+                ) : (
+                  <>
+                    Add at least <span className="font-medium text-ink">{usd(short)}</span>{" "}
+                    to continue.
+                  </>
+                )}
               </p>
             )}
           </>
@@ -79,10 +96,10 @@ export default function CreditsDialog({
             Not now
           </button>
           <Link
-            href={membership ? "/account?join=1" : "/account?topup=1"}
+            href={upgrade ? "/account?join=1" : "/account?topup=1"}
             className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
           >
-            {membership ? "Join" : "Add credits"}
+            {upgrade ? "See plans" : "Add credits"}
           </Link>
         </div>
       </div>

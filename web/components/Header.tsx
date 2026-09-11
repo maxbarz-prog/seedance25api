@@ -7,7 +7,8 @@ import { CREDIT_USD, SITE_NAME } from "@/lib/config";
 interface Me {
   email: string;
   balanceCredits: number;
-  membershipActive: boolean;
+  planLabel: string;
+  canBuyCredits: boolean;
 }
 
 // Anything that spends or adds credits fires this so the header re-reads the
@@ -63,7 +64,7 @@ export default function Header() {
                   next generation can run. */}
               <span
                 className="flex items-center overflow-hidden rounded-full border border-line"
-                title={`${me.balanceCredits} credits`}
+                title={`${me.balanceCredits} credits · ${me.planLabel} plan`}
               >
                 <Link
                   href="/account"
@@ -72,11 +73,13 @@ export default function Header() {
                 >
                   {balance}
                 </Link>
+                {/* A free member cannot top up, so the button sends them to
+                    the plans instead of a purchase they cannot make. */}
                 <Link
-                  href="/account?topup=1"
+                  href={me.canBuyCredits ? "/account?topup=1" : "/account?join=1"}
                   className="border-l border-line bg-accent px-3 py-1 font-medium text-accent-ink hover:opacity-90"
                 >
-                  + Add credits
+                  {me.canBuyCredits ? "+ Add credits" : "Upgrade"}
                 </Link>
               </span>
               <Link

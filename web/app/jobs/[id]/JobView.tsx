@@ -84,11 +84,13 @@ export default function JobView({ id }: { id: string }) {
       if (res.status === 402) {
         setBlock({
           reason:
-            data.error === "membership_required"
-              ? "membership_required"
+            data.error === "membership_required" || data.error === "plan_required"
+              ? "plan_required"
               : "insufficient_credits",
           needed: data.needed,
           balance: data.balance,
+          canBuyCredits: data.canBuyCredits,
+          message: data.message,
         });
         return;
       }

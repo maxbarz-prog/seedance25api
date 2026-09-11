@@ -3,7 +3,11 @@
 // one by env and re-exports an async facade, so routes never know which
 // backend they are on.
 
-export type Membership = "none" | "monthly" | "annual";
+// A plan id. Two older values survive on rows written before tiers existed
+// and are mapped on read (lib/plan.ts): "none" was an unsubscribed account,
+// "monthly"/"annual" the single paid plan that preceded these.
+export type Membership = "free" | "standard" | "pro" | "max" | "none" | "monthly" | "annual";
+export type BillingInterval = "month" | "year";
 export type JobStatus = "queued" | "generating" | "upscaling" | "ready" | "failed";
 export type JobMode = "upscaled-4k" | "upscaled-1080p" | "native-1080p";
 
@@ -21,6 +25,14 @@ export interface User {
   // than recomputed from it. Optional because rows written before this
   // existed have no value yet; readers fall back to summing the ledger.
   balance_credits?: number;
+  // Of that balance, how much came from a membership allocation rather than
+  // being bought. Granted credits expire at renewal (beyond the plan's
+  // rollover); bought ones never do, so spending takes the granted ones
+  // first. Absent on rows written before tiers existed, which is treated as
+  // zero — those balances were all bought.
+  granted_credits?: number;
+  // Whether the subscription is billed monthly or yearly. Null for free.
+  billing_interval?: BillingInterval | null;
   created_at: number;
 }
 
@@ -82,6 +94,11 @@ export interface LedgerEntry {
   job_id: string | null;
   memo: string | null;
   external_id: string | null;
+  // How much of this movement was membership allocation rather than bought
+  // credit (see AddLedgerOpts.grantedDelta). Recorded so a refund can put
+  // back exactly what the charge took from the expiring half. Null on rows
+  // written before tiers, and on movements that are purely bought credit.
+  granted_delta?: number | null;
   created_at: number;
 }
 
@@ -107,10 +124,18 @@ export interface AdminJobRow {
   created_at: number;
 }
 
+// One row per (plan, billing interval) with active paid members in it. The
+// revenue estimate is computed from this rather than from a monthly/annual
+// headcount, which cannot price four tiers.
+export interface MemberCount {
+  plan: string;
+  interval: BillingInterval;
+  count: number;
+}
+
 export interface AdminData {
   userCount: number;
-  monthlyMembers: number;
-  annualMembers: number;
+  members: MemberCount[];
   creditsPurchased: number;
   creditsSpent: number;
   creditsRefunded: number;
@@ -126,6 +151,12 @@ export interface AddLedgerOpts {
   jobId?: string;
   memo?: string;
   externalId?: string;
+  // How much of this movement is membership allocation rather than bought
+  // credit. Positive on a grant, negative when allocation is spent or expires.
+  // Keeps `granted_credits` in step with the balance so the expiring and
+  // permanent halves stay distinguishable — which is what decides how much
+  // may be forfeited at a renewal. See lib/grants.ts.
+  grantedDelta?: number;
 }
 
 import { MoneyIssue } from "./reconcile";
@@ -134,7 +165,12 @@ export interface DataStore {
   createUser(email: string, passwordHash: string): Promise<User>;
   userByEmail(email: string): Promise<User | undefined>;
   userById(id: string): Promise<User | undefined>;
-  setMembership(userId: string, membership: Membership, renewsAt: number | null): Promise<void>;
+  setMembership(
+    userId: string,
+    membership: Membership,
+    renewsAt: number | null,
+    interval?: BillingInterval | null
+  ): Promise<void>;
   setStripeIds(userId: string, customerId: string | null, subscriptionId: string | null): Promise<void>;
   userByStripeCustomer(customerId: string): Promise<User | undefined>;
   setResetToken(userId: string, tokenHash: string | null, expiresAt: number | null): Promise<void>;
@@ -162,6 +198,10 @@ export interface DataStore {
   storageUsedBytes(userId: string): Promise<number>;
 
   adminData(): Promise<AdminData>;
+
+  // Every account, for the monthly credit-grant sweep (lib/grants.ts). Run
+  // once a period, not per request.
+  allUsers(limit?: number): Promise<User[]>;
 
   // Small global key-value store for operational state that is not tied to a
   // user or a job — currently the money-safety halt (lib/money.ts).

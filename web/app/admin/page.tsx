@@ -10,6 +10,7 @@ interface Overview {
     monthlyMembers: number;
     annualMembers: number;
     estMonthlyMembershipUsd: number;
+    membersByPlan: { plan: string; label: string; monthly: number; annual: number }[];
     creditsPurchased: number;
     creditsSpent: number;
     creditsRefunded: number;
@@ -502,7 +503,12 @@ export default function AdminPage() {
         <Tile
           label="Est. membership rev / mo"
           value={`$${t.estMonthlyMembershipUsd.toFixed(0)}`}
-          detail="memberships"
+          detail={
+            (t.membersByPlan ?? [])
+              .filter((p) => p.monthly + p.annual > 0)
+              .map((p) => `${p.label} ${p.monthly + p.annual}`)
+              .join(" · ") || "no paid members yet"
+          }
         />
         <Tile
           label="Credits purchased"

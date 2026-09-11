@@ -13,24 +13,100 @@ export const CREDIT_USD = 0.01; // 1 credit = 1 cent
 export const MIN_TOPUP_USD = 10;
 export const TOPUP_PRESETS_USD = [10, 20, 50];
 
+// Membership tiers. Credit allocations deliberately match Runway's, so a
+// member can compare like for like — the difference is that generation here
+// is billed at cost, so the same credits go several times further.
+//
+// Everything a tier grants or withholds is declared here, not scattered
+// through the code: the monthly credit allocation, how much of it survives a
+// renewal, storage, whether credits can be bought at all, and where the
+// member sits in the queue.
+//
+// Credits granted with a membership EXPIRE. Credits bought with money never
+// do. That distinction is load-bearing — see `granted_credits` on the user
+// row — because otherwise a year of allocations could be banked and spent at
+// once, which is exactly what the margin cannot absorb.
+export const ANNUAL_DISCOUNT = 0.25;
+
 export const PLANS = {
-  monthly: {
-    id: "monthly",
-    label: "Monthly",
-    priceUsd: 19.99,
-    interval: "month" as const,
+  free: {
+    id: "free",
+    label: "Free",
+    monthlyUsd: 0,
+    // One grant on signup, never renewed.
+    credits: 125,
+    recurring: false,
+    storageGb: 5,
+    // Free members upscale like everyone else: a 480p clip is not a fair
+    // sample of what the service does.
+    canUpscale: true,
+    // No card on file, so no top-ups. The allocation is the whole offer.
+    canBuyCredits: false,
+    // Months of unspent allocation that survive a renewal. Free never
+    // renews, so this is moot.
+    rolloverMonths: 0,
+    priority: 0,
+  },
+  standard: {
+    id: "standard",
+    label: "Standard",
+    monthlyUsd: 15,
+    credits: 625,
+    recurring: true,
     storageGb: 20,
+    canUpscale: true,
+    canBuyCredits: true,
+    rolloverMonths: 0,
+    priority: 1,
   },
-  annual: {
-    id: "annual",
-    label: "Annual",
-    priceUsd: 199,
-    interval: "year" as const,
-    storageGb: 50,
+  pro: {
+    id: "pro",
+    label: "Pro",
+    monthlyUsd: 35,
+    credits: 2250,
+    recurring: true,
+    storageGb: 100,
+    canUpscale: true,
+    canBuyCredits: true,
+    rolloverMonths: 0,
+    priority: 2,
   },
-};
+  max: {
+    id: "max",
+    label: "Max",
+    monthlyUsd: 95,
+    credits: 7000,
+    recurring: true,
+    storageGb: 500,
+    canUpscale: true,
+    canBuyCredits: true,
+    // One month of unspent allocation carries over.
+    rolloverMonths: 1,
+    priority: 3,
+  },
+} as const;
 
 export type PlanId = keyof typeof PLANS;
+export const PLAN_IDS = Object.keys(PLANS) as PlanId[];
+export const PAID_PLAN_IDS = PLAN_IDS.filter((p) => PLANS[p].monthlyUsd > 0);
+export const DEFAULT_PLAN: PlanId = "free";
+
+export type BillingInterval = "month" | "year";
+
+// A year costs twelve months less the annual discount. Credits are still
+// granted monthly on an annual plan — paying up front buys a cheaper month,
+// not a year of allocation to spend on day one.
+export function planPriceUsd(plan: PlanId, interval: BillingInterval): number {
+  const m = PLANS[plan].monthlyUsd;
+  return interval === "year"
+    ? Math.round(m * 12 * (1 - ANNUAL_DISCOUNT) * 100) / 100
+    : m;
+}
+
+// What the member effectively pays per month on an annual plan.
+export function effectiveMonthlyUsd(plan: PlanId, interval: BillingInterval): number {
+  return interval === "year" ? planPriceUsd(plan, "year") / 12 : PLANS[plan].monthlyUsd;
+}
 
 // Every video model this account can call, newest first.
 //

@@ -1,5 +1,5 @@
 import { adminData } from "./db";
-import { PLANS } from "./config";
+import { PLAN_IDS, PLANS, PlanId, planPriceUsd } from "./config";
 
 export type { AdminJobRow, AdminUserRow } from "./data/types";
 
@@ -9,7 +9,11 @@ export interface AdminOverview {
     activeMembers: number;
     monthlyMembers: number;
     annualMembers: number;
+    // Recurring revenue at today's roster, annual plans spread over twelve
+    // months.
     estMonthlyMembershipUsd: number;
+    // Active paid members per tier, in plan order.
+    membersByPlan: { plan: PlanId; label: string; monthly: number; annual: number }[];
     creditsPurchased: number;
     creditsSpent: number;
     creditsRefunded: number;
@@ -28,12 +32,29 @@ export async function adminOverview(): Promise<AdminOverview> {
   return {
     totals: {
       users: d.userCount,
-      activeMembers: d.monthlyMembers + d.annualMembers,
-      monthlyMembers: d.monthlyMembers,
-      annualMembers: d.annualMembers,
-      estMonthlyMembershipUsd:
-        d.monthlyMembers * PLANS.monthly.priceUsd +
-        (d.annualMembers * PLANS.annual.priceUsd) / 12,
+      activeMembers: d.members.reduce((a, m) => a + m.count, 0),
+      monthlyMembers: d.members
+        .filter((m) => m.interval === "month")
+        .reduce((a, m) => a + m.count, 0),
+      annualMembers: d.members
+        .filter((m) => m.interval === "year")
+        .reduce((a, m) => a + m.count, 0),
+      // Each tier at its own price, annual spread over the year it covers.
+      estMonthlyMembershipUsd: d.members.reduce((a, m) => {
+        if (!(m.plan in PLANS)) return a;
+        const p = m.plan as PlanId;
+        return (
+          a +
+          m.count *
+            (m.interval === "year" ? planPriceUsd(p, "year") / 12 : PLANS[p].monthlyUsd)
+        );
+      }, 0),
+      membersByPlan: PLAN_IDS.filter((p) => PLANS[p].monthlyUsd > 0).map((p) => ({
+        plan: p,
+        label: PLANS[p].label,
+        monthly: d.members.find((m) => m.plan === p && m.interval === "month")?.count ?? 0,
+        annual: d.members.find((m) => m.plan === p && m.interval === "year")?.count ?? 0,
+      })),
       creditsPurchased: d.creditsPurchased,
       creditsSpent: d.creditsSpent,
       creditsRefunded: d.creditsRefunded,

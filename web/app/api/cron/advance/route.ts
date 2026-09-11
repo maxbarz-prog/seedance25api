@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { advanceAll } from "@/lib/pipeline";
+import { sweepPeriodGrants } from "@/lib/grants";
 
 // Invoked every minute by the scheduler (sst.config.ts Cron) so jobs keep
 // moving after the member closes the tab. Guarded by a shared secret.
@@ -11,5 +12,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
   const result = await advanceAll();
-  return NextResponse.json(result);
+  // Cheap after the first run of each month: a marker short-circuits it.
+  const grants = await sweepPeriodGrants();
+  return NextResponse.json({ ...result, grants });
 }

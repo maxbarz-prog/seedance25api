@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createUser, userByEmail } from "@/lib/db";
 import { hashPassword, session } from "@/lib/auth";
+import { grantSignupCredits } from "@/lib/grants";
 
 const Body = z.object({
   email: z.string().email(),
@@ -24,6 +25,8 @@ export async function POST(req: NextRequest) {
     );
   }
   const user = await createUser(email, await hashPassword(password));
+  // The free allocation, so a new account can make something immediately.
+  await grantSignupCredits(user.id);
   const s = await session();
   s.userId = user.id;
   await s.save();

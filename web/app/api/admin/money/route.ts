@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
-import { addLedger, moneyIssues, userById } from "@/lib/db";
+import { moneyIssues, userById } from "@/lib/db";
+import { refundCredits } from "@/lib/grants";
 import { clearHalt, currentHalt, halt } from "@/lib/money";
 
 // The money desk: what the halt switch says, what we owe back, and the two
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
   let refunded = 0;
   let credits = 0;
   for (const i of targets) {
-    const entry = await addLedger(i.userId, i.credits, "refund", {
+    const entry = await refundCredits(i.userId, i.credits, {
       jobId: i.jobId,
       memo: `Reconciliation: ${i.reason}`,
       // Guards against a double refund if this is clicked twice or two

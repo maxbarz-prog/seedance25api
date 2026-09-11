@@ -1,3 +1,4 @@
+import { PAID_PLAN_IDS, PlanId, BillingInterval } from "@/lib/config";
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { z } from "zod";
@@ -10,7 +11,7 @@ import { applyMembership, applyTopup, stripeEnabled } from "@/lib/billing";
 
 const Body = z.union([
   z.object({ kind: z.literal("topup"), usd: z.number().min(1).max(1000) }),
-  z.object({ kind: z.literal("subscribe"), plan: z.enum(["monthly", "annual"]) }),
+  z.object({ kind: z.literal("subscribe"), plan: z.enum(PAID_PLAN_IDS as [string, ...string[]]), interval: z.enum(["month", "year"]).default("month") }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
   if (parsed.data.kind === "topup") {
     await applyTopup(user.id, parsed.data.usd, `mock_${randomUUID()}`);
   } else {
-    await applyMembership(user.id, parsed.data.plan);
+    await applyMembership(user.id, parsed.data.plan as PlanId, parsed.data.interval as BillingInterval);
   }
   return NextResponse.json({ ok: true });
 }

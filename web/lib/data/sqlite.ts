@@ -15,6 +15,7 @@ import {
   LedgerEntry,
   Membership,
   User,
+  BillingInterval,
 } from "./types";
 
 // Local-dev store: single SQLite file, zero services. The require() is lazy
@@ -98,6 +99,9 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT`,
       `ALTER TABLE users ADD COLUMN reset_token_hash TEXT`,
       `ALTER TABLE users ADD COLUMN reset_expires_at INTEGER`,
+      `ALTER TABLE users ADD COLUMN granted_credits INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN billing_interval TEXT`,
+      `ALTER TABLE ledger ADD COLUMN granted_delta INTEGER`,
     ];
     for (const sql of adds) {
       try {
@@ -113,15 +117,19 @@ export class SqliteStore implements DataStore {
       id: randomUUID(),
       email: email.toLowerCase().trim(),
       password_hash: passwordHash,
-      membership: "none",
+      membership: "free",
       membership_renews_at: null,
       stripe_customer_id: null,
+      granted_credits: 0,
+      billing_interval: null,
       created_at: Date.now(),
     };
     this.db()
       .prepare(
-        `INSERT INTO users (id, email, password_hash, membership, membership_renews_at, stripe_customer_id, created_at)
-         VALUES (@id, @email, @password_hash, @membership, @membership_renews_at, @stripe_customer_id, @created_at)`
+        `INSERT INTO users (id, email, password_hash, membership, membership_renews_at, stripe_customer_id,
+                            granted_credits, billing_interval, created_at)
+         VALUES (@id, @email, @password_hash, @membership, @membership_renews_at, @stripe_customer_id,
+                 @granted_credits, @billing_interval, @created_at)`
       )
       .run(u);
     return u;
@@ -137,10 +145,17 @@ export class SqliteStore implements DataStore {
     return this.db().prepare(`SELECT * FROM users WHERE id = ?`).get(id) as User | undefined;
   }
 
-  async setMembership(userId: string, membership: Membership, renewsAt: number | null) {
+  async setMembership(
+    userId: string,
+    membership: Membership,
+    renewsAt: number | null,
+    interval?: BillingInterval | null
+  ) {
     this.db()
-      .prepare(`UPDATE users SET membership = ?, membership_renews_at = ? WHERE id = ?`)
-      .run(membership, renewsAt, userId);
+      .prepare(
+        `UPDATE users SET membership = ?, membership_renews_at = ?, billing_interval = ? WHERE id = ?`
+      )
+      .run(membership, renewsAt, interval ?? null, userId);
   }
 
   async setStripeIds(userId: string, customerId: string | null, subscriptionId: string | null) {
@@ -192,18 +207,32 @@ export class SqliteStore implements DataStore {
       job_id: opts.jobId ?? null,
       memo: opts.memo ?? null,
       external_id: opts.externalId ?? null,
+      granted_delta: opts.grantedDelta ? Math.round(opts.grantedDelta) : null,
       created_at: Date.now(),
     };
     try {
       this.db()
         .prepare(
-          `INSERT INTO ledger (id, user_id, delta_credits, kind, job_id, memo, external_id, created_at)
-           VALUES (@id, @user_id, @delta_credits, @kind, @job_id, @memo, @external_id, @created_at)`
+          `INSERT INTO ledger (id, user_id, delta_credits, kind, job_id, memo, external_id, granted_delta, created_at)
+           VALUES (@id, @user_id, @delta_credits, @kind, @job_id, @memo, @external_id, @granted_delta, @created_at)`
         )
         .run(e);
     } catch (err: unknown) {
       if (String(err).includes("UNIQUE constraint failed: ledger.external_id")) return null;
       throw err;
+    }
+    // Granted credits are tracked separately from the balance so the
+    // expiring half can be told from the bought half. Clamped at zero and at
+    // the balance: a spend takes granted credits first, and rounding must
+    // never leave more "granted" than the member actually holds.
+    if (e.granted_delta) {
+      this.db()
+        .prepare(
+          `UPDATE users
+              SET granted_credits = MAX(0, COALESCE(granted_credits, 0) + ?)
+            WHERE id = ?`
+        )
+        .run(e.granted_delta, userId);
     }
     return e;
   }
@@ -299,6 +328,12 @@ export class SqliteStore implements DataStore {
     return findMoneyIssues(jobs, ledger);
   }
 
+  async allUsers(limit = 20000): Promise<User[]> {
+    return this.db()
+      .prepare(`SELECT * FROM users ORDER BY created_at ASC LIMIT ?`)
+      .all(limit) as User[];
+  }
+
   async adminData(): Promise<AdminData> {
     const d = this.db();
     const now = Date.now();
@@ -329,16 +364,29 @@ export class SqliteStore implements DataStore {
       )
       .all() as AdminJobRow[];
 
+    // Paid members still inside their period, grouped by plan and interval.
+    // The legacy "monthly"/"annual" values map onto standard, matching
+    // lib/plan.ts; "free" and the pre-tier "none" are not memberships.
+    const memberCounts = (
+      d
+        .prepare(
+          `SELECT membership, billing_interval, COUNT(*) AS n
+             FROM users
+            WHERE membership_renews_at > ? AND membership NOT IN ('free', 'none')
+            GROUP BY membership, billing_interval`
+        )
+        .all(now) as { membership: string; billing_interval: string | null; n: number }[]
+    ).map((r) => ({
+      plan:
+        r.membership === "monthly" || r.membership === "annual" ? "standard" : r.membership,
+      interval: (r.billing_interval ??
+        (r.membership === "annual" ? "year" : "month")) as BillingInterval,
+      count: r.n,
+    }));
+
     return {
       userCount: count(`SELECT COUNT(*) AS n FROM users`),
-      monthlyMembers: count(
-        `SELECT COUNT(*) AS n FROM users WHERE membership = 'monthly' AND membership_renews_at > ?`,
-        now
-      ),
-      annualMembers: count(
-        `SELECT COUNT(*) AS n FROM users WHERE membership = 'annual' AND membership_renews_at > ?`,
-        now
-      ),
+      members: memberCounts,
       creditsPurchased: sum("topup") + sum("adjustment"),
       creditsSpent: sum("charge"),
       creditsRefunded: sum("refund"),
