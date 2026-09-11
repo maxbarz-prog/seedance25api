@@ -86,11 +86,20 @@ export function perSecondUsd(
   return (rate * tokens) / 1e6;
 }
 
-export function rates(opts: RateOptions = {}) {
-  const gen = {} as Record<ModelId, GenRates | null>;
-  for (const id of Object.keys(MODELS) as ModelId[]) gen[id] = genRates(id, opts);
+// The parts of a price that come from the environment rather than from the
+// model registry. Small enough to hand to the browser, which is the point:
+// a quote is arithmetic, and making the member wait on a Lambda round trip
+// to see a price change is indefensible.
+export interface PricingConstants {
+  upscale2xPerSec: number;
+  upscale4xPerSec: number;
+  deliveryPerVideo: number;
+  overheadPct: number;
+  processingPct: number;
+}
+
+export function pricingConstants(): PricingConstants {
   return {
-    gen,
     // Provider: upscaler, per source second. ByteDance Video Upscaler via fal,
     // published 30fps rates: $0.0072/s to 1080p, $0.0288/s to 4K.
     upscale2xPerSec: envNum("COST_UPSCALE_2X_PER_SEC", 0.0072),
@@ -103,6 +112,12 @@ export function rates(opts: RateOptions = {}) {
     // Payment processing recovery, as a fraction of the charged price.
     processingPct: envNum("COST_PROCESSING_PCT", 0.035),
   };
+}
+
+export function rates(opts: RateOptions = {}) {
+  const gen = {} as Record<ModelId, GenRates | null>;
+  for (const id of Object.keys(MODELS) as ModelId[]) gen[id] = genRates(id, opts);
+  return { gen, ...pricingConstants() };
 }
 
 export interface QuoteInput {
@@ -126,11 +141,14 @@ export interface Quote {
 // price = (provider + delivery) x (1 + overhead) / (1 - processing), rounded
 // up to a whole credit. Processing divides (not multiplies) because the fee
 // is charged on the final price.
-export function quote(input: QuoteInput): Quote {
-  const r = rates({ audio: input.audio, now: input.now });
+// The price, given the constants. Pure: no environment, no clock beyond what
+// the caller passes, so the browser and the server compute the same number
+// from the same inputs. The server is still the authority — the jobs route
+// re-quotes before charging — but the member sees the answer instantly.
+export function quoteWith(c: PricingConstants, input: QuoteInput): Quote {
   const d = input.durationS;
   const ctx = input.contextS ?? 0;
-  const gen = r.gen[input.model];
+  const gen = genRates(input.model, { audio: input.audio, now: input.now });
   if (!gen) throw new Error(`no confirmed provider rate for ${input.model}`);
   const out = OUTPUT_MODES[input.mode];
   // Native renders the deliverable itself; everything else renders at 480p
@@ -149,17 +167,15 @@ export function quote(input: QuoteInput): Quote {
   if (!out.native) {
     // The upscaler only ever sees the new output seconds, and its rate is
     // per source second regardless of the target.
-    providerUsd +=
-      (out.upscaleFactor === 4 ? r.upscale4xPerSec : r.upscale2xPerSec) * d;
+    providerUsd += (out.upscaleFactor === 4 ? c.upscale4xPerSec : c.upscale2xPerSec) * d;
   }
-  const usd =
-    ((providerUsd + r.deliveryPerVideo) * (1 + r.overheadPct)) / (1 - r.processingPct);
+  const usd = ((providerUsd + c.deliveryPerVideo) * (1 + c.overheadPct)) / (1 - c.processingPct);
   const credits = Math.ceil(usd / CREDIT_USD);
-  return {
-    credits,
-    usd: credits * CREDIT_USD,
-    perSecUsd: (credits * CREDIT_USD) / d,
-  };
+  return { credits, usd: credits * CREDIT_USD, perSecUsd: (credits * CREDIT_USD) / d };
+}
+
+export function quote(input: QuoteInput): Quote {
+  return quoteWith(pricingConstants(), input);
 }
 
 export function usdToCredits(usd: number): number {

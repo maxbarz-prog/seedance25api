@@ -1,9 +1,15 @@
 import { DEFAULT_MODE, DEFAULT_MODEL } from "@/lib/config";
 import Composer from "@/components/Composer";
 import Link from "next/link";
-import { fmtUsd, quote } from "@/lib/pricing";
+import { fmtUsd, pricingConstants, quote } from "@/lib/pricing";
+import { storageEnabled } from "@/lib/storage";
 
 export default function Home() {
+  // Resolved once, at render, and handed to the composer. Saves the browser
+  // two round trips on first paint and makes every later price change
+  // instant.
+  const pricing = pricingConstants();
+  const uploadsEnabled = storageEnabled();
   const q5 = quote({ model: DEFAULT_MODEL, durationS: 5, mode: DEFAULT_MODE });
   const q30 = quote({ model: DEFAULT_MODEL, durationS: 30, mode: DEFAULT_MODE });
 
@@ -22,7 +28,7 @@ export default function Home() {
         </p>
       </section>
 
-      <Composer />
+      <Composer pricing={pricing} uploadsEnabled={uploadsEnabled} />
 
       <section className="mt-14 grid gap-6 sm:grid-cols-3">
         <div className="rounded-2xl border border-line bg-surface p-5">

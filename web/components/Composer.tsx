@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ASPECT_RATIOS,
@@ -25,6 +25,7 @@ import {
   DEFAULT_MODE,
 } from "@/lib/config";
 import CreditsDialog, { CreditsBlock } from "./CreditsDialog";
+import { PricingConstants, quoteWith } from "@/lib/pricing";
 import { BALANCE_EVENT } from "./Header";
 
 const ROLE_LABELS: Record<ImageRole, string> = {
@@ -41,7 +42,14 @@ interface Quote {
 
 const DRAFT_KEY = "remerged-draft";
 
-export default function Composer() {
+export default function Composer({
+  pricing,
+  uploadsEnabled,
+}: {
+  // Handed down from the server so a price change needs no network call.
+  pricing: PricingConstants;
+  uploadsEnabled: boolean;
+}) {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState<ModelId>(DEFAULT_MODEL);
@@ -49,11 +57,9 @@ export default function Composer() {
   const [aspect, setAspect] = useState<string>("16:9");
   const [audio, setAudio] = useState(false);
   const [mode, setMode] = useState<OutputMode>(DEFAULT_MODE);
-  const [q, setQ] = useState<Quote | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [block, setBlock] = useState<CreditsBlock | null>(null);
-  const [uploadsEnabled, setUploadsEnabled] = useState(false);
   const [images, setImages] = useState<
     { key: string; preview: string; role: InputRole; name: string }[]
   >([]);
@@ -64,13 +70,6 @@ export default function Composer() {
   const [variations, setVariations] = useState(1);
 
   const maxDuration = MODELS[model].maxDurationS;
-
-  useEffect(() => {
-    fetch("/api/uploads")
-      .then((r) => r.json())
-      .then((d) => setUploadsEnabled(!!d.enabled))
-      .catch(() => {});
-  }, []);
 
   const imageCount = images.filter((i) => !i.role.startsWith("reference_")).length;
   const videoCount = images.filter((i) => i.role === "reference_video").length;
@@ -208,21 +207,24 @@ export default function Composer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canNative, mode]);
 
-  useEffect(() => {
-    const ctl = new AbortController();
-    const effectiveMode = modeAvailable(mode) ? mode : DEFAULT_MODE;
-    const qs = new URLSearchParams({
-      model,
-      duration: String(Math.min(durationS, maxDuration)),
-      mode: effectiveMode,
-      audio: audio ? "1" : "0",
-    });
-    fetch(`/api/quote?${qs}`, { signal: ctl.signal })
-      .then((r) => r.json())
-      .then((d) => setQ(d.error ? null : d))
-      .catch(() => {});
-    return () => ctl.abort();
-  }, [model, durationS, mode, maxDuration, audio, canNative]);
+  // Priced here, not over the network. The formula is arithmetic over the
+  // model registry plus a handful of constants the server handed down, so a
+  // change to the model, length or output route repaints immediately. The
+  // server re-quotes before it charges anyone, so this is a display, never
+  // the authority.
+  const q: Quote | null = useMemo(() => {
+    try {
+      return quoteWith(pricing, {
+        model,
+        durationS: Math.min(durationS, maxDuration),
+        mode: modeAvailable(mode) ? mode : DEFAULT_MODE,
+        audio,
+      });
+    } catch {
+      return null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pricing, model, durationS, maxDuration, mode, audio, canNative]);
 
   async function generate() {
     setError(null);
