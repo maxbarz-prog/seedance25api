@@ -286,7 +286,10 @@ export default function AccountPanel() {
                     <span className="block font-semibold">{p.label}</span>
                     <PlanPrice plan={id} interval={interval} />
                     <span className="mt-2 block text-muted">
-                      {p.credits.toLocaleString()} credits a month
+                      {/* "free" because they come WITH the plan rather than
+                          being bought on top of it — the distinction the
+                          top-up buttons below are about. */}
+                      {p.credits.toLocaleString()} free credits a month
                     </span>
                     <span className="block text-muted">{p.storageGb} GB storage</span>
                   </button>

@@ -57,6 +57,12 @@ export default function Header() {
           {SITE_NAME}
         </Link>
         <nav className="flex items-center gap-2 text-sm sm:gap-5">
+          {/* The wordmark already goes home, but a named tab is what people
+              look for. Hidden on a phone alongside the others — the header
+              has no room, and the wordmark is right there. */}
+          <Link href="/" className="hidden text-muted hover:text-ink sm:inline">
+            Home
+          </Link>
           <Link href="/pricing" className="hidden text-muted hover:text-ink sm:inline">
             Pricing
           </Link>
@@ -103,7 +109,11 @@ export default function Header() {
               </span>
               <Link
                 href="/account"
-                className="hidden max-w-[14ch] truncate text-muted hover:text-ink sm:inline"
+                /* Held back to md: at the sm breakpoint every nav link appears
+                   at once and the row is 8px too wide. The email is the least
+                   useful thing in it — the balance pill already links to the
+                   same page. */
+                className="hidden max-w-[14ch] truncate text-muted hover:text-ink md:inline"
               >
                 {me.email}
               </Link>

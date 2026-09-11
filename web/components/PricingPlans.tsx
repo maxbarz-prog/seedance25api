@@ -40,8 +40,11 @@ export default function PricingPlans() {
                 <PlanPrice plan={id} interval={interval} />
               </div>
               <ul className="mt-3 space-y-1 text-sm text-muted">
+                {/* "free" because they come WITH the plan rather than being
+                    bought on top of it — the distinction the next line, about
+                    buying more, turns on. */}
                 <li className="text-ink">
-                  {p.credits.toLocaleString()} credits
+                  {p.credits.toLocaleString()} free credits
                   {p.recurring ? " a month" : ", once"}
                 </li>
                 <li>{p.storageGb} GB storage</li>
