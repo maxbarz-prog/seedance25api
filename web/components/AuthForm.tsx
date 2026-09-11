@@ -28,7 +28,15 @@ export default function AuthForm({ kind }: { kind: "login" | "signup" }) {
       }
       const next = params.get("next");
       // New members go to the join step; the composer draft is waiting after.
-      window.location.href = kind === "signup" ? "/account?join=1" : next || "/";
+      // A plan picked on the pricing page rides along, so choosing a tier
+      // there and then signing up does not lose the choice.
+      const join = new URLSearchParams({ join: "1" });
+      for (const key of ["plan", "interval"]) {
+        const v = params.get(key);
+        if (v) join.set(key, v);
+      }
+      window.location.href =
+        kind === "signup" ? `/account?${join.toString()}` : next || "/";
     } finally {
       setBusy(false);
     }

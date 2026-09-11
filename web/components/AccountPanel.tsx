@@ -3,14 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
-  ANNUAL_DISCOUNT,
   BillingInterval,
   PAID_PLAN_IDS,
   PLANS,
   PlanId,
-  planPriceUsd,
   TOPUP_PRESETS_USD,
 } from "@/lib/config";
+import IntervalToggle from "./IntervalToggle";
+import PlanPrice from "./PlanPrice";
 
 interface LedgerEntry {
   id: string;
@@ -41,7 +41,17 @@ export default function AccountPanel() {
   const [me, setMe] = useState<Me | null>(null);
   const [authMode, setAuthMode] = useState<"clerk" | "builtin">("builtin");
   const [busy, setBusy] = useState<string | null>(null);
-  const [interval, setInterval] = useState<BillingInterval>("month");
+  // Yearly by default: it is the better deal, and the member who wants to
+  // pay monthly can say so in one click. Switching shows the undiscounted
+  // price rather than hiding it. A period chosen on the pricing page arrives
+  // as a query param and wins over the default.
+  const [interval, setInterval] = useState<BillingInterval>(
+    params.get("interval") === "month" ? "month" : "year"
+  );
+  // Likewise the tier, which is highlighted rather than bought: they have
+  // just made an account, and being dropped straight onto a card form is not
+  // what picking a plan on the pricing page asked for.
+  const pickedPlan = PAID_PLAN_IDS.find((p) => p === params.get("plan"));
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
@@ -155,19 +165,7 @@ export default function AccountPanel() {
           {/* Yearly is a plan-wide choice, not a separate plan, so it sits
               above the tiers rather than doubling their number. */}
           {!me.membershipActive && (
-            <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
-              {(["month", "year"] as const).map((i) => (
-                <button
-                  key={i}
-                  onClick={() => setInterval(i)}
-                  className={`rounded-full px-3 py-1 ${
-                    interval === i ? "bg-accent text-accent-ink" : "text-muted"
-                  }`}
-                >
-                  {i === "month" ? "Monthly" : `Yearly · ${Math.round(ANNUAL_DISCOUNT * 100)}% off`}
-                </button>
-              ))}
-            </div>
+            <IntervalToggle value={interval} onChange={setInterval} />
           )}
         </div>
 
@@ -185,31 +183,29 @@ export default function AccountPanel() {
         ) : (
           <>
             <p className="mt-2 text-sm text-muted">
-              {joinNudge
+              {pickedPlan
+                ? `You picked ${PLANS[pickedPlan].label}. Confirm it below, or choose another.`
+                : joinNudge
                 ? "One step before your video: pick a plan."
                 : `You are on the ${me.planLabel} plan: ${PLANS[me.plan].credits.toLocaleString()} credits, ${PLANS[me.plan].storageGb} GB storage, upscaling included. Credit top-ups need a paid plan.`}
             </p>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               {PAID_PLAN_IDS.map((id) => {
                 const p = PLANS[id];
-                const price = planPriceUsd(id, interval);
                 return (
                   <button
                     key={id}
                     onClick={() => subscribe(id, interval)}
                     disabled={busy !== null}
                     className={`rounded-xl border px-5 py-3 text-left text-sm disabled:opacity-50 ${
-                      id === "pro" ? "border-accent" : "border-line hover:border-accent"
+                      id === (pickedPlan ?? "pro")
+                        ? "border-accent ring-1 ring-accent"
+                        : "border-line hover:border-accent"
                     }`}
                   >
                     <span className="block font-semibold">{p.label}</span>
-                    <span className="block font-semibold">
-                      ${price}
-                      <span className="font-normal text-muted">
-                        /{interval === "year" ? "year" : "month"}
-                      </span>
-                    </span>
-                    <span className="mt-1 block text-muted">
+                    <PlanPrice plan={id} interval={interval} />
+                    <span className="mt-2 block text-muted">
                       {p.credits.toLocaleString()} credits a month
                     </span>
                     <span className="block text-muted">{p.storageGb} GB storage</span>
