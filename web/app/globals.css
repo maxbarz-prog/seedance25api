@@ -39,6 +39,10 @@
   --color-good: var(--good);
   --color-warn: var(--warn);
   --color-bad: var(--bad);
+  /* Below this the header runs out of room for the word "credits" next to
+     the balance. Real phones are 360 and up; this only bites on the oldest
+     and on a folded Galaxy. */
+  --breakpoint-xs: 22.5rem;
 }
 
 body {

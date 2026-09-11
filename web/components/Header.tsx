@@ -38,7 +38,12 @@ export default function Header() {
     };
   }, [load]);
 
-  const balance = me
+  // Credits, not dollars. Credits are the unit every price on the site is
+  // quoted in, so a balance in dollars makes the member do the conversion
+  // themselves at the one moment it matters — deciding whether they can
+  // afford the thing in front of them. The dollar value stays on the tooltip.
+  const credits = me ? me.balanceCredits.toLocaleString() : null;
+  const usd = me
     ? (me.balanceCredits * CREDIT_USD).toLocaleString(undefined, {
         style: "currency",
         currency: "USD",
@@ -47,11 +52,11 @@ export default function Header() {
 
   return (
     <header className="border-b border-line bg-surface">
-      <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
+      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-3 py-3 sm:px-4">
         <Link href="/" className="text-lg font-semibold tracking-tight">
           {SITE_NAME}
         </Link>
-        <nav className="flex items-center gap-3 text-sm sm:gap-5">
+        <nav className="flex items-center gap-2 text-sm sm:gap-5">
           <Link href="/pricing" className="hidden text-muted hover:text-ink sm:inline">
             Pricing
           </Link>
@@ -66,23 +71,34 @@ export default function Header() {
               {/* Balance is always on screen: it is what decides whether the
                   next generation can run. */}
               <span
-                className="flex items-center overflow-hidden rounded-full border border-line"
-                title={`${me.balanceCredits} credits · ${me.planLabel} plan`}
+                className="flex shrink-0 items-center overflow-hidden whitespace-nowrap rounded-full border border-line"
+                title={`${credits} credits · worth ${usd} · ${me.planLabel} plan`}
               >
                 <Link
                   href="/account"
-                  className="px-3 py-1 font-medium tabular-nums hover:bg-bg"
-                  aria-label={`Credit balance ${balance}`}
+                  className="px-2.5 py-1 font-medium hover:bg-bg sm:px-3"
+                  aria-label={`Credit balance: ${credits} credits, worth ${usd}`}
                 >
-                  {balance}
+                  <span className="tabular-nums">{credits}</span>
+                  {/* Naming the unit is the point, so it stays at every width
+                      a real phone has. Under 360px the header cannot fit it
+                      and the number alone has to do — the tooltip and the
+                      aria-label still say credits. */}
+                  <span className="ml-1 hidden font-normal text-muted xs:inline">credits</span>
                 </Link>
                 {/* A free member cannot top up, so the button sends them to
                     the plans instead of a purchase they cannot make. */}
                 <Link
                   href={me.canBuyCredits ? "/account?topup=1" : "/account?join=1"}
-                  className="border-l border-line bg-accent px-3 py-1 font-medium text-accent-ink hover:opacity-90"
+                  className="border-l border-line bg-accent px-2.5 py-1 font-medium text-accent-ink hover:opacity-90 sm:px-3"
                 >
-                  {me.canBuyCredits ? "+ Add credits" : "Upgrade"}
+                  {me.canBuyCredits ? (
+                    <>
+                      + Add<span className="hidden sm:inline"> credits</span>
+                    </>
+                  ) : (
+                    "Upgrade"
+                  )}
                 </Link>
               </span>
               <Link
