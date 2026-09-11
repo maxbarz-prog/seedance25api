@@ -444,12 +444,44 @@ export const HELP: HelpCategory[] = [
       },
       {
         slug: "deleting",
-        title: "Deleting videos and closing your account",
-        summary: "Videos, any time. The account, by email.",
+        title: "Deleting videos",
+        summary: "Any time, from the library. Frees the storage immediately.",
         body: [
-          p("Delete any video from your library. That frees its storage immediately and cannot be undone."),
           p(
-            `To close your account entirely, email ${SUPPORT_EMAIL} from the address on the account. Your videos and personal data are removed; a minimal billing record is retained where the law requires it.`
+            "Delete any video from your library. That frees its storage straight away and cannot be undone, so download anything you want to keep first."
+          ),
+          p(
+            "Deleting a video does not refund the credits it cost — the generation has already been paid for at the provider."
+          ),
+        ],
+      },
+      {
+        slug: "leaving",
+        title: "Cancelling, deactivating or deleting your account",
+        summary: "Three different things. Only the last one cannot be undone.",
+        body: [
+          p(
+            "All three are on your account page, under Leaving. They are deliberately separate, because they are not the same decision:"
+          ),
+          table(
+            ["", "Billing", "Your videos", "Reversible"],
+            [
+              ["Cancel your plan", "Stops at period end", "Kept", "Yes — resubscribe"],
+              ["Deactivate", "Stops", "Kept", "Yes — sign in and reactivate"],
+              ["Delete account", "Stops", "Erased", "No"],
+            ]
+          ),
+          p(
+            "CANCELLING keeps everything and just stops the renewal. Your plan runs to the end of the period you have already paid for, then the account moves to Free. Credits you bought stay; plan credits go when the plan does."
+          ),
+          p(
+            "DEACTIVATING puts the account on hold. Billing stops, nothing generates, and every video stays where it is. Sign back in whenever you like and one click brings it all back."
+          ),
+          p(
+            "DELETING is permanent. Every video is removed from storage and your account, history and credits are erased. We cannot recover it afterwards, which is why it asks you to type your email address first."
+          ),
+          note(
+            `Deleting forfeits any credits still in your balance. If you bought credits in the last 14 days and have not used them, ask for a refund at ${SUPPORT_EMAIL} before deleting.`
           ),
         ],
       },

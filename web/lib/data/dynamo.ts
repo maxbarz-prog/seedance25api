@@ -80,6 +80,8 @@ export class DynamoStore implements DataStore {
       balance_credits: 0,
       granted_credits: 0,
       billing_interval: null,
+      deactivated_at: null,
+      cancel_at_period_end: false,
       created_at: Date.now(),
     };
     // `stripe_customer_id` is the hash key of the "stripe" GSI, and DynamoDB
@@ -241,6 +243,49 @@ export class DynamoStore implements DataStore {
   // every page load meant a member's account page got slower the more they
   // used the product. The fallback covers rows written before the running
   // balance existed and disappears the first time they transact.
+  async setDeactivated(userId: string, at: number | null) {
+    await this.doc.send(
+      new UpdateCommand({
+        TableName: USERS,
+        Key: { id: userId },
+        UpdateExpression: "SET deactivated_at = :a",
+        ExpressionAttributeValues: { ":a": at },
+      })
+    );
+  }
+
+  async setCancelAtPeriodEnd(userId: string, value: boolean) {
+    await this.doc.send(
+      new UpdateCommand({
+        TableName: USERS,
+        Key: { id: userId },
+        UpdateExpression: "SET cancel_at_period_end = :v",
+        ExpressionAttributeValues: { ":v": value },
+      })
+    );
+  }
+
+  async deleteUser(userId: string) {
+    // Jobs and ledger entries first, the user row last. If this is
+    // interrupted the account still exists and can be deleted again; the
+    // reverse would strand rows nothing points at.
+    const jobs = await this.jobsFor(userId, 10000);
+    for (const j of jobs) {
+      await this.doc.send(new DeleteCommand({ TableName: JOBS, Key: { id: j.id } }));
+    }
+    const entries = (await this.queryLedger(userId)) as (LedgerEntry & {
+      pk?: string;
+      sk?: string;
+    })[];
+    for (const e of entries) {
+      if (!e.pk || !e.sk) continue;
+      await this.doc.send(
+        new DeleteCommand({ TableName: LEDGER, Key: { pk: e.pk, sk: e.sk } })
+      );
+    }
+    await this.doc.send(new DeleteCommand({ TableName: USERS, Key: { id: userId } }));
+  }
+
   async balance(userId: string): Promise<number> {
     const u = await this.userById(userId);
     if (u && typeof u.balance_credits === "number") return u.balance_credits;

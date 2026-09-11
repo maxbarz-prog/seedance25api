@@ -34,6 +34,9 @@ interface Me {
   storageQuotaBytes: number;
   canBuyCredits: boolean;
   canUpscale: boolean;
+  cancelAtPeriodEnd: boolean;
+  deactivated: boolean;
+  deactivatedAt: number | null;
   ledger: LedgerEntry[];
 }
 
@@ -58,6 +61,11 @@ export default function AccountPanel() {
   // Points them at the plans rather than leaving a button that does nothing.
   const [upgradeReason, setUpgradeReason] = useState<string | null>(null);
   const plansRef = useRef<HTMLElement | null>(null);
+  // Which of the three leaving options is open. Only one at a time, and none
+  // by default: these should take a deliberate act to reach.
+  const [leaving, setLeaving] = useState<"unsubscribe" | "deactivate" | "delete" | null>(null);
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     fetch("/api/me")
@@ -132,6 +140,21 @@ export default function AccountPanel() {
     }
   }
 
+  async function account(action: string, extra: Record<string, unknown> = {}) {
+    const data = await post("/api/account", { action, ...extra }, `acct-${action}`);
+    if (!data) return;
+    setNotice(data.message ?? null);
+    setLeaving(null);
+    setConfirmEmail("");
+    // Deactivation and deletion both end the session server-side, so there is
+    // nothing left to show here.
+    if (action === "deactivate" || action === "delete") {
+      window.location.href = action === "delete" ? "/?deleted=1" : "/?deactivated=1";
+      return;
+    }
+    refresh();
+  }
+
   async function portal() {
     const data = await post("/api/billing/portal", {}, "portal");
     if (data?.url) window.location.href = data.url;
@@ -173,6 +196,29 @@ export default function AccountPanel() {
       </div>
 
       {error && <p className="text-sm text-bad">{error}</p>}
+      {notice && (
+        <p className="rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm">
+          {notice}
+        </p>
+      )}
+
+      {me.deactivated && (
+        <section className="rounded-2xl border border-accent bg-accent/10 p-5">
+          <h2 className="font-medium">This account is deactivated</h2>
+          <p className="mt-1 text-sm text-muted">
+            Deactivated{" "}
+            {me.deactivatedAt ? new Date(me.deactivatedAt).toLocaleDateString() : ""}. Nothing
+            is being billed and nothing will generate. Your videos are untouched.
+          </p>
+          <button
+            onClick={() => account("reactivate")}
+            disabled={busy !== null}
+            className="mt-3 rounded-full bg-accent px-5 py-2 text-sm font-medium text-accent-ink hover:opacity-90 disabled:opacity-50"
+          >
+            Reactivate account
+          </button>
+        </section>
+      )}
 
       {/* Membership */}
       <section
@@ -198,10 +244,15 @@ export default function AccountPanel() {
 
         {me.membershipActive ? (
           <p className="mt-2 text-sm text-muted">
-            <span className="font-medium text-good">Active</span> —{" "}
-            {me.planLabel} plan, {me.billingInterval === "year" ? "billed yearly" : "billed monthly"}, renews{" "}
-            {new Date(me.membershipRenewsAt!).toLocaleDateString()}. Storage
-            included: {quotaGb.toFixed(0)} GB.{" "}
+            <span className={`font-medium ${me.cancelAtPeriodEnd ? "text-bad" : "text-good"}`}>
+              {me.cancelAtPeriodEnd ? "Cancelled" : "Active"}
+            </span>{" "}
+            — {me.planLabel} plan,{" "}
+            {me.billingInterval === "year" ? "billed yearly" : "billed monthly"},{" "}
+            {me.cancelAtPeriodEnd ? "ends" : "renews"}{" "}
+            {new Date(me.membershipRenewsAt!).toLocaleDateString()}
+            {me.cancelAtPeriodEnd && " and will not renew"}. Storage included:{" "}
+            {quotaGb.toFixed(0)} GB.{" "}
             <button onClick={portal} className="underline hover:text-ink">
               Manage subscription
             </button>{" "}
@@ -305,6 +356,177 @@ export default function AccountPanel() {
             {usedGb.toFixed(2)} GB of {quotaGb.toFixed(0)} GB used on{" "}
             {me.planLabel}
           </p>
+      </section>
+
+      {/* Leaving */}
+      <section className="rounded-2xl border border-line bg-surface p-5">
+        <h2 className="font-medium">Leaving</h2>
+        <p className="mt-1 text-sm text-muted">
+          Three different things, and only the last one cannot be undone.
+        </p>
+
+        <div className="mt-4 divide-y divide-line">
+          {/* Unsubscribe — only means anything on a paid plan. */}
+          {me.membershipActive && !me.cancelAtPeriodEnd && (
+            <div className="py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-medium">Cancel your plan</p>
+                  <p className="text-sm text-muted">
+                    Stops the billing. You keep this account, your library and
+                    any credits you bought, and your {me.planLabel} plan runs to{" "}
+                    {me.membershipRenewsAt
+                      ? new Date(me.membershipRenewsAt).toLocaleDateString()
+                      : "the end of the period"}{" "}
+                    before moving to Free.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setLeaving(leaving === "unsubscribe" ? null : "unsubscribe")}
+                  className="shrink-0 rounded-full border border-line px-4 py-1.5 text-sm hover:border-accent"
+                >
+                  Cancel plan
+                </button>
+              </div>
+              {leaving === "unsubscribe" && (
+                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-line p-4 text-sm">
+                  <span className="text-muted">
+                    Cancel the {me.planLabel} plan? You keep access until it runs out.
+                  </span>
+                  <button
+                    onClick={() => account("unsubscribe")}
+                    disabled={busy !== null}
+                    className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90 disabled:opacity-50"
+                  >
+                    Yes, cancel
+                  </button>
+                  <button onClick={() => setLeaving(null)} className="text-muted underline">
+                    Keep it
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {me.membershipActive && me.cancelAtPeriodEnd && (
+            <div className="py-4">
+              <p className="font-medium">Your plan is cancelled</p>
+              <p className="text-sm text-muted">
+                {me.planLabel} runs until{" "}
+                {me.membershipRenewsAt
+                  ? new Date(me.membershipRenewsAt).toLocaleDateString()
+                  : "the end of the period"}{" "}
+                and will not renew, then this account moves to Free. Your
+                library and any credits you bought stay put. To carry on, pick
+                a plan above.
+              </p>
+            </div>
+          )}
+
+          {/* Deactivate. */}
+          <div className="py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-medium">Deactivate account</p>
+                <p className="text-sm text-muted">
+                  Puts everything on hold. Billing stops, nothing generates, and
+                  your videos stay where they are. Sign back in whenever you
+                  like and it all comes back.
+                </p>
+              </div>
+              <button
+                onClick={() => setLeaving(leaving === "deactivate" ? null : "deactivate")}
+                className="shrink-0 rounded-full border border-line px-4 py-1.5 text-sm hover:border-accent"
+              >
+                Deactivate
+              </button>
+            </div>
+            {leaving === "deactivate" && (
+              <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-line p-4 text-sm">
+                <span className="text-muted">
+                  You will be signed out.
+                  {me.membershipActive && " Your plan is cancelled at the same time."}
+                </span>
+                <button
+                  onClick={() => account("deactivate")}
+                  disabled={busy !== null}
+                  className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90 disabled:opacity-50"
+                >
+                  Deactivate
+                </button>
+                <button onClick={() => setLeaving(null)} className="text-muted underline">
+                  Never mind
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Delete — the only irreversible one, and it says so. */}
+          <div className="py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-medium text-bad">Delete account</p>
+                <p className="text-sm text-muted">
+                  Permanent. Every video is removed from storage and your
+                  account, history and credits are erased. There is no undo and
+                  we cannot recover it for you.
+                </p>
+              </div>
+              <button
+                onClick={() => setLeaving(leaving === "delete" ? null : "delete")}
+                className="shrink-0 rounded-full border border-bad px-4 py-1.5 text-sm text-bad hover:bg-bad/10"
+              >
+                Delete
+              </button>
+            </div>
+            {leaving === "delete" && (
+              <div className="mt-3 space-y-3 rounded-xl border border-bad p-4 text-sm">
+                <p>
+                  This deletes <span className="font-medium">{me.email}</span>,
+                  {" "}
+                  <span className="font-medium">{me.ledger.length > 0 ? "your history" : "your account"}</span>
+                  {" "}and every video you have made.
+                </p>
+                {me.balanceCredits > 0 && (
+                  <p className="text-bad">
+                    You still hold {me.balanceCredits.toLocaleString()} credits
+                    (${(me.balanceCredits * 0.01).toFixed(2)}). Deleting forfeits
+                    them. If you bought credits in the last 14 days and have not
+                    used them, ask for a refund first —{" "}
+                    <a href="/refunds" className="underline">
+                      refund policy
+                    </a>
+                    .
+                  </p>
+                )}
+                <label className="block">
+                  <span className="text-muted">Type {me.email} to confirm</span>
+                  <input
+                    value={confirmEmail}
+                    onChange={(e) => setConfirmEmail(e.target.value)}
+                    placeholder={me.email}
+                    className="mt-1 w-full rounded-xl border border-line bg-bg px-3 py-2 outline-none focus:border-bad"
+                  />
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={() => account("delete", { confirm: confirmEmail })}
+                    disabled={
+                      busy !== null ||
+                      confirmEmail.trim().toLowerCase() !== me.email.toLowerCase()
+                    }
+                    className="rounded-full bg-bad px-4 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40"
+                  >
+                    Delete my account
+                  </button>
+                  <button onClick={() => setLeaving(null)} className="text-muted underline">
+                    Keep my account
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* History */}

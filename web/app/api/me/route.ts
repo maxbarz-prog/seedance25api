@@ -7,6 +7,7 @@ import {
   canUpscale,
   effectivePlan,
   grantedBalance,
+  isDeactivated,
   intervalOf,
   storageQuotaBytes,
 } from "@/lib/plan";
@@ -43,6 +44,10 @@ export async function GET() {
       storageQuotaBytes: storageQuotaBytes(user),
       canBuyCredits: canBuyCredits(user),
       canUpscale: canUpscale(user),
+      // True once cancelled: the plan runs to membershipRenewsAt and stops.
+      cancelAtPeriodEnd: !!user.cancel_at_period_end,
+      deactivated: isDeactivated(user),
+      deactivatedAt: user.deactivated_at ?? null,
       ledger,
     },
   });

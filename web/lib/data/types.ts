@@ -38,6 +38,16 @@ export interface User {
   granted_credits?: number;
   // Whether the subscription is billed monthly or yearly. Null for free.
   billing_interval?: BillingInterval | null;
+  // Set when the member deactivates. The account and its videos survive and
+  // the member can still sign in — to reactivate, or to delete for good — but
+  // nothing generates and nothing is billed. Deliberately reversible, which
+  // is the whole difference between this and deletion.
+  deactivated_at?: number | null;
+  // Set when the member cancels: the plan runs to membership_renews_at and
+  // then stops. Without it the account page cannot tell "paid up until the
+  // 10th" from "cancelled, ends on the 10th", and a member who cancels sees
+  // no evidence it worked.
+  cancel_at_period_end?: boolean;
   created_at: number;
 }
 
@@ -181,6 +191,12 @@ export interface DataStore {
   setResetToken(userId: string, tokenHash: string | null, expiresAt: number | null): Promise<void>;
   userByResetToken(tokenHash: string): Promise<User | undefined>;
   setPassword(userId: string, passwordHash: string): Promise<void>;
+  setDeactivated(userId: string, at: number | null): Promise<void>;
+  setCancelAtPeriodEnd(userId: string, value: boolean): Promise<void>;
+  // Erase the member: their jobs, their ledger and the row itself. The stored
+  // VIDEO FILES are not this layer's to remove — the caller deletes those
+  // first, because only it knows about object storage.
+  deleteUser(userId: string): Promise<void>;
 
   balance(userId: string): Promise<number>;
   addLedger(

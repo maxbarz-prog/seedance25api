@@ -18,7 +18,7 @@ import {
   OUTPUT_MODE_IDS,
   resolveMode,
 } from "@/lib/config";
-import { canBuyCredits, storageQuotaBytes } from "@/lib/plan";
+import { canBuyCredits, isDeactivated, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import { currentHalt } from "@/lib/money";
 
@@ -37,6 +37,17 @@ export async function POST(
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   // Every plan can extend; credits and storage are what gate it.
+
+  // A deactivated account does nothing until the member brings it back.
+  if (isDeactivated(user)) {
+    return NextResponse.json(
+      {
+        error: "deactivated",
+        message: "Your account is deactivated. Reactivate it from your account page to generate again.",
+      },
+      { status: 403 }
+    );
+  }
 
   const { id } = await params;
   const source = await jobById(id);

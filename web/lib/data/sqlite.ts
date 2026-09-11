@@ -102,6 +102,8 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE users ADD COLUMN granted_credits INTEGER NOT NULL DEFAULT 0`,
       `ALTER TABLE users ADD COLUMN billing_interval TEXT`,
       `ALTER TABLE ledger ADD COLUMN granted_delta INTEGER`,
+      `ALTER TABLE users ADD COLUMN deactivated_at INTEGER`,
+      `ALTER TABLE users ADD COLUMN cancel_at_period_end INTEGER NOT NULL DEFAULT 0`,
     ];
     for (const sql of adds) {
       try {
@@ -122,27 +124,40 @@ export class SqliteStore implements DataStore {
       stripe_customer_id: null,
       granted_credits: 0,
       billing_interval: null,
+      deactivated_at: null,
+      cancel_at_period_end: false,
       created_at: Date.now(),
     };
     this.db()
       .prepare(
         `INSERT INTO users (id, email, password_hash, membership, membership_renews_at, stripe_customer_id,
-                            granted_credits, billing_interval, created_at)
+                            granted_credits, billing_interval, deactivated_at,
+                            cancel_at_period_end, created_at)
          VALUES (@id, @email, @password_hash, @membership, @membership_renews_at, @stripe_customer_id,
-                 @granted_credits, @billing_interval, @created_at)`
+                 @granted_credits, @billing_interval, @deactivated_at,
+                 @cancel_at_period_end, @created_at)`
       )
-      .run(u);
+      .run({ ...u, cancel_at_period_end: u.cancel_at_period_end ? 1 : 0 });
     return u;
   }
 
+  // SQLite has no boolean, so the 0/1 column is normalised here rather than
+  // leaving every caller to remember that `0` is truthy in JavaScript when it
+  // arrives as a number.
+  private hydrate(row: unknown): User | undefined {
+    if (!row) return undefined;
+    const u = row as User & { cancel_at_period_end?: number | boolean };
+    return { ...u, cancel_at_period_end: !!u.cancel_at_period_end };
+  }
+
   async userByEmail(email: string): Promise<User | undefined> {
-    return this.db()
-      .prepare(`SELECT * FROM users WHERE email = ?`)
-      .get(email.toLowerCase().trim()) as User | undefined;
+    return this.hydrate(
+      this.db().prepare(`SELECT * FROM users WHERE email = ?`).get(email.toLowerCase().trim())
+    );
   }
 
   async userById(id: string): Promise<User | undefined> {
-    return this.db().prepare(`SELECT * FROM users WHERE id = ?`).get(id) as User | undefined;
+    return this.hydrate(this.db().prepare(`SELECT * FROM users WHERE id = ?`).get(id));
   }
 
   async setMembership(
@@ -165,9 +180,9 @@ export class SqliteStore implements DataStore {
   }
 
   async userByStripeCustomer(customerId: string): Promise<User | undefined> {
-    return this.db()
-      .prepare(`SELECT * FROM users WHERE stripe_customer_id = ?`)
-      .get(customerId) as User | undefined;
+    return this.hydrate(
+      this.db().prepare(`SELECT * FROM users WHERE stripe_customer_id = ?`).get(customerId)
+    );
   }
 
   async setResetToken(userId: string, tokenHash: string | null, expiresAt: number | null) {
@@ -177,13 +192,34 @@ export class SqliteStore implements DataStore {
   }
 
   async userByResetToken(tokenHash: string): Promise<User | undefined> {
-    return this.db()
-      .prepare(`SELECT * FROM users WHERE reset_token_hash = ?`)
-      .get(tokenHash) as User | undefined;
+    return this.hydrate(
+      this.db().prepare(`SELECT * FROM users WHERE reset_token_hash = ?`).get(tokenHash)
+    );
   }
 
   async setPassword(userId: string, passwordHash: string) {
     this.db().prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(passwordHash, userId);
+  }
+
+  async setDeactivated(userId: string, at: number | null) {
+    this.db().prepare(`UPDATE users SET deactivated_at = ? WHERE id = ?`).run(at, userId);
+  }
+
+  async setCancelAtPeriodEnd(userId: string, value: boolean) {
+    this.db()
+      .prepare(`UPDATE users SET cancel_at_period_end = ? WHERE id = ?`)
+      .run(value ? 1 : 0, userId);
+  }
+
+  async deleteUser(userId: string) {
+    // One transaction: a half-deleted account — jobs gone, ledger left, or
+    // the reverse — is worse than either outcome.
+    const d = this.db();
+    d.transaction(() => {
+      d.prepare(`DELETE FROM jobs WHERE user_id = ?`).run(userId);
+      d.prepare(`DELETE FROM ledger WHERE user_id = ?`).run(userId);
+      d.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
+    })();
   }
 
   async balance(userId: string): Promise<number> {

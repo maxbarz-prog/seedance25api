@@ -24,7 +24,7 @@ import {
   supportsQuality,
   OUTPUT_MODE_IDS,
 } from "@/lib/config";
-import { canBuyCredits, canUpscale, storageQuotaBytes } from "@/lib/plan";
+import { canBuyCredits, canUpscale, isDeactivated, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import { currentHalt } from "@/lib/money";
 import { presentJob } from "@/lib/present";
@@ -66,6 +66,17 @@ export async function POST(req: NextRequest) {
 
   // No membership gate: every plan, Free included, can generate. What decides
   // it is credits — checked below, once there is a price to check against.
+
+  // A deactivated account does nothing until the member brings it back.
+  if (isDeactivated(user)) {
+    return NextResponse.json(
+      {
+        error: "deactivated",
+        message: "Your account is deactivated. Reactivate it from your account page to generate again.",
+      },
+      { status: 403 }
+    );
+  }
 
   // Money safety: if anything is wrong with what we charge or pay, we take
   // no more money until a human has cleared it. Checked before the quote, so

@@ -4,7 +4,20 @@ import Link from "next/link";
 import { fmtUsd, pricingConstants, quote } from "@/lib/pricing";
 import { storageEnabled } from "@/lib/storage";
 
-export default function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ deactivated?: string; deleted?: string }>;
+}) {
+  // Deactivating and deleting both end the session, so the member lands back
+  // here signed out. Saying what just happened is the difference between a
+  // completed action and an unexplained logout.
+  const sp = await searchParams;
+  const farewell = sp.deleted
+    ? "Your account and everything in it has been deleted. Nothing further is billed."
+    : sp.deactivated
+      ? "Your account is deactivated and billing has stopped. Sign in whenever you want it back — your videos are waiting."
+      : null;
   // Resolved once, at render, and handed to the composer. Saves the browser
   // two round trips on first paint and makes every later price change
   // instant.
@@ -15,13 +28,18 @@ export default function Home() {
 
   return (
     <div className="py-10">
+      {farewell && (
+        <p className="mb-8 rounded-2xl border border-line bg-surface px-5 py-4 text-center text-sm">
+          {farewell}
+        </p>
+      )}
       <section className="mb-8 text-center">
         <h1 className="text-4xl font-semibold tracking-tight">
           Seedance video, without the markup.
         </h1>
         <p className="mx-auto mt-3 max-w-2xl text-muted">
           Members generate at our cost — the membership is the business model.
-          A 5-second 1080p video runs{" "}
+          A 5-second 4K video runs{" "}
           <span className="font-medium text-ink">{fmtUsd(q5.usd)}</span>; a full
           30-second Seedance 2.5 clip is{" "}
           <span className="font-medium text-ink">{fmtUsd(q30.usd)}</span>.

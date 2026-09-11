@@ -19,7 +19,7 @@ export const PRIVACY = [
   ["What we collect", `Your email address and a hashed password; payment details are handled entirely by our payment processor (Stripe) and never touch our servers; the prompts, reference images and videos you create; and standard server logs.`],
   ["How we use it", `To run the service: authenticating you, processing generations with our AI providers, billing, delivering your videos, and support. Prompts and images are sent to the AI providers strictly to fulfil your request.`],
   ["Sharing", `We share data only with the processors needed to operate: our payment processor, cloud hosting (Amazon Web Services), email delivery, and the AI model providers that generate your videos. We do not sell personal data.`],
-  ["Retention", `Account data is kept while your account exists. Videos are kept per the storage terms. You can delete videos at any time and request account deletion via ${SUPPORT_EMAIL}.`],
+  ["Retention", `Account data is kept while your account exists. Videos are kept per the storage terms. You can delete videos at any time, and you can delete your entire account yourself from your account page — that removes your videos from storage and erases your account, history and credits, permanently. You may also deactivate instead, which stops billing and generation but keeps everything until you return. Questions: ${SUPPORT_EMAIL}.`],
   ["Cookies", `We use a single session cookie to keep you signed in. No advertising trackers.`],
   ["Your rights", `You may access, correct or delete your personal data by contacting ${SUPPORT_EMAIL}. Depending on your jurisdiction you may have further rights under applicable data-protection law.`],
   ["Contact", `${SUPPORT_EMAIL}.`],

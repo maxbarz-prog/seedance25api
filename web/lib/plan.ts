@@ -42,6 +42,12 @@ export function effectivePlan(
   return (user.membership_renews_at ?? 0) > now ? plan : DEFAULT_PLAN;
 }
 
+// A deactivated account keeps everything but does nothing: no generating, no
+// billing. Reversible by design — see app/api/account/route.ts.
+export function isDeactivated(user: Pick<User, "deactivated_at"> | null | undefined): boolean {
+  return !!user?.deactivated_at;
+}
+
 export function storageQuotaBytes(
   user: Pick<User, "membership" | "membership_renews_at">
 ): number {

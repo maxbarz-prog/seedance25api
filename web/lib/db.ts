@@ -56,6 +56,10 @@ export const jobsInFlight: DataStore["jobsInFlight"] = (...a) => store().jobsInF
 export const deleteJob: DataStore["deleteJob"] = (...a) => store().deleteJob(...a);
 export const storageUsedBytes: DataStore["storageUsedBytes"] = (...a) =>
   store().storageUsedBytes(...a);
+export const setDeactivated: DataStore["setDeactivated"] = (...a) => store().setDeactivated(...a);
+export const setCancelAtPeriodEnd: DataStore["setCancelAtPeriodEnd"] = (...a) =>
+  store().setCancelAtPeriodEnd(...a);
+export const deleteUser: DataStore["deleteUser"] = (...a) => store().deleteUser(...a);
 export const adminData: DataStore["adminData"] = () => store().adminData();
 export const allUsers: DataStore["allUsers"] = (...a) => store().allUsers(...a);
 export const getSystem: DataStore["getSystem"] = (...a) => store().getSystem(...a);

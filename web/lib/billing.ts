@@ -9,6 +9,7 @@ import {
 } from "./config";
 import {
   addLedger,
+  setCancelAtPeriodEnd,
   setMembership,
   setStripeIds,
   User,
@@ -16,6 +17,7 @@ import {
 } from "./db";
 import { usdToCredits } from "./pricing";
 import { grantPeriodCredits } from "./grants";
+import { intervalOf, planOf } from "./plan";
 
 // Stripe wrapper with a mock mode: without STRIPE_SECRET_KEY, checkout calls
 // return internal mock-payment URLs so the whole flow is testable locally.
@@ -98,6 +100,32 @@ export async function createMembershipCheckout(
   return { url: s.url! };
 }
 
+// Cancel at period end — never immediately. They have paid for the period
+// they are in, so they keep it; the plan lapses to free when it runs out,
+// which syncSubscription already handles on the resulting webhook.
+//
+// Returns the moment access ends, so the member can be told a date rather
+// than left guessing.
+export async function cancelSubscription(user: User): Promise<{ endsAt: number | null }> {
+  if (stripeEnabled() && user.stripe_subscription_id) {
+    const sub = await stripeClient().subscriptions.update(user.stripe_subscription_id, {
+      cancel_at_period_end: true,
+    });
+    const endsAt = (sub.items.data[0]?.current_period_end ?? 0) * 1000 || null;
+    // Mirror it immediately rather than waiting for the webhook, so the page
+    // they are looking at tells the truth on the next render.
+    await setMembership(user.id, planOf(user), endsAt, intervalOf(user));
+    await setCancelAtPeriodEnd(user.id, true);
+    return { endsAt };
+  }
+  // No Stripe (dev, or a comped membership): the renewal date is the whole
+  // record of the subscription, so leaving it in place and not renewing IS
+  // the cancellation. It lapses to free by itself — but the flag still has to
+  // be set, or the account page cannot show that it happened.
+  await setCancelAtPeriodEnd(user.id, true);
+  return { endsAt: user.membership_renews_at ?? null };
+}
+
 // Stripe-hosted portal for updating cards, switching plans, cancelling.
 export async function createPortalSession(user: User, origin: string): Promise<{ url: string } | null> {
   if (!stripeEnabled() || !user.stripe_customer_id) return null;
@@ -137,6 +165,8 @@ export async function applyMembership(
   const now = Date.now();
   const renewMs = interval === "year" ? 365 * 24 * 3600e3 : 30 * 24 * 3600e3;
   await setMembership(userId, planId, renewsAt ?? now + renewMs, interval);
+  // Subscribing again undoes a previous cancellation.
+  await setCancelAtPeriodEnd(userId, false);
   await grantPeriodCredits(userId, planId);
 }
 
@@ -159,13 +189,16 @@ export async function syncSubscription(sub: Stripe.Subscription): Promise<void> 
   const active = sub.status === "active" || sub.status === "trialing" || sub.status === "past_due";
   if (active && !sub.cancel_at_period_end) {
     await setMembership(user.id, plan, periodEnd, interval);
+    await setCancelAtPeriodEnd(user.id, false);
     await setStripeIds(user.id, customerId, sub.id);
   } else if (active && sub.cancel_at_period_end) {
     // Access continues until period end, then lapses naturally.
     await setMembership(user.id, plan, periodEnd, interval);
+    await setCancelAtPeriodEnd(user.id, true);
   } else {
     // A lapsed subscriber drops to free rather than losing the account:
     // they keep their library and any credits they bought.
     await setMembership(user.id, "free", null, null);
+    await setCancelAtPeriodEnd(user.id, false);
   }
 }
