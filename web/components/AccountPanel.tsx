@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   BillingInterval,
@@ -9,6 +9,7 @@ import {
   PlanId,
   TOPUP_PRESETS_USD,
 } from "@/lib/config";
+import { MIN_TOPUP_PLAN } from "@/lib/config";
 import IntervalToggle from "./IntervalToggle";
 import PlanPrice from "./PlanPrice";
 
@@ -53,6 +54,10 @@ export default function AccountPanel() {
   // what picking a plan on the pricing page asked for.
   const pickedPlan = PAID_PLAN_IDS.find((p) => p === params.get("plan"));
   const [error, setError] = useState<string | null>(null);
+  // Set when a free member reaches for something their plan does not include.
+  // Points them at the plans rather than leaving a button that does nothing.
+  const [upgradeReason, setUpgradeReason] = useState<string | null>(null);
+  const plansRef = useRef<HTMLElement | null>(null);
 
   const refresh = useCallback(() => {
     fetch("/api/me")
@@ -106,6 +111,17 @@ export default function AccountPanel() {
   }
 
   async function topup(usd: number) {
+    // A plan that cannot buy credits must not leave a dead button. Say what
+    // is needed, and move them to where they can do it.
+    if (me && !me.canBuyCredits) {
+      setUpgradeReason(
+        MIN_TOPUP_PLAN
+          ? `Buying credits needs ${PLANS[MIN_TOPUP_PLAN].label} or above — the ${me.planLabel} plan has no card on file. Pick a plan here and top-ups unlock straight away.`
+          : "Buying credits is not available on your plan."
+      );
+      plansRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     const data = await post("/api/billing/topup", { usd }, `top-${usd}`);
     if (!data) return;
     if (data.url.startsWith("/account?mock=")) {
@@ -159,7 +175,12 @@ export default function AccountPanel() {
       {error && <p className="text-sm text-bad">{error}</p>}
 
       {/* Membership */}
-      <section className="rounded-2xl border border-line bg-surface p-5">
+      <section
+        ref={plansRef}
+        className={`rounded-2xl border bg-surface p-5 ${
+          upgradeReason ? "border-accent" : "border-line"
+        }`}
+      >
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="font-medium">Membership</h2>
           {/* Yearly is a plan-wide choice, not a separate plan, so it sits
@@ -168,6 +189,12 @@ export default function AccountPanel() {
             <IntervalToggle value={interval} onChange={setInterval} />
           )}
         </div>
+
+        {upgradeReason && (
+          <p className="mt-2 rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm">
+            {upgradeReason}
+          </p>
+        )}
 
         {me.membershipActive ? (
           <p className="mt-2 text-sm text-muted">
@@ -246,7 +273,7 @@ export default function AccountPanel() {
             <button
               key={usd}
               onClick={() => topup(usd)}
-              disabled={busy !== null || !me.canBuyCredits}
+              disabled={busy !== null}
               className="rounded-xl border border-line px-5 py-2 text-sm hover:border-accent disabled:opacity-50"
             >
               +${usd}
@@ -255,8 +282,12 @@ export default function AccountPanel() {
         </div>
         {!me.canBuyCredits && (
           <p className="mt-2 text-xs text-muted">
-            Top-ups need a paid plan — pick one above. Your {me.planLabel} credits
-            still work as they are.
+            Top-ups need{" "}
+            {MIN_TOPUP_PLAN ? `${PLANS[MIN_TOPUP_PLAN].label} or above` : "a paid plan"} —{" "}
+            <button onClick={() => topup(0)} className="underline hover:text-ink">
+              see plans
+            </button>
+            . Your {me.planLabel} credits still work as they are.
           </p>
         )}
       </section>

@@ -111,6 +111,13 @@ export const PLAN_IDS = Object.keys(PLANS) as PlanId[];
 export const PAID_PLAN_IDS = PLAN_IDS.filter((p) => PLANS[p].monthlyUsd > 0);
 export const DEFAULT_PLAN: PlanId = "free";
 
+// The cheapest plan that can buy credits — derived, so the copy telling a
+// free member what they need never names a tier that has stopped being the
+// answer. Undefined only if no plan allows top-ups at all.
+export const MIN_TOPUP_PLAN: PlanId | undefined = PLAN_IDS.find(
+  (p) => PLANS[p].canBuyCredits
+);
+
 export type BillingInterval = "month" | "year";
 
 // A year costs twelve months less the annual discount. Credits are still

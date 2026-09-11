@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CREDIT_USD } from "@/lib/config";
+import { CREDIT_USD, MIN_TOPUP_PLAN, PLANS } from "@/lib/config";
 
 // Shown instead of silently bouncing the member to /account when a generation
 // is refused for money reasons. Three causes, one dialog: the plan does not
@@ -73,8 +73,10 @@ export default function CreditsDialog({
               <p className="mt-1 text-sm text-muted">
                 {upgrade ? (
                   <>
-                    You are {usd(short)} short. Your plan does not include credit
-                    top-ups — a paid plan adds credits every month.
+                    You are {usd(short)} short, and your plan cannot buy credits.{" "}
+                    {MIN_TOPUP_PLAN
+                      ? `${PLANS[MIN_TOPUP_PLAN].label} ($${PLANS[MIN_TOPUP_PLAN].monthlyUsd}/month) is the cheapest plan that can, and it includes ${PLANS[MIN_TOPUP_PLAN].credits.toLocaleString()} credits a month.`
+                      : "A paid plan adds credits every month."}
                   </>
                 ) : (
                   <>

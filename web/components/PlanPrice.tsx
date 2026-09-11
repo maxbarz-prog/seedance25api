@@ -46,10 +46,9 @@ export default function PlanPrice({
           {Math.round(ANNUAL_DISCOUNT * 100)}%
         </span>
       ) : (
-        <span className="block text-xs text-muted">
-          billed monthly · ${planPriceUsd(plan, "year")}/year saves{" "}
-          {Math.round(ANNUAL_DISCOUNT * 100)}%
-        </span>
+        // No annual pitch here: they have just chosen monthly, and the
+        // toggle above already says what yearly saves.
+        <span className="block text-xs text-muted">billed monthly</span>
       )}
     </>
   );
