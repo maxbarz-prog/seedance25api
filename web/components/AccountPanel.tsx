@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   BillingInterval,
@@ -32,6 +33,7 @@ interface Me {
   grantedCredits: number;
   storageUsedBytes: number;
   storageQuotaBytes: number;
+  creditRefundUsd: number;
   canBuyCredits: boolean;
   canUpscale: boolean;
   cancelAtPeriodEnd: boolean;
@@ -389,10 +391,19 @@ export default function AccountPanel() {
                 </button>
               </div>
               {leaving === "unsubscribe" && (
-                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-line p-4 text-sm">
-                  <span className="text-muted">
-                    Cancel the {me.planLabel} plan? You keep access until it runs out.
-                  </span>
+                <div className="mt-3 space-y-3 rounded-xl border border-line p-4 text-sm">
+                  <p className="text-muted">
+                    Cancel the {me.planLabel} plan? Plan fees are not refunded —
+                    what you get is the rest of the period you have already paid
+                    for. Your plan keeps working until{" "}
+                    <span className="font-medium text-ink">
+                      {me.membershipRenewsAt
+                        ? new Date(me.membershipRenewsAt).toLocaleDateString()
+                        : "the end of the period"}
+                    </span>
+                    , so there is nothing to gain by cancelling early.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => account("unsubscribe")}
                     disabled={busy !== null}
@@ -403,6 +414,7 @@ export default function AccountPanel() {
                   <button onClick={() => setLeaving(null)} className="text-muted underline">
                     Keep it
                   </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -442,11 +454,25 @@ export default function AccountPanel() {
               </button>
             </div>
             {leaving === "deactivate" && (
-              <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-line p-4 text-sm">
-                <span className="text-muted">
+              <div className="mt-3 space-y-3 rounded-xl border border-line p-4 text-sm">
+                <p className="text-muted">
                   You will be signed out.
-                  {me.membershipActive && " Your plan is cancelled at the same time."}
-                </span>
+                  {me.membershipActive && (
+                    <>
+                      {" "}
+                      Your plan is cancelled at the same time. Plan fees are not
+                      refunded, so the period you have paid for runs to{" "}
+                      <span className="font-medium text-ink">
+                        {me.membershipRenewsAt
+                          ? new Date(me.membershipRenewsAt).toLocaleDateString()
+                          : "the end of the period"}
+                      </span>{" "}
+                      either way — reactivate before then and the remaining time
+                      is still yours.
+                    </>
+                  )}
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
                 <button
                   onClick={() => account("deactivate")}
                   disabled={busy !== null}
@@ -457,6 +483,7 @@ export default function AccountPanel() {
                 <button onClick={() => setLeaving(null)} className="text-muted underline">
                   Never mind
                 </button>
+                </div>
               </div>
             )}
           </div>
@@ -490,13 +517,33 @@ export default function AccountPanel() {
                 {me.balanceCredits > 0 && (
                   <p className="text-bad">
                     You still hold {me.balanceCredits.toLocaleString()} credits
-                    (${(me.balanceCredits * 0.01).toFixed(2)}). Deleting forfeits
-                    them. If you bought credits in the last 14 days and have not
-                    used them, ask for a refund first —{" "}
-                    <a href="/refunds" className="underline">
-                      refund policy
-                    </a>
-                    .
+                    (${(me.balanceCredits * 0.01).toFixed(2)}), and deleting
+                    forfeits every one of them.
+                    {me.creditRefundUsd > 0 ? (
+                      <>
+                        {" "}
+                        Of those, the credits you bought would refund{" "}
+                        <span className="font-medium">
+                          ${me.creditRefundUsd.toFixed(2)}
+                        </span>{" "}
+                        after card fees — ask for that{" "}
+                        <Link href="/help/plans-billing-credits/refunds" className="underline">
+                          before deleting
+                        </Link>
+                        , because once the account is gone there is nothing to
+                        refund against.
+                      </>
+                    ) : (
+                      <>
+                        {" "}
+                        They all came with your plan rather than being bought, so
+                        none of them is refundable —{" "}
+                        <Link href="/help/plans-billing-credits/refunds" className="underline">
+                          why
+                        </Link>
+                        .
+                      </>
+                    )}
                   </p>
                 )}
                 <label className="block">

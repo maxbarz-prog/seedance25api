@@ -395,17 +395,32 @@ export const HELP: HelpCategory[] = [
       {
         slug: "refunds",
         title: "Refunds",
-        summary: "Failed generations are refunded automatically. Everything else, ask.",
+        summary:
+          "Failed generations: automatic. Plan fees: never. Bought credits: yes, less costs.",
         body: [
           p(
-            "A generation that fails is refunded to your balance automatically, in full, without you having to ask. It appears in your history as a refund."
+            "A generation that fails is refunded to your balance automatically, in full, without you having to ask. It appears in your history as a refund. We also reconcile the other way: if money was taken and the work was never done, we find it and refund it even if nobody reported it."
+          ),
+          p("Beyond that there are two rules, and they are different:"),
+          table(
+            ["", "Refundable?"],
+            [
+              ["Plan fees", "No — you get the rest of the period instead"],
+              ["Credits you bought, unspent", "Yes, less the card fee"],
+              ["Credits you bought, already spent", "No"],
+              ["Credits included with your plan", "No — never purchased"],
+            ]
           ),
           p(
-            "We also reconcile in the other direction: if money was taken and the work was never done, the discrepancy is found and refunded even if nobody reported it."
+            "PLAN FEES are not refunded. What you get instead is the period you already paid for: cancel your plan or deactivate your account and your access runs to the end of the current billing period before the account moves to Free. Partial periods are not prorated. The exception is a charge made in error — tell us within 14 days and we will refund it in full."
           ),
           p(
-            `Credit purchases are refundable to the original payment method within 14 days if none of the purchased credits have been used. Plan fees are non-refundable except as set out in the refund policy. For anything else, email ${SUPPORT_EMAIL} and describe what happened.`
+            "CREDITS YOU BOUGHT can be refunded to the original card, minus the costs already incurred on them. Two things come off: credits you have already spent, because we paid a provider to render those videos at the moment you made them, and the card processing fee on the original purchase, which our payment processor keeps even when the payment is refunded. So you get back the value of your unused bought credits, less that fee."
           ),
+          note(
+            "Credits that came with your plan are not refundable at all, in any amount. They were granted rather than bought, so there is no payment behind them to return. Your account page shows which half of your balance is which."
+          ),
+          p(`To ask for one, email ${SUPPORT_EMAIL} from the address on the account.`),
         ],
       },
     ],
@@ -472,16 +487,16 @@ export const HELP: HelpCategory[] = [
             ]
           ),
           p(
-            "CANCELLING keeps everything and just stops the renewal. Your plan runs to the end of the period you have already paid for, then the account moves to Free. Credits you bought stay; plan credits go when the plan does."
+            "CANCELLING keeps everything and just stops the renewal. Your plan runs to the end of the period you have already paid for — plan fees are not refunded, so that remaining time is yours and worth using — and the account moves to Free after that date. Credits you bought stay; plan credits go when the plan does."
           ),
           p(
-            "DEACTIVATING puts the account on hold. Billing stops, nothing generates, and every video stays where it is. Sign back in whenever you like and one click brings it all back."
+            "DEACTIVATING puts the account on hold. Billing stops, nothing generates, and every video stays where it is. The same rule applies: a plan you have paid for still runs to the end of its period, so reactivating before that date costs nothing and gets the remaining time back. Sign back in whenever you like and one click brings it all back."
           ),
           p(
             "DELETING is permanent. Every video is removed from storage and your account, history and credits are erased. We cannot recover it afterwards, which is why it asks you to type your email address first."
           ),
           note(
-            `Deleting forfeits any credits still in your balance. If you bought credits in the last 14 days and have not used them, ask for a refund at ${SUPPORT_EMAIL} before deleting.`
+            `Deleting forfeits every credit in your balance. If any of them were BOUGHT rather than granted with your plan, ask for a refund at ${SUPPORT_EMAIL} BEFORE you delete — once the account is gone there is no record to refund against. Plan fees are not refundable either way; cancelling simply leaves you the rest of the period you paid for.`
           ),
         ],
       },

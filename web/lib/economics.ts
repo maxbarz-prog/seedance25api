@@ -91,3 +91,44 @@ export function creditsForMargin(
   const net = revenue * (1 - c.processingPct);
   return Math.floor((net - targetUsd) / (CREDIT_USD * (1 - c.processingPct)));
 }
+
+// What a member can be refunded for credits they bought.
+//
+// Policy: subscription fees are never refunded — cancelling buys access to
+// the end of the period already paid for instead. Credits ARE refundable,
+// less the costs already incurred on them, which are two:
+//
+//   1. Credits already SPENT are gone. We paid a provider to render that
+//      video the moment it was made; there is nothing left to return.
+//   2. The card fee on the original purchase is not returned to us when we
+//      refund, so it comes out of the refund rather than out of the margin
+//      on an at-cost service.
+//
+// Plan credits are outside this entirely: they were granted, not bought, so
+// there is no money behind them to return. Only the bought half is eligible.
+export interface CreditRefund {
+  // Bought credits still held — the only ones with money behind them.
+  refundableCredits: number;
+  grossUsd: number;
+  // The card fee already paid on that amount, which a refund does not recover.
+  processingUsd: number;
+  netUsd: number;
+}
+
+export function creditRefund(
+  balanceCredits: number,
+  grantedCredits: number,
+  c: PricingConstants = pricingConstants()
+): CreditRefund {
+  // Spending takes plan credits first, so whatever is left above the granted
+  // portion is what was bought and never used.
+  const refundableCredits = Math.max(0, balanceCredits - Math.max(0, grantedCredits));
+  const grossUsd = refundableCredits * CREDIT_USD;
+  const processingUsd = grossUsd * c.processingPct;
+  return {
+    refundableCredits,
+    grossUsd,
+    processingUsd,
+    netUsd: Math.max(0, grossUsd - processingUsd),
+  };
+}

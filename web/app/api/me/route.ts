@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { clerkEnabled, currentUser } from "@/lib/auth";
 import { balance, ledgerFor, storageUsedBytes } from "@/lib/db";
 import { PLANS } from "@/lib/config";
+import { creditRefund } from "@/lib/economics";
 import {
   canBuyCredits,
   canUpscale,
@@ -42,6 +43,10 @@ export async function GET() {
       grantedCredits: grantedBalance(user, bal),
       storageUsedBytes: used,
       storageQuotaBytes: storageQuotaBytes(user),
+      // What a refund of unused BOUGHT credits would actually return, after
+      // the card fee that is not recovered. Shown where credits are at
+      // stake, so the policy is a number rather than a paragraph.
+      creditRefundUsd: creditRefund(bal, grantedBalance(user, bal)).netUsd,
       canBuyCredits: canBuyCredits(user),
       canUpscale: canUpscale(user),
       // True once cancelled: the plan runs to membershipRenewsAt and stops.
