@@ -5,6 +5,7 @@ import { clerkEnabled } from "./auth";
 import { stripeEnabled } from "./billing";
 import { currentHalt } from "./money";
 import { ModelId, Quality, tokensFor } from "./config";
+import { planMargins } from "./economics";
 
 // System status for the admin page.
 //
@@ -86,6 +87,9 @@ const TOKEN_FIXTURES: {
 // Never below the billed count; at most a percent above it.
 const TOKEN_MIN = 0;
 const TOKEN_MAX = 0.01;
+// Below this a plan still earns something, but not enough to absorb a cost
+// moving against us — worth a warning before it becomes a loss.
+const PLAN_MARGIN_THIN_USD = 5;
 
 async function timed<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<{ ok: true; value: T; ms: number } | { ok: false; error: string; ms: number; status?: number }> {
   const t0 = Date.now();
@@ -207,6 +211,31 @@ async function internalChecks(): Promise<Check[]> {
     note: bad.length
       ? `token estimate outside the 0 to +1% tolerance — ${bad.join("; ")}`
       : `every estimate lands within 0 to +1% of what the provider billed`,
+  });
+
+  // A plan that grants more generation than its fee covers loses money on
+  // every member who uses it fully, and nothing else on this page would
+  // notice — the per-render margin check only sees one render at a time, and
+  // each of those is priced correctly. This is the same question asked of the
+  // plan as a whole.
+  const margins = planMargins();
+  const underwater = margins.filter((m) => m.marginUsd <= 0);
+  const thin = margins.filter((m) => m.marginUsd > 0 && m.marginUsd < PLAN_MARGIN_THIN_USD);
+  const worst = margins[0];
+  out.push({
+    key: "internal.plan_margin", group: "internal", label: "Plan margin",
+    value: underwater.length
+      ? `${underwater.length} underwater`
+      : `worst $${worst.marginUsd.toFixed(2)}`,
+    level: underwater.length ? "bad" : thin.length ? "warn" : "good",
+    blame: underwater.length ? "us" : undefined,
+    note: underwater.length
+      ? `at full use these plans cost more than they earn: ${underwater
+          .map((m) => `${m.plan} ${m.interval}ly ($${m.marginUsd.toFixed(2)})`)
+          .join("; ")}. Cut the allocation or raise the price.`
+      : `${worst.plan} billed ${worst.interval}ly is the thinnest at $${worst.marginUsd.toFixed(
+          2
+        )}/month if every granted credit is spent`,
   });
 
   // A read of a key that cannot exist: proves the table, the IAM role and the

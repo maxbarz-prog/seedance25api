@@ -11,6 +11,13 @@ interface Overview {
     annualMembers: number;
     estMonthlyMembershipUsd: number;
     membersByPlan: { plan: string; label: string; monthly: number; annual: number }[];
+    planMargins: {
+      label: string;
+      interval: string;
+      revenueUsd: number;
+      costUsd: number;
+      marginUsd: number;
+    }[];
     creditsPurchased: number;
     creditsSpent: number;
     creditsRefunded: number;
@@ -485,6 +492,50 @@ export default function AdminPage() {
                       )}
                     </td>
                     <td className="py-2 tabular-nums text-muted">{t.samples}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* What each plan earns if the member spends everything it grants.
+          Worst first: annual is always the thinner of the two intervals, and
+          it is the one a plan has to be set by. */}
+      {!!t.planMargins?.length && (
+        <section className="rounded-2xl border border-line bg-surface p-5">
+          <h2 className="font-medium">Plan margin at full use</h2>
+          <p className="mt-1 text-xs text-muted">
+            Monthly revenue less card fees, provider, delivery and overhead, if
+            every granted credit is spent. Derived from the live cost
+            constants, so this moves when they do.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-muted">
+                  <th className="py-2 font-normal">Plan</th>
+                  <th className="py-2 font-normal">Billed</th>
+                  <th className="py-2 font-normal">Revenue / mo</th>
+                  <th className="py-2 font-normal">Cost at full use</th>
+                  <th className="py-2 font-normal">Margin</th>
+                </tr>
+              </thead>
+              <tbody>
+                {t.planMargins.map((m) => (
+                  <tr key={`${m.label}-${m.interval}`} className="border-b border-line last:border-0">
+                    <td className="py-2">{m.label}</td>
+                    <td className="py-2 text-muted">{m.interval}</td>
+                    <td className="py-2 tabular-nums text-muted">${m.revenueUsd.toFixed(2)}</td>
+                    <td className="py-2 tabular-nums text-muted">${m.costUsd.toFixed(2)}</td>
+                    <td
+                      className={`py-2 tabular-nums font-medium ${
+                        m.marginUsd <= 0 ? "text-bad" : m.marginUsd < 5 ? "text-amber-500" : ""
+                      }`}
+                    >
+                      ${m.marginUsd.toFixed(2)}
+                    </td>
                   </tr>
                 ))}
               </tbody>

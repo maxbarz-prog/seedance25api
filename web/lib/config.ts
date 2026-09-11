@@ -13,9 +13,12 @@ export const CREDIT_USD = 0.01; // 1 credit = 1 cent
 export const MIN_TOPUP_USD = 10;
 export const TOPUP_PRESETS_USD = [10, 20, 50];
 
-// Membership tiers. Credit allocations deliberately match Runway's, so a
-// member can compare like for like — the difference is that generation here
-// is billed at cost, so the same credits go several times further.
+// Membership tiers. Credit allocations match Runway's wherever the margin
+// allows it, so a member can compare like for like — the difference is that
+// generation here is billed at cost, so the same credits go several times
+// further. Max is the exception: at Runway's number it earns almost nothing
+// on the annual price, so it is set from the margin instead. See
+// lib/economics.ts, which derives both directions of that calculation.
 //
 // Everything a tier grants or withholds is declared here, not scattered
 // through the code: the monthly credit allocation, how much of it survives a
@@ -75,7 +78,20 @@ export const PLANS = {
     id: "max",
     label: "Max",
     monthlyUsd: 95,
-    credits: 7000,
+    // Set from the margin, not from Runway's figure.
+    //
+    // A granted credit spent costs us (1 - processing) x $0.01 in provider,
+    // delivery and overhead, so an allocation is a direct claim on the plan
+    // fee. Annual is the binding case — the same allocation for 25% less
+    // money — and at $855/year, or $71.25 a month, this allocation leaves
+    // about $12 a month if the member spends every credit.
+    //
+    // Runway's equivalent is 9,500. Matching it here would leave roughly
+    // nothing on annual, and lose money the moment a cost moves against us.
+    // creditsForMargin("max", "year", 12) recomputes this if the overhead or
+    // processing constants change; the admin page shows the live figure and
+    // the status page fails if any plan's margin goes negative.
+    credits: 5875,
     recurring: true,
     storageGb: 500,
     canUpscale: true,

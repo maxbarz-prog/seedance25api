@@ -1,5 +1,6 @@
 import { adminData } from "./db";
 import { PLAN_IDS, PLANS, PlanId, planPriceUsd } from "./config";
+import { planMargins } from "./economics";
 
 export type { AdminJobRow, AdminUserRow } from "./data/types";
 
@@ -14,6 +15,15 @@ export interface AdminOverview {
     estMonthlyMembershipUsd: number;
     // Active paid members per tier, in plan order.
     membersByPlan: { plan: PlanId; label: string; monthly: number; annual: number }[];
+    // What each plan earns a month if the member spends every credit it
+    // grants. Worst first — that is the one a plan is set by.
+    planMargins: {
+      label: string;
+      interval: string;
+      revenueUsd: number;
+      costUsd: number;
+      marginUsd: number;
+    }[];
     creditsPurchased: number;
     creditsSpent: number;
     creditsRefunded: number;
@@ -49,6 +59,13 @@ export async function adminOverview(): Promise<AdminOverview> {
             (m.interval === "year" ? planPriceUsd(p, "year") / 12 : PLANS[p].monthlyUsd)
         );
       }, 0),
+      planMargins: planMargins().map((m) => ({
+        label: PLANS[m.plan].label,
+        interval: m.interval === "year" ? "annual" : "monthly",
+        revenueUsd: m.monthlyRevenueUsd,
+        costUsd: m.fullUseCostUsd + m.processingUsd,
+        marginUsd: m.marginUsd,
+      })),
       membersByPlan: PLAN_IDS.filter((p) => PLANS[p].monthlyUsd > 0).map((p) => ({
         plan: p,
         label: PLANS[p].label,

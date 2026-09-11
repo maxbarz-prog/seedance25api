@@ -73,7 +73,7 @@ credits goes several times further. Annual is 25% off.
 |---|---|---|---|---|
 | Per month | $0 | $15 | $35 | $95 |
 | Per year | — | $135 | $315 | $855 |
-| Credits | 125 once | 625/mo | 2,250/mo | 7,000/mo |
+| Credits | 125 once | 625/mo | 2,250/mo | 5,875/mo |
 | Storage | 5 GB | 20 GB | 100 GB | 500 GB |
 | Upscaling | yes | yes | yes | yes |
 | Buy more credits | no | yes | yes | yes |
@@ -82,6 +82,28 @@ credits goes several times further. Annual is 25% off.
 
 Every plan can generate — Free included. What gates a generation is credits,
 not membership.
+
+### Plans are set by their margin, not by a round number
+
+A granted credit costs us `(1 − processing) × $0.01` in provider charges,
+delivery and overhead when it is spent, so an allocation is a direct claim on
+the plan fee:
+
+```
+margin = (1 − processing) × (monthly revenue − credits × $0.01)
+```
+
+**Annual is always the binding case** — the same allocation for 25% less
+money — so a plan has to be set by its annual figure. Max is the one tier not
+on Runway's number: at their 9,500 it earns almost nothing on $855/year, so
+it is set from the margin instead and lands at about **$12/month** if a
+member spends every credit.
+
+`web/lib/economics.ts` derives this in both directions — `planMargin()` for
+what a plan earns, `creditsForMargin()` for the allocation that hits a
+target — from the live cost constants, so the numbers move if overhead or
+processing move in SSM. The admin page shows the current figures and the
+status page fails red if any plan goes underwater.
 
 ### Granted credits expire; bought credits do not
 

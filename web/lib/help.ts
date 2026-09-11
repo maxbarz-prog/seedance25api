@@ -147,7 +147,7 @@ export const HELP: HelpCategory[] = [
             "The difference from everywhere else is the pricing. Generation is billed at what it costs us: the provider's charge for that specific render, plus the real cost of storing and delivering the file, plus a stated overhead and payment fees. There is no markup on usage. The plan fee is our revenue, and the price page shows the formula in full."
           ),
           p(
-            `That is why a plan's credits go further here. The credit allocations deliberately match Runway's, so the two can be compared directly: the same ${PLANS.standard.credits.toLocaleString()} credits on ${PLANS.standard.label} buy several times more video.`
+            `That is why a plan's credits go further here. Most of the allocations are deliberately the same numbers Runway uses, so the two can be compared directly: the same ${PLANS.standard.credits.toLocaleString()} credits on ${PLANS.standard.label} buy several times more video here than they do there.`
           ),
         ],
       },
