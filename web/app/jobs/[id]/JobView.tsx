@@ -9,8 +9,7 @@ import {
   EXTEND_MIN_S,
   MODELS,
   ModelId,
-  OUTPUT_MODES,
-  OutputMode,
+  modeInfo,
 } from "@/lib/config";
 import CreditsDialog, { CreditsBlock } from "@/components/CreditsDialog";
 import { BALANCE_EVENT } from "@/components/Header";
@@ -140,7 +139,7 @@ export default function JobView({ id }: { id: string }) {
 
   const phase = phaseOf(job);
   const stepIdx =
-    job.mode === "native-1080p" && phase === "generating"
+    modeInfo(job.mode).upscale === "none" && phase === "generating"
       ? 1
       : STEPS.indexOf(phase as (typeof STEPS)[number]);
 
@@ -155,9 +154,9 @@ export default function JobView({ id }: { id: string }) {
           ? MODELS[job.model as ModelId].label
           : job.model}{" "}
         · {job.duration_s}s · {job.aspect} ·{" "}
-        {job.mode in OUTPUT_MODES
-          ? `${OUTPUT_MODES[job.mode as OutputMode].label} (${OUTPUT_MODES[job.mode as OutputMode].resolution})`
-          : job.mode}{" "}
+        {`${modeInfo(job.mode).label} (${
+          modeInfo(job.mode).resolution
+        })`}{" "}
         · ${(job.quote_credits * 0.01).toFixed(2)}
       </p>
 
@@ -261,7 +260,9 @@ export default function JobView({ id }: { id: string }) {
         <div className="mt-8 rounded-2xl border border-line bg-surface p-8">
           <ol className="space-y-4">
             {STEPS.slice(0, 3).map((s, i) => {
-              if (job.mode === "native-1080p" && s === "upscaling") return null;
+              // Nothing to show for a step this route never takes.
+              if (modeInfo(job.mode).upscale === "none" && s === "upscaling")
+                return null;
               const state = i < stepIdx ? "done" : i === stepIdx ? "now" : "todo";
               return (
                 <li key={s} className="flex items-center gap-3 text-sm">

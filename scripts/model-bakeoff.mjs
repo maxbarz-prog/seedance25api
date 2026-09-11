@@ -141,7 +141,7 @@ function ourPriceUsd(m, durationS) {
   return Math.ceil(usd / CREDIT) * CREDIT;
 }
 
-const summary = { startedAt: new Date().toISOString(), instructions: INSTRUCTIONS, mode: NATIVE ? "native-1080p" : "upscaled-1080p", prompt: PROMPT, seed: SEED, durationS: DURATION_S, models: [], totals: {} };
+const summary = { startedAt: new Date().toISOString(), instructions: INSTRUCTIONS, mode: NATIVE ? "1080p" : "480p-1080p", prompt: PROMPT, seed: SEED, durationS: DURATION_S, models: [], totals: {} };
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

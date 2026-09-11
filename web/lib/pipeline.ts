@@ -11,7 +11,7 @@ import {
   storeVideoFromUrl,
 } from "./storage";
 import { sendEmail } from "./email";
-import { EXTEND_CONTEXT_S, SITE_DOMAIN, SITE_NAME } from "./config";
+import { EXTEND_CONTEXT_S, modeInfo, SITE_DOMAIN, SITE_NAME } from "./config";
 import { concat, durationOf, trimTail } from "./video";
 import { checkMargin, currentHalt } from "./money";
 
@@ -131,7 +131,9 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
           durationS: job.duration_s,
           aspect: job.aspect,
           audio: !!job.audio,
-          resolution: job.mode === "native-1080p" ? "1080p" : "480p",
+          // The render quality the member chose, which is not necessarily
+          // the resolution they get: an upscaler may follow.
+          resolution: modeInfo(job.mode).quality,
           inputs,
           sourceVideoUrl,
           seed: job.seed ?? undefined,
@@ -186,7 +188,7 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
             console.error(`margin check failed for job ${id}:`, e)
           );
         }
-        if (job.mode === "native-1080p") {
+        if (modeInfo(job.mode).upscale === "none") {
           if (!(await claimJob(id, "generating", "ready"))) return jobById(id);
           await finalize(job, result.videoUrl!);
         } else {
@@ -195,7 +197,7 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
           try {
             upTask = await upscaler().submitUpscale(
               result.videoUrl!,
-              job.upscale_factor === 4 ? 4 : 2
+              modeInfo(job.mode).upscale === "4k" ? 4 : 2
             );
           } catch (err) {
             // Same deferral as generation, but back to "generating": the

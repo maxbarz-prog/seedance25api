@@ -1,4 +1,15 @@
-import { CREDIT_USD, MODELS, ModelId, OUTPUT_MODES, OutputMode, RateTable, tokensFor } from "./config";
+import {
+  CREDIT_USD,
+  MODELS,
+  ModelId,
+  OUTPUT_MODES,
+  OutputMode,
+  QUALITIES,
+  Quality,
+  RateTable,
+  resolveMode,
+  tokensFor,
+} from "./config";
 
 // The pricing model. Every number here is a COST INPUT: provider rates per
 // model, a delivery allocation for storage/egress, an operations overhead
@@ -73,14 +84,16 @@ function genRates(model: ModelId, opts: RateOptions = {}): GenRates | null {
 }
 
 // Per-second cost, for the pricing page and anything that wants a headline
-// figure. Derived from the model's own frame size, so it differs per model.
+// figure. Derived from the model's own frame size at that quality, so it
+// differs per model and is not a simple multiple between qualities.
 export function perSecondUsd(
   model: ModelId,
-  tier: "sd" | "hd",
+  quality: Quality,
   opts: RateOptions = {}
 ): number | null {
   const g = genRates(model, opts);
-  const tokens = tokensFor(model, tier, 1);
+  const tokens = tokensFor(model, quality, 1);
+  const tier = QUALITIES[quality].rateTier;
   const rate = tier === "sd" ? g?.sd : g?.hd;
   if (!g || tokens === null || rate == null) return null;
   return (rate * tokens) / 1e6;
@@ -150,28 +163,36 @@ export function quoteWith(c: PricingConstants, input: QuoteInput): Quote {
   const ctx = input.contextS ?? 0;
   const gen = genRates(input.model, { audio: input.audio, now: input.now });
   if (!gen) throw new Error(`no confirmed provider rate for ${input.model}`);
-  const out = OUTPUT_MODES[input.mode];
-  // Native renders the deliverable itself; everything else renders at 480p
-  // and buys resolution at the upscaler, which is much the cheaper pixel.
-  const tier = out.native ? "hd" : "sd";
+  const resolved = resolveMode(input.mode);
+  if (!resolved) throw new Error(`unknown output mode ${input.mode}`);
+  const out = OUTPUT_MODES[resolved];
+  // What the model is asked to render decides both the frame size and which
+  // band of the rate table applies. 720p sits in the same price band as 480p
+  // but on twice the pixels, so its cost comes out of the token count, not
+  // out of a different rate.
+  const tier = QUALITIES[out.quality].rateTier;
   // The provider bills the reference clip's seconds as input, so an extension
   // is one render covering both.
-  const tokens = tokensFor(input.model, tier, d + ctx);
+  const tokens = tokensFor(input.model, out.quality, d + ctx);
   const rate = ctx > 0
-    ? out.native ? gen.hdWithVideo : gen.sdWithVideo
-    : out.native ? gen.hd : gen.sd;
+    ? tier === "hd" ? gen.hdWithVideo : gen.sdWithVideo
+    : tier === "hd" ? gen.hd : gen.sd;
   if (tokens === null || rate == null) {
-    throw new Error(`${input.model} cannot render ${out.label} natively`);
+    throw new Error(`${input.model} cannot render at ${out.quality}`);
   }
   let providerUsd = (rate * tokens) / 1e6;
-  if (!out.native) {
+  if (out.upscale !== "none") {
     // The upscaler only ever sees the new output seconds, and its rate is
     // per source second regardless of the target.
-    providerUsd += (out.upscaleFactor === 4 ? c.upscale4xPerSec : c.upscale2xPerSec) * d;
+    providerUsd += (out.upscale === "4k" ? c.upscale4xPerSec : c.upscale2xPerSec) * d;
   }
   const usd = ((providerUsd + c.deliveryPerVideo) * (1 + c.overheadPct)) / (1 - c.processingPct);
   const credits = Math.ceil(usd / CREDIT_USD);
-  return { credits, usd: credits * CREDIT_USD, perSecUsd: (credits * CREDIT_USD) / d };
+  // Credits are whole cents, so derive the dollar figure by dividing rather
+  // than multiplying: 255 * 0.01 is 2.5500000000000003 in binary floating
+  // point, and that lands in API responses.
+  const charged = credits / 100;
+  return { credits, usd: charged, perSecUsd: charged / d };
 }
 
 export function quote(input: QuoteInput): Quote {

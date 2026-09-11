@@ -67,7 +67,7 @@ export class SqliteStore implements DataStore {
         duration_s INTEGER NOT NULL,
         aspect TEXT NOT NULL,
         audio INTEGER NOT NULL DEFAULT 0,
-        mode TEXT NOT NULL DEFAULT 'upscaled-1080p',
+        mode TEXT NOT NULL DEFAULT '480p-4k',
         upscale_factor INTEGER NOT NULL DEFAULT 2,
         status TEXT NOT NULL DEFAULT 'queued',
         quote_credits INTEGER NOT NULL,

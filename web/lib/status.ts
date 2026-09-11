@@ -4,7 +4,7 @@ import { ffmpegAvailable } from "./video";
 import { clerkEnabled } from "./auth";
 import { stripeEnabled } from "./billing";
 import { currentHalt } from "./money";
-import { ModelId, tokensFor } from "./config";
+import { ModelId, Quality, tokensFor } from "./config";
 
 // System status for the admin page.
 //
@@ -68,17 +68,20 @@ let cache: { at: number; value: Status } | null = null;
 // between 0% and +1% of what is really billed. Under is a loss on every
 // order; more than a percent over is money taken for nothing. A model whose
 // frame size changes upstream trips this before a member is charged wrongly.
+// Real billed token counts from the 2026-09-09/10 bake-off, by render
+// quality. A quality with no fixture here has never been measured, which is
+// why it is not in VERIFIED_QUALITIES and not offered.
 const TOKEN_FIXTURES: {
   model: ModelId;
-  tier: "sd" | "hd";
+  quality: Quality;
   seconds: number;
   billed: number;
 }[] = [
-  { model: "seedance-2.5", tier: "sd", seconds: 5, billed: 48437 },
-  { model: "seedance-2.5", tier: "hd", seconds: 4, billed: 196425 },
-  { model: "seedance-2.0", tier: "sd", seconds: 5, billed: 50638 },
-  { model: "seedance-2.0-fast", tier: "sd", seconds: 5, billed: 50638 },
-  { model: "seedance-2.0-mini", tier: "sd", seconds: 5, billed: 50638 },
+  { model: "seedance-2.5", quality: "480p", seconds: 5, billed: 48437 },
+  { model: "seedance-2.5", quality: "1080p", seconds: 4, billed: 196425 },
+  { model: "seedance-2.0", quality: "480p", seconds: 5, billed: 50638 },
+  { model: "seedance-2.0-fast", quality: "480p", seconds: 5, billed: 50638 },
+  { model: "seedance-2.0-mini", quality: "480p", seconds: 5, billed: 50638 },
 ];
 // Never below the billed count; at most a percent above it.
 const TOKEN_MIN = 0;
@@ -184,15 +187,15 @@ async function internalChecks(): Promise<Check[]> {
   // expected, shows up here before it shows up on an invoice.
   const bad: string[] = [];
   for (const f of TOKEN_FIXTURES) {
-    const est = tokensFor(f.model, f.tier, f.seconds);
+    const est = tokensFor(f.model, f.quality, f.seconds);
     if (est === null) {
-      bad.push(`${f.model} ${f.tier}: not priced`);
+      bad.push(`${f.model} ${f.quality}: not priced`);
       continue;
     }
     const drift = (est - f.billed) / f.billed;
     if (drift < TOKEN_MIN || drift > TOKEN_MAX) {
       bad.push(
-        `${f.model} ${f.tier} ${f.seconds}s: estimate ${Math.round(est)} vs ${f.billed} billed (${(drift * 100).toFixed(2)}%)`
+        `${f.model} ${f.quality} ${f.seconds}s: estimate ${Math.round(est)} vs ${f.billed} billed (${(drift * 100).toFixed(2)}%)`
       );
     }
   }

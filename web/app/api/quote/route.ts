@@ -8,10 +8,10 @@ import {
   MODEL_IDS,
   MODELS,
   ModelId,
-  NATIVE_1080P_MODEL_IDS,
   OUTPUT_MODES,
   OUTPUT_MODE_IDS,
-  OutputMode,
+  resolveMode,
+  supportsQuality,
 } from "@/lib/config";
 
 export async function GET(req: NextRequest) {
@@ -24,16 +24,19 @@ export async function GET(req: NextRequest) {
   }
   const model = modelParam as ModelId;
   const durationS = Number(p.get("duration") || 5);
-  const modeParam = p.get("mode") ?? DEFAULT_MODE;
-  if (!(OUTPUT_MODE_IDS as string[]).includes(modeParam)) {
+  const modeParam = p.get("mode") || DEFAULT_MODE;
+  // resolveMode accepts the three pre-split ids so an old job's re-quote (the
+  // extend panel) keeps working.
+  const mode = resolveMode(modeParam);
+  if (!mode || !(OUTPUT_MODE_IDS as string[]).includes(mode)) {
     return NextResponse.json({ error: "Unknown output mode." }, { status: 400 });
   }
-  const mode = modeParam as OutputMode;
   // 2.0 Fast and 2.0 Mini have no 1080p output at the provider at all; they
   // reach 1080p only through the upscaler.
-  if (OUTPUT_MODES[mode].native && !(NATIVE_1080P_MODEL_IDS as string[]).includes(model)) {
+  const quality = OUTPUT_MODES[mode].quality;
+  if (!supportsQuality(model, quality)) {
     return NextResponse.json(
-      { error: `${MODELS[model].label} does not render 1080p natively.` },
+      { error: `${MODELS[model].label} does not render at ${quality}.` },
       { status: 400 }
     );
   }

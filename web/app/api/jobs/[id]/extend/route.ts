@@ -14,8 +14,9 @@ import {
   MAX_PROMPT_CHARS,
   MODEL_IDS,
   ModelId,
+  OUTPUT_MODES,
   OUTPUT_MODE_IDS,
-  OutputMode,
+  resolveMode,
 } from "@/lib/config";
 import { canBuyCredits, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
@@ -71,13 +72,16 @@ export async function POST(
   const model = (
     (MODEL_IDS as string[]).includes(source.model) ? source.model : DEFAULT_MODEL
   ) as ModelId;
+  const resolved = resolveMode(source.mode);
+  const sourceMode =
+    resolved && (OUTPUT_MODE_IDS as string[]).includes(resolved) ? resolved : DEFAULT_MODE;
   const q = quote({
     model,
     durationS: b.durationS,
     // An extension keeps the source's output path, so the two halves match.
-    mode: (OUTPUT_MODE_IDS as string[]).includes(source.mode)
-      ? (source.mode as OutputMode)
-      : DEFAULT_MODE,
+    // resolveMode covers a source written before quality and upscale became
+    // separate choices; a route we no longer offer falls back.
+    mode: sourceMode,
     audio: !!source.audio,
     // The pipeline sends only the last EXTEND_CONTEXT_S of the source.
     contextS: Math.min(source.duration_s, EXTEND_CONTEXT_S),
@@ -115,8 +119,8 @@ export async function POST(
     duration_s: b.durationS,
     aspect: source.aspect,
     audio: source.audio,
-    mode: source.mode,
-    upscale_factor: source.upscale_factor,
+    mode: sourceMode,
+    upscale_factor: OUTPUT_MODES[sourceMode].upscaleFactor,
     status: "queued",
     quote_credits: q.credits,
     provider_task_id: null,

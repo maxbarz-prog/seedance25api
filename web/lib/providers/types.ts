@@ -9,7 +9,9 @@ export interface GenerationRequest {
   durationS: number;
   aspect: string;
   audio: boolean;
-  resolution: "480p" | "1080p";
+  // The render quality asked of the model. Not necessarily what the member
+  // receives — an upscaler may follow.
+  resolution: "480p" | "720p" | "1080p";
   // Fetchable (~1h) input URLs: anchoring/reference images, reference
   // video(s) for motion/style, reference audio for sync.
   inputs?: {

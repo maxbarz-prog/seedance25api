@@ -5,8 +5,8 @@ import {
   MODEL_IDS,
   MODELS,
   ModelId,
-  NATIVE_1080P_MODEL_IDS,
   OUTPUT_MODES,
+  supportsQuality,
   OUTPUT_MODE_IDS,
   OutputMode,
   DEFAULT_MODE,
@@ -25,12 +25,7 @@ export default function PricingPage() {
   const durations = [5, 10, 15, 30];
   const priceFor = (model: ModelId, mode: OutputMode, d: number) => {
     if (d > MODELS[model].maxDurationS) return "—";
-    if (
-      OUTPUT_MODES[mode].native &&
-      !(NATIVE_1080P_MODEL_IDS as readonly string[]).includes(model)
-    ) {
-      return "—";
-    }
+    if (!supportsQuality(model, OUTPUT_MODES[mode].quality)) return "—";
     return fmtUsd(quote({ model, durationS: d, mode }).usd);
   };
   // Seedance 1.5 Pro is the one model priced by soundtrack rather than
@@ -167,7 +162,9 @@ export default function PricingPage() {
                         )}
                         <div className="text-xs opacity-70">
                           rendered at {OUTPUT_MODES[mode].renderedAt}
-                          {OUTPUT_MODES[mode].native ? ", no upscaler" : ", then upscaled"}
+                          {OUTPUT_MODES[mode].upscale === "none"
+                            ? ", no upscaler"
+                            : `, upscaled to ${OUTPUT_MODES[mode].resolution}`}
                         </div>
                       </td>
                       {durations.map((d) => (
@@ -189,7 +186,8 @@ export default function PricingPage() {
           Live rates — these numbers move when our costs move, in both
           directions. A dash means the model does not offer that: only some
           models render 1080p themselves, and none is priced past its maximum
-          length. Prices are for silent video.
+          length. Prices are for silent video. Quality is what the model
+          renders; upscale is what happens to it afterwards.
           {" "}
           <span className="text-ink">
             4K is the default because it is the cheapest good option, not the

@@ -225,7 +225,7 @@ async function main() {
     }, { timeoutMs: 120_000, everyMs: 3_000 });
     step("topup", { returnedTo: back2, balanceBefore: before, balanceAfter: bal });
 
-    // 5. Generate (480p -> upscaled 1080p, the default mode).
+    // 5. Generate (480p rendered, upscaled to 1080p — the cheapest route).
     // Opt-in: every generation and extension is a real, billed provider call,
     // so a plain run stops here having proven auth, billing and the webhooks.
     if ((process.env.E2E_GENERATE || "no") !== "yes") {
@@ -236,7 +236,7 @@ async function main() {
     const gen = await api(ctx, "POST", "/api/jobs", {
       prompt: "A red vintage bicycle leaning against a sunlit stone wall, leaves drifting past, gentle camera push-in",
       model: "seedance-2.5", durationS: DURATION_S, aspect: "16:9", audio: false,
-      mode: "upscaled-1080p", upscaleFactor: 2, seed: 12345,
+      mode: "480p-1080p", upscaleFactor: 2, seed: 12345,
     });
     if (gen.status !== 201) throw new Error(`generate: ${gen.status} ${JSON.stringify(gen.json)}`);
     const job = await pollJob(ctx, gen.json.id, "generate");

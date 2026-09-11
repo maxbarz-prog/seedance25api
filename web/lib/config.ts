@@ -118,9 +118,10 @@ export function effectiveMonthlyUsd(plan: PlanId, interval: BillingInterval): nu
 // so cost per second is arithmetic once the rate is known. Every rate below
 // reproduces the provider's own worked price examples exactly.
 //
-// `sd` covers 480p and 720p output, `hd` is 1080p. A null `hd` means the
-// model cannot render 1080p at all (2.0 Fast and 2.0 Mini) and the native
-// path is hidden for it. `withVideo` is the lower rate charged when a
+// `sd` covers 480p and 720p output, `hd` is 1080p — the rate tier is a
+// PRICE band, not a frame size, and 720p is billed at the 480p rate on far
+// more pixels (see QUALITIES). A null `hd` means the model cannot render
+// 1080p at all (2.0 Fast and 2.0 Mini) and that quality is hidden for it. `withVideo` is the lower rate charged when a
 // reference video rides along, i.e. an extension — its seconds are billed
 // as input.
 //
@@ -171,7 +172,7 @@ export const MODELS = {
     maxDurationS: 30,
     accepts: ["text", "image"],
     perMillion: { sd: 10.7, hd: 11.7, sdWithVideo: 6.4, hdWithVideo: 7.0 },
-    frameSize: { sd: [854, 480], hd: [1920, 1080] },
+    frameSize: { "480p": [854, 480], "720p": [1280, 720], "1080p": [1920, 1080] },
     // 28% off 1080p only, to 2026-09-17 14:00 UTC+8.
     discount: { pct: 0.28, until: "2026-09-17T06:00:00Z", applies: ["hd"] },
   },
@@ -182,7 +183,7 @@ export const MODELS = {
     maxDurationS: 15,
     accepts: ["text", "image"],
     perMillion: { sd: 7.0, hd: 7.7, sdWithVideo: 4.3, hdWithVideo: 4.7 },
-    frameSize: { sd: [864, 496], hd: [1920, 1080] },
+    frameSize: { "480p": [864, 496], "720p": [1280, 720], "1080p": [1920, 1080] },
   },
   "seedance-2.0-fast": {
     id: "seedance-2.0-fast",
@@ -192,7 +193,7 @@ export const MODELS = {
     accepts: ["text", "image"],
     // 480p/720p only — the provider does not offer 1080p or 4K here.
     perMillion: { sd: 5.6, hd: null, sdWithVideo: 3.3, hdWithVideo: null },
-    frameSize: { sd: [864, 496], hd: null },
+    frameSize: { "480p": [864, 496], "720p": [1280, 720], "1080p": null },
     // 25% off, to 2026-10-07 14:00 UTC+8.
     discount: { pct: 0.25, until: "2026-10-07T06:00:00Z", applies: ["sd"] },
   },
@@ -203,7 +204,7 @@ export const MODELS = {
     maxDurationS: 15,
     accepts: ["text", "image"],
     perMillion: { sd: 3.5, hd: null, sdWithVideo: 2.1, hdWithVideo: null },
-    frameSize: { sd: [864, 496], hd: null },
+    frameSize: { "480p": [864, 496], "720p": [1280, 720], "1080p": null },
     // 60% off, to 2026-10-07 14:00 UTC+8.
     discount: { pct: 0.6, until: "2026-10-07T06:00:00Z", applies: ["sd"] },
   },
@@ -215,7 +216,7 @@ export const MODELS = {
     accepts: ["text", "image"],
     // Priced by soundtrack, not resolution.
     perMillion: { sd: 1.2, hd: 1.2, sdWithVideo: 1.2, hdWithVideo: 1.2 },
-    frameSize: { sd: [864, 480], hd: [1920, 1088] },
+    frameSize: { "480p": [864, 480], "720p": [1280, 720], "1080p": [1920, 1088] },
     audio: { sd: 2.4, hd: 2.4, sdWithVideo: 2.4, hdWithVideo: 2.4 },
     activated: false,
   },
@@ -226,7 +227,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text", "image"],
     perMillion: { sd: 2.5, hd: 2.5, sdWithVideo: 2.5, hdWithVideo: 2.5 },
-    frameSize: { sd: [864, 480], hd: [1920, 1088] },
+    frameSize: { "480p": [864, 480], "720p": [1280, 720], "1080p": [1920, 1088] },
     activated: false,
   },
   "seedance-1.0-pro-fast": {
@@ -236,7 +237,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text", "image"],
     perMillion: { sd: 1.0, hd: 1.0, sdWithVideo: 1.0, hdWithVideo: 1.0 },
-    frameSize: { sd: [864, 480], hd: [1920, 1088] },
+    frameSize: { "480p": [864, 480], "720p": [1280, 720], "1080p": [1920, 1088] },
     activated: false,
   },
   // The lite pair is split by input type — the model id says so — so each
@@ -249,7 +250,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["text"],
     perMillion: null,
-    frameSize: { sd: [864, 480], hd: [1920, 1088] },
+    frameSize: { "480p": [864, 480], "720p": [1280, 720], "1080p": [1920, 1088] },
     activated: false,
   },
   "seedance-1.0-lite-i2v": {
@@ -259,7 +260,7 @@ export const MODELS = {
     maxDurationS: 10,
     accepts: ["image"],
     perMillion: null,
-    frameSize: { sd: [864, 480], hd: [1920, 1088] },
+    frameSize: { "480p": [864, 480], "720p": [1280, 720], "1080p": [1920, 1088] },
     activated: false,
   },
 } as const;
@@ -312,60 +313,199 @@ export function framesFor(seconds: number): number {
   return Math.round(seconds * FPS) + EXTRA_FRAMES;
 }
 
-// Estimated billed tokens for one render.
-export function tokensFor(model: ModelId, tier: "sd" | "hd", seconds: number): number | null {
-  const size = MODELS[model].frameSize[tier];
+// Estimated billed tokens for one render, at the quality the model was asked
+// for. The frame size is per model AND per quality, because the provider does
+// not emit one canonical size for a named resolution.
+export function tokensFor(model: ModelId, quality: Quality, seconds: number): number | null {
+  const size = MODELS[model].frameSize[quality];
   if (!size) return null;
   return (framesFor(seconds) * size[0] * size[1] * TOKEN_SAFETY) / 1024;
 }
 
-// How a finished video is produced. Three routes to a deliverable, and the
-// member picks; nothing here is hidden from them.
+// How a finished video is produced: a RENDER QUALITY the model is asked for,
+// and an UPSCALE target applied to it. Two independent choices, which is how
+// the member sees them.
 //
-// The default is 480p upscaled to 4K. It is not a compromise: measured
-// 2026-09-10, the upscaler turns a 480p render into a true 3840x2160 for
-// $0.0288 per source second, while a native 1080p render of the same clip
-// costs 4-5x as much in provider tokens and comes back at a lower
-// resolution. The generation dominates the bill either way, so buying more
+// The default is 480p rendered, upscaled to 4K. It is not a compromise:
+// measured 2026-09-10, the upscaler turns a 480p render into a true
+// 3840x2160 for $0.0288 per source second, while a native 1080p render of
+// the same clip costs 4-5x as much in provider tokens and comes back at a
+// lower resolution. The render dominates the bill either way, so buying
 // pixels at the upscaler is the cheapest quality available.
-//
-// `upscaleFactor` is what the upscaler is asked for; `native` means the model
-// renders the final resolution itself and the upscaler is not used at all.
-export const OUTPUT_MODES = {
-  "upscaled-4k": {
-    id: "upscaled-4k",
-    label: "4K",
-    resolution: "3840x2160",
-    renderedAt: "480p",
-    upscaleFactor: 4 as const,
-    native: false,
-    blurb:
-      "Rendered at 480p, then AI-upscaled to 4K. Sharpest result and, because the render is cheap, far less than a native 1080p pass.",
+
+export const QUALITIES = {
+  "480p": {
+    id: "480p",
+    label: "480p",
+    // Which band of the provider's rate table this quality is billed in.
+    // NOT the frame size: 720p is billed at the same rate per token as 480p,
+    // on 2.2x as many pixels, so it costs about 2.2x as much to render.
+    rateTier: "sd" as const,
+    note: "Cheapest render. With an upscaler on top this is the best value on the site.",
   },
-  "upscaled-1080p": {
-    id: "upscaled-1080p",
+  "720p": {
+    id: "720p",
+    label: "720p",
+    rateTier: "sd" as const,
+    note: "More real detail before upscaling, at a little over twice the render cost of 480p.",
+  },
+  "1080p": {
+    id: "1080p",
     label: "1080p",
-    resolution: "1920x1080",
-    renderedAt: "480p",
-    upscaleFactor: 2 as const,
-    native: false,
-    blurb: "Rendered at 480p, then AI-upscaled to 1080p. The cheapest way to a full-HD clip.",
-  },
-  "native-1080p": {
-    id: "native-1080p",
-    label: "1080p native",
-    resolution: "1920x1080",
-    renderedAt: "1080p",
-    upscaleFactor: 2 as const,
-    native: true,
-    blurb:
-      "Rendered at 1080p by the model itself, with no upscaler involved. No interpolated frames, but several times the price. Not offered on every model.",
+    rateTier: "hd" as const,
+    note: "The model renders full HD itself. Several times the price, and not offered on every model.",
   },
 } as const;
 
-export type OutputMode = keyof typeof OUTPUT_MODES;
-export const OUTPUT_MODE_IDS = Object.keys(OUTPUT_MODES) as OutputMode[];
-export const DEFAULT_MODE: OutputMode = "upscaled-4k";
+export type Quality = keyof typeof QUALITIES;
+export const QUALITY_IDS = Object.keys(QUALITIES) as Quality[];
+export const DEFAULT_QUALITY: Quality = "480p";
+
+// Quality tiers whose frame size has been MEASURED against a real billed
+// generation, per model. An unverified tier is not offered: a frame size
+// guessed low sells below cost and one guessed high overcharges, and
+// estimates are held to 0..+1% of the invoice.
+//
+// 720p is wired end to end but withheld until one short clip per model has
+// been generated and its billed token count read back — see
+// .github/workflows/model-frame-size.yml. Add "720p" here once those frame
+// sizes come from measurement rather than from the obvious guess.
+export const VERIFIED_QUALITIES: readonly Quality[] = ["480p", "1080p"];
+
+export const UPSCALES = {
+  "4k": {
+    id: "4k",
+    label: "4K",
+    resolution: "3840x2160",
+    // What the upscaler is asked for; also picks which of its two published
+    // rates applies.
+    target: "4k" as const,
+    factor: 4 as const,
+  },
+  "1080p": {
+    id: "1080p",
+    label: "1080p",
+    resolution: "1920x1080",
+    target: "1080p" as const,
+    factor: 2 as const,
+  },
+  none: {
+    id: "none",
+    label: "No upscale",
+    resolution: null,
+    target: null,
+    factor: 0 as const,
+  },
+} as const;
+
+export type Upscale = keyof typeof UPSCALES;
+export const UPSCALE_IDS = Object.keys(UPSCALES) as Upscale[];
+export const DEFAULT_UPSCALE: Upscale = "4k";
+
+// The combinations that mean something. Upscaling 1080p to 1080p is a no-op,
+// so it is not a route.
+const MODE_PAIRS: [Quality, Upscale][] = [
+  ["480p", "4k"],
+  ["480p", "1080p"],
+  ["480p", "none"],
+  ["720p", "4k"],
+  ["720p", "1080p"],
+  ["720p", "none"],
+  ["1080p", "4k"],
+  ["1080p", "none"],
+];
+
+export interface OutputModeInfo {
+  id: string;
+  quality: Quality;
+  upscale: Upscale;
+  // What the member ends up with.
+  label: string;
+  resolution: string;
+  renderedAt: string;
+  // No upscaler involved: the model renders the deliverable itself.
+  native: boolean;
+  upscaleFactor: 0 | 2 | 4;
+  blurb: string;
+}
+
+function modeId(quality: Quality, upscale: Upscale): string {
+  return upscale === "none" ? quality : `${quality}-${upscale}`;
+}
+
+function describe(quality: Quality, upscale: Upscale): OutputModeInfo {
+  const u = UPSCALES[upscale];
+  const native = upscale === "none";
+  return {
+    id: modeId(quality, upscale),
+    quality,
+    upscale,
+    label: native ? `${QUALITIES[quality].label} as rendered` : `${quality} → ${u.label}`,
+    resolution: u.resolution ?? QUALITIES[quality].label,
+    renderedAt: QUALITIES[quality].label,
+    native,
+    upscaleFactor: u.factor,
+    blurb: native
+      ? `Rendered at ${QUALITIES[quality].label} and delivered as-is, with no upscaler. ${QUALITIES[quality].note}`
+      : `Rendered at ${QUALITIES[quality].label}, then AI-upscaled to ${u.label} (${u.resolution}). ${QUALITIES[quality].note}`,
+  };
+}
+
+export const OUTPUT_MODES: Record<string, OutputModeInfo> = Object.fromEntries(
+  MODE_PAIRS.map(([q, u]) => [modeId(q, u), describe(q, u)])
+);
+
+export type OutputMode = string;
+// Only routes whose render quality has a measured frame size are offered.
+export const OUTPUT_MODE_IDS: OutputMode[] = MODE_PAIRS.filter(([q]) =>
+  VERIFIED_QUALITIES.includes(q)
+).map(([q, u]) => modeId(q, u));
+export const DEFAULT_MODE: OutputMode = modeId(DEFAULT_QUALITY, DEFAULT_UPSCALE);
+
+// Job rows written before quality and upscale were separate choices carry the
+// old three ids. Mapped here rather than migrated, so an old job still
+// displays and still re-quotes correctly.
+const LEGACY_MODES: Record<string, OutputMode> = {
+  "upscaled-4k": "480p-4k",
+  "upscaled-1080p": "480p-1080p",
+  "native-1080p": "1080p",
+};
+
+// Strict: a legacy id maps to its current one, a current id passes through,
+// and anything else is null. Null means "reject this request" — an API must
+// not silently price a typo as the default.
+export function resolveMode(mode: string | null | undefined): OutputMode | null {
+  if (!mode) return null;
+  if (mode in LEGACY_MODES) return LEGACY_MODES[mode];
+  return mode in OUTPUT_MODES ? mode : null;
+}
+
+// Forgiving, for reading a job that already exists: a row carrying a mode we
+// no longer recognise still has to display and still has to finish, so it
+// falls back rather than throwing halfway through a paid generation.
+export function modeInfo(mode: string | null | undefined): OutputModeInfo {
+  return OUTPUT_MODES[resolveMode(mode) ?? DEFAULT_MODE];
+}
+
+// Which routes a given model can actually take: it must be able to render the
+// quality asked for.
+export function modesForModel(model: ModelId): OutputMode[] {
+  return OUTPUT_MODE_IDS.filter((id) => supportsQuality(model, OUTPUT_MODES[id].quality));
+}
+
+export function supportsQuality(model: ModelId, quality: Quality): boolean {
+  const entry = MODELS[model];
+  if (!entry.frameSize[quality]) return false;
+  // A quality with no rate in its band cannot be costed, so it is not sold.
+  const tier = QUALITIES[quality].rateTier;
+  return entry.perMillion?.[tier] != null;
+}
+
+export function qualitiesForModel(model: ModelId): Quality[] {
+  return QUALITY_IDS.filter(
+    (q) => VERIFIED_QUALITIES.includes(q) && supportsQuality(model, q)
+  );
+}
 
 export const MIN_DURATION_S = 4;
 export const MAX_DURATION_S = 30; // absolute ceiling (Seedance 2.5)

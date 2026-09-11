@@ -9,7 +9,12 @@
 export type Membership = "free" | "standard" | "pro" | "max" | "none" | "monthly" | "annual";
 export type BillingInterval = "month" | "year";
 export type JobStatus = "queued" | "generating" | "upscaling" | "ready" | "failed";
-export type JobMode = "upscaled-4k" | "upscaled-1080p" | "native-1080p";
+// A render quality and an upscale target, as one id: "480p-4k", "720p",
+// "1080p". The three values written before those were separate choices
+// ("upscaled-4k", "upscaled-1080p", "native-1080p") still exist on old rows
+// and are mapped on read by resolveMode() in lib/config.ts — which is why
+// this is a string rather than a closed union.
+export type JobMode = string;
 
 export interface User {
   id: string;

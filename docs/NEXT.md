@@ -372,12 +372,30 @@ were never rendered.
 
 ## Tasks, in order
 
+0. **Measure the 720p frame size** (≈$2.35, needs approval). 720p is wired
+   through the registry, the pricing formula, the composer, the pipeline and
+   the catalogue endpoint, but is withheld from `VERIFIED_QUALITIES` in
+   `web/lib/config.ts` because nobody has measured what frame the models
+   actually emit at that resolution. The estimate would be a guess, and a
+   guess breaks the 0..+1% rule in both directions. Run
+   `.github/workflows/model-frame-size.yml` with `resolution=720p`, paste the
+   `frameSize` lines it prints into `config.ts`, add the matching fixtures to
+   `TOKEN_FIXTURES` in `web/lib/status.ts`, then add `"720p"` to
+   `VERIFIED_QUALITIES`.
+
+   Worth knowing before spending: 720p is poor value. A 5s Seedance 2.5 clip
+   costs $0.77 at 480p→4K and $1.52 at 720p→4K, for the same delivered
+   3840×2160. The only thing the extra buys is more real detail going into
+   the upscaler.
+
 1. **Owner's manual generation test on dev** (deliberately not automated —
    the owner wants to validate output quality personally). Sign in at
    https://dev.remerged.click, join, top up, then generate a short clip in
    each mode, extend one, and download. What to watch:
-   - 480p → upscaled 1080p is the default path; native 1080p is the premium
-     toggle and costs about 5× more per second.
+   - The default is 480p rendered, upscaled to 4K. Quality and upscale are
+     now separate controls: 480p/1080p × 4K/1080p/none. Native 1080p is the
+     premium render and costs about 4× more per second for a quarter of the
+     delivered pixels.
    - An extension returns **only the new seconds**, not source plus
      continuation (see ModelArk fact 3). Decide whether to concatenate.
    - After an extension, check the Lambda log via `logs.yml` for

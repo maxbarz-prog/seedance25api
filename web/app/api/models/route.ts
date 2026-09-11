@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { MODEL_IDS, MODELS, NATIVE_1080P_MODEL_IDS } from "@/lib/config";
+import { MODEL_IDS, MODELS, NATIVE_1080P_MODEL_IDS, modesForModel, qualitiesForModel } from "@/lib/config";
 
 // The models actually on sale, with what each one can do. Public and cheap:
 // it reads the registry, nothing else.
@@ -16,6 +16,10 @@ export async function GET() {
       maxDurationS: MODELS[id].maxDurationS,
       accepts: MODELS[id].accepts,
       native1080p: (NATIVE_1080P_MODEL_IDS as readonly string[]).includes(id),
+      // Render qualities this model offers, and the full routes built on
+      // them, so a client never has to guess which combinations exist.
+      qualities: qualitiesForModel(id),
+      modes: modesForModel(id),
       // Only some models price by soundtrack; the quote endpoint takes an
       // audio flag for those.
       audioPriced: "audio" in MODELS[id],

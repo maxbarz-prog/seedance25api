@@ -1,4 +1,4 @@
-import { CREDIT_USD, MODELS, ModelId } from "./config";
+import { CREDIT_USD, MODELS, ModelId, modeInfo, QUALITIES } from "./config";
 import { getSystem, setSystem, Job } from "./db";
 import { rates } from "./pricing";
 
@@ -100,6 +100,9 @@ export function providerCostUsd(opts: {
   tokens: number;
   audio?: boolean;
   withVideo?: boolean;
+  // Which band of the rate table the render was billed in — "hd" only for a
+  // native 1080p render. 720p bills in the "sd" band on more pixels, and the
+  // token count already carries that.
   native: boolean;
   // Seconds handed to the upscaler, if the job took that path.
   upscaleSourceS?: number;
@@ -138,15 +141,20 @@ export async function checkMargin(
   tokens: number
 ): Promise<MarginReport | null> {
   if (!Number.isFinite(tokens) || tokens <= 0) return null;
-  const native = job.mode === "native-1080p";
+  const out = modeInfo(job.mode);
+  // The rate band follows the RENDER quality, and the upscaler bill follows
+  // whether one ran. Those are two different questions now, so read both off
+  // the route rather than inferring them from one another.
+  const hdBand = QUALITIES[out.quality].rateTier === "hd";
+  const upscaled = out.upscale !== "none";
   const providerUsd = providerCostUsd({
     model: job.model,
     tokens,
     audio: !!job.audio,
     withVideo: job.kind === "extend",
-    native,
-    upscaleSourceS: native ? 0 : job.duration_s,
-    upscaleFactor: job.upscale_factor,
+    native: hdBand,
+    upscaleSourceS: upscaled ? job.duration_s : 0,
+    upscaleFactor: out.upscaleFactor,
   });
   if (providerUsd === null) return null;
   const chargedUsd = job.quote_credits * CREDIT_USD;

@@ -53,36 +53,46 @@ jobs:
           printf '%-24s %-16s %6s %10s\n' MODEL MODE DUR PRICE
           for model in $models; do
             maxd=$(printf '%s' "$catalogue" | jq -r --arg m "$model" '.models[]|select(.id==$m)|.maxDurationS')
-            native=$(printf '%s' "$catalogue" | jq -r --arg m "$model" '.models[]|select(.id==$m)|.native1080p')
             audio=$(printf '%s' "$catalogue" | jq -r --arg m "$model" '.models[]|select(.id==$m)|.audioPriced')
-            for mode in upscaled-4k upscaled-1080p native-1080p; do
+            # The routes the site says this model offers. Every one of them
+            # must quote; anything it does NOT offer must be refused. Both
+            # halves matter: a route that quotes but cannot render sells
+            # something we cannot deliver.
+            offered=$(printf '%s' "$catalogue" | jq -r --arg m "$model" '.models[]|select(.id==$m)|.modes[]')
+            all=$(printf '%s' "$catalogue" | jq -r '[.models[].modes[]]|unique|.[]')
+            for mode in $all; do
+              wanted=no
+              for o in $offered; do [ "$o" = "$mode" ] && wanted=yes; done
               for d in 5 10; do
                 [ "$d" -le "$maxd" ] || continue
                 body=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=$d&mode=$mode")
                 usd=$(printf '%s' "$body" | jq -r 'if .usd then (.usd|tostring) else "n/a " + (.error // "?") end')
                 printf '%-24s %-16s %6s %10s\n' "$model" "$mode" "${d}s" "$usd"
-                # Every model must quote on the upscaled path. On the native
-                # path, only those that render 1080p natively.
                 case "$usd" in
                   n/a*)
-                    if [ "$mode" = "upscaled-1080p" ] || [ "$native" = "true" ]; then
-                      echo "FAIL: $model $mode gave no quote"; fail=1
-                    fi ;;
+                    [ "$wanted" = "yes" ] && { echo "FAIL: $model offers $mode but gave no quote"; fail=1; } ;;
                   *)
-                    if [ "$mode" = "native-1080p" ] && [ "$native" != "true" ]; then
-                      echo "FAIL: $model quoted native 1080p it cannot render"; fail=1
-                    fi ;;
+                    [ "$wanted" = "no" ] && { echo "FAIL: $model quoted $mode it does not offer"; fail=1; } ;;
                 esac
               done
             done
             # A model priced by soundtrack must cost more with audio on.
             if [ "$audio" = "true" ]; then
-              silent=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=5&mode=upscaled-1080p&audio=0" | jq -r '.usd // empty')
-              loud=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=5&mode=upscaled-1080p&audio=1" | jq -r '.usd // empty')
+              silent=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=5&mode=480p-1080p&audio=0" | jq -r '.usd // empty')
+              loud=$(curl -sS --max-time 20 "$base/api/quote?model=$model&duration=5&mode=480p-1080p&audio=1" | jq -r '.usd // empty')
               echo "$model audio pricing: silent=$silent audio=$loud"
               awk -v a="$silent" -v b="$loud" 'BEGIN{exit !(a!="" && b!="" && b>a)}' \
                 || { echo "FAIL: $model audio not priced higher"; fail=1; }
             fi
+          done
+
+          # The legacy mode ids written on jobs before quality and upscale
+          # became separate choices must still quote, or the extend panel on
+          # an old clip breaks.
+          for legacy in upscaled-4k upscaled-1080p native-1080p; do
+            usd=$(curl -sS --max-time 20 "$base/api/quote?model=seedance-2.5&duration=5&mode=$legacy" | jq -r '.usd // empty')
+            echo "legacy mode $legacy -> ${usd:-none}"
+            [ -n "$usd" ] || { echo "FAIL: legacy mode $legacy no longer quotes"; fail=1; }
           done
 
           # A withdrawn or unpriced model must be refused cleanly, not 500,

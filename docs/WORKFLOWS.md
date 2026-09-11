@@ -32,6 +32,28 @@ Needs the word `spend` typed into `confirm`.
 Roughly $1.30 for four models at 5s upscaled; $3.95 for the two that can do
 native 1080p.
 
+### `model-frame-size.yml` — measure what a resolution really is
+Every price is derived from the frame size a model actually emits, and that
+is not predictable from the resolution name: "480p" is 854×480 on Seedance
+2.5 and 864×496 on the 2.0 family, a 4.5% difference. Guessing it low sells
+below cost; guessing it high overcharges. So a resolution stays out of
+`VERIFIED_QUALITIES` in `web/lib/config.ts` — and therefore off the site —
+until this has measured it.
+
+It renders the shortest allowed clip per model at the resolution under test,
+reads back the token count the provider billed, inverts
+`tokens = frames × w × h / 1024` to get the size they charged for, probes the
+delivered file with ffprobe, and prints the exact `frameSize` line to paste
+into `config.ts`. Needs the word `spend` typed into `confirm`.
+
+| Input | Meaning |
+|---|---|
+| `resolution` | Which to measure. `720p` is the one currently unmeasured |
+| `duration` | Seconds per clip. The frame size does not depend on it, so leave it at the minimum |
+| `models` | Limit to named model ids |
+
+About $2.35 for all four models at 720p, before promotions.
+
 ### `upscale-4k.yml` — one clip to 4K
 Takes a file from an earlier bake-off artifact and upscales it, publishing
 under its own artifact name (`4k-sample`) so looking at one thing does not

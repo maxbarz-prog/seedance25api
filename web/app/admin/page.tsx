@@ -466,7 +466,7 @@ export default function AdminPage() {
                   <tr key={`${t.model}-${t.mode}`} className="border-b border-line last:border-0">
                     <td className="py-2">{t.model}</td>
                     <td className="py-2 text-muted">
-                      {t.mode === "native-1080p" ? "1080p native" : "1080p upscaled"}
+                      {t.mode}
                     </td>
                     <td className="py-2 font-medium tabular-nums">
                       {t.medianSecPerOutputSec.toFixed(1)}x
@@ -631,7 +631,7 @@ export default function AdminPage() {
                   <td className="py-2 pr-4">{j.email}</td>
                   <td className="max-w-64 truncate py-2 pr-4">{j.prompt}</td>
                   <td className="py-2 pr-4 text-muted">
-                    {j.duration_s}s · {j.mode === "native-1080p" ? "native" : "upscaled"}
+                    {j.duration_s}s · {j.mode}
                   </td>
                   <td className="py-2 pr-4 tabular-nums">{usd(j.quote_credits)}</td>
                   <td className="py-2">

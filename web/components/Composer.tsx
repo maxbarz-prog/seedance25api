@@ -18,11 +18,17 @@ import {
   MODEL_IDS,
   MODELS,
   ModelId,
-  NATIVE_1080P_MODEL_IDS,
   OUTPUT_MODES,
-  OUTPUT_MODE_IDS,
   OutputMode,
-  DEFAULT_MODE,
+  QUALITIES,
+  QUALITY_IDS,
+  Quality,
+  qualitiesForModel,
+  UPSCALES,
+  UPSCALE_IDS,
+  Upscale,
+  DEFAULT_QUALITY,
+  DEFAULT_UPSCALE,
 } from "@/lib/config";
 import CreditsDialog, { CreditsBlock } from "./CreditsDialog";
 import { PricingConstants, quoteWith } from "@/lib/pricing";
@@ -56,7 +62,10 @@ export default function Composer({
   const [durationS, setDurationS] = useState(DEFAULT_DURATION_S);
   const [aspect, setAspect] = useState<string>("16:9");
   const [audio, setAudio] = useState(false);
-  const [mode, setMode] = useState<OutputMode>(DEFAULT_MODE);
+  // Quality and upscale are two independent choices; `mode` is just the pair
+  // of them, and the only thing the API is told.
+  const [quality, setQuality] = useState<Quality>(DEFAULT_QUALITY);
+  const [upscale, setUpscale] = useState<Upscale>(DEFAULT_UPSCALE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [block, setBlock] = useState<CreditsBlock | null>(null);
@@ -81,10 +90,16 @@ export default function Composer({
   const needs: "text" | "image" = imageCount > 0 ? "image" : "text";
   const compatible = (m: ModelId) =>
     (MODELS[m].accepts as readonly string[]).includes(needs);
-  // 2.0 Fast and 2.0 Mini have no 1080p output at the provider, so the native
-  // option is not offered for them at all.
-  const canNative = (NATIVE_1080P_MODEL_IDS as readonly string[]).includes(model);
-  const modeAvailable = (m: OutputMode) => !OUTPUT_MODES[m].native || canNative;
+  // Which render qualities this model actually offers. 2.0 Fast and 2.0 Mini
+  // have no 1080p output at the provider, so it is not shown for them.
+  const qualities = qualitiesForModel(model);
+  const qualityOk = qualities.includes(quality);
+  // Upscaling 1080p to 1080p is a no-op, so it is not a route.
+  const upscales = UPSCALE_IDS.filter((u) => !(quality === "1080p" && u === "1080p"));
+  const upscaleOk = upscales.includes(upscale);
+  const mode: OutputMode = `${qualityOk ? quality : DEFAULT_QUALITY}${
+    (upscaleOk ? upscale : DEFAULT_UPSCALE) === "none" ? "" : `-${upscaleOk ? upscale : DEFAULT_UPSCALE}`
+  }`;
   // A supplied first or last frame fixes the output ratio at the provider, so
   // offering an aspect choice alongside one would be a lie.
   const framePinned = images.some(
@@ -177,7 +192,8 @@ export default function Composer({
         if (d.durationS) setDurationS(d.durationS);
         if (d.aspect) setAspect(d.aspect);
         if (typeof d.audio === "boolean") setAudio(d.audio);
-        if (d.mode) setMode(d.mode);
+        if (d.quality && QUALITY_IDS.includes(d.quality)) setQuality(d.quality);
+        if (d.upscale && UPSCALE_IDS.includes(d.upscale)) setUpscale(d.upscale);
       }
     } catch {}
   }, []);
@@ -185,10 +201,10 @@ export default function Composer({
     try {
       localStorage.setItem(
         DRAFT_KEY,
-        JSON.stringify({ prompt, model, durationS, aspect, audio, mode })
+        JSON.stringify({ prompt, model, durationS, aspect, audio, quality, upscale })
       );
     } catch {}
-  }, [prompt, model, durationS, aspect, audio, mode]);
+  }, [prompt, model, durationS, aspect, audio, quality, upscale]);
 
   useEffect(() => {
     if (durationS > maxDuration) setDurationS(maxDuration);
@@ -202,10 +218,14 @@ export default function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needs, model]);
 
+  // Switching to a model that cannot render the chosen quality, or to 1080p
+  // with the 1080p upscale selected, falls back rather than showing a price
+  // for something that cannot be ordered.
   useEffect(() => {
-    if (!modeAvailable(mode)) setMode(DEFAULT_MODE);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canNative, mode]);
+    if (!qualityOk) setQuality(DEFAULT_QUALITY);
+    if (!upscaleOk) setUpscale(DEFAULT_UPSCALE);
+     
+  }, [qualityOk, upscaleOk]);
 
   // Priced here, not over the network. The formula is arithmetic over the
   // model registry plus a handful of constants the server handed down, so a
@@ -217,14 +237,14 @@ export default function Composer({
       return quoteWith(pricing, {
         model,
         durationS: Math.min(durationS, maxDuration),
-        mode: modeAvailable(mode) ? mode : DEFAULT_MODE,
+        mode,
         audio,
       });
     } catch {
       return null;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pricing, model, durationS, maxDuration, mode, audio, canNative]);
+     
+  }, [pricing, model, durationS, maxDuration, mode, audio]);
 
   async function generate() {
     setError(null);
@@ -446,18 +466,41 @@ export default function Composer({
           <span className="text-muted">Generate audio</span>
         </label>
 
-        <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
-          {OUTPUT_MODE_IDS.filter(modeAvailable).map((m) => (
-            <button
-              key={m}
-              onClick={() => setMode(m)}
-              className={`rounded-full px-3 py-1 ${
-                mode === m ? "bg-accent text-accent-ink" : "text-muted"
-              }`}
-            >
-              {OUTPUT_MODES[m].label}
-            </button>
-          ))}
+        {/* Two separate decisions: what the model renders, and what happens
+            to it afterwards. Conflating them into one list of routes hid the
+            fact that the render is the expensive half. */}
+        <div className="flex items-center gap-2">
+          <span className="text-muted">Quality</span>
+          <div className="flex items-center gap-1 rounded-full border border-line p-1">
+            {qualities.map((qq) => (
+              <button
+                key={qq}
+                onClick={() => setQuality(qq)}
+                className={`rounded-full px-3 py-1 ${
+                  quality === qq ? "bg-accent text-accent-ink" : "text-muted"
+                }`}
+              >
+                {QUALITIES[qq].label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <span className="text-muted">Upscale</span>
+          <div className="flex items-center gap-1 rounded-full border border-line p-1">
+            {upscales.map((uu) => (
+              <button
+                key={uu}
+                onClick={() => setUpscale(uu)}
+                className={`rounded-full px-3 py-1 ${
+                  upscale === uu ? "bg-accent text-accent-ink" : "text-muted"
+                }`}
+              >
+                {uu === "none" ? "None" : UPSCALES[uu].label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -472,8 +515,8 @@ export default function Composer({
         </span>
         <br />
         {OUTPUT_MODES[mode].blurb}
-        {!canNative && (
-          <> {MODELS[model].label} does not render 1080p itself, so that option is not shown.</>
+        {!qualities.includes("1080p") && (
+          <> {MODELS[model].label} does not render 1080p itself, so that quality is not shown.</>
         )}
       </p>
 

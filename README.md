@@ -29,17 +29,38 @@ runs on BytePlus ModelArk (the Seedance family); upscaling runs on fal.
 
 ## The pipeline
 
-Three routes to a finished video. The member picks; the default is **4K**.
+Two independent choices, which is how the member sees them:
 
-| Route | How | Why |
-|---|---|---|
-| **4K** (default) | render 480p → AI upscale ×4 → 3840×2160 | Cheapest good option. The render dominates the bill, so resolution bought at the upscaler costs a fraction of rendering it natively |
-| 1080p | render 480p → AI upscale ×2 → 1920×1080 | Cheapest route to full HD |
-| 1080p native | the model renders 1080p; no upscaler | No interpolated frames. Several times the price. Only on models that offer it |
+- **Quality** — what the model is asked to render: `480p` (default), `720p`,
+  `1080p`. This is the expensive half of the bill.
+- **Upscale** — what happens to it afterwards: `4K` (default), `1080p`,
+  `None`.
 
-A 5-second clip on Seedance 2.0: **$0.59** at 4K, **$0.46** at 1080p
-upscaled, **$2.18** at native 1080p. That ordering is not a mistake — see
-`docs/NEXT.md`.
+A job's `mode` is the pair (`480p-4k`, `1080p`, …). The three ids written
+before these were separate choices (`upscaled-4k`, `upscaled-1080p`,
+`native-1080p`) still exist on old rows and are mapped on read by
+`resolveMode()`.
+
+Seedance 2.5, 5 seconds, USD:
+
+| Quality | → 4K | → 1080p | as rendered |
+|---|---|---|---|
+| **480p** (default) | **$0.77** | $0.65 | $0.61 |
+| 720p | $1.52 | $1.39 | $1.35 |
+| 1080p | $2.55 | $2.42 | $2.38 |
+
+480p → 4K costs a third of a native 1080p render and comes back at four times
+the resolution. That ordering is not a mistake: the render dominates the
+bill, so pixels bought at the upscaler are far cheaper than pixels rendered.
+See `docs/NEXT.md`.
+
+**720p is wired but not yet offered.** The price is derived from the frame
+size the model actually emits, and that is not predictable from the
+resolution name — "480p" is 854×480 on Seedance 2.5 and 864×496 on the 2.0
+family. Until each model's 720p frame has been measured against a real
+invoice, 720p stays out of `VERIFIED_QUALITIES` in `web/lib/config.ts`.
+`.github/workflows/model-frame-size.yml` measures it (≈$2.35, one short clip
+per model); add `"720p"` to that list with the numbers it prints.
 
 ## Plans
 

@@ -19,10 +19,10 @@ import {
   DEFAULT_MODE,
   MODEL_IDS,
   MODELS,
-  NATIVE_1080P_MODEL_IDS,
   OUTPUT_MODES,
+  resolveMode,
+  supportsQuality,
   OUTPUT_MODE_IDS,
-  OutputMode,
 } from "@/lib/config";
 import { canBuyCredits, canUpscale, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
@@ -35,7 +35,10 @@ const Body = z.object({
   durationS: z.number().int().min(MIN_DURATION_S).max(MAX_DURATION_S),
   aspect: z.enum(ASPECT_RATIOS),
   audio: z.boolean().default(false),
-  mode: z.enum(OUTPUT_MODE_IDS as [string, ...string[]]).default(DEFAULT_MODE),
+  // Validated by resolveMode below rather than by an enum here, so a draft
+  // or client still holding one of the three pre-split mode ids keeps working
+  // instead of failing schema validation.
+  mode: z.string().default(DEFAULT_MODE),
   images: z
     .array(
       z.object({
@@ -143,22 +146,29 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const outputMode = b.mode as OutputMode;
-  if (OUTPUT_MODES[outputMode].native && !(NATIVE_1080P_MODEL_IDS as string[]).includes(model)) {
+  const outputMode = resolveMode(b.mode);
+  if (!outputMode || !(OUTPUT_MODE_IDS as string[]).includes(outputMode)) {
+    return NextResponse.json({ error: "Unknown output mode." }, { status: 400 });
+  }
+  const quality = OUTPUT_MODES[outputMode].quality;
+  // A model that cannot render the quality asked for: 2.0 Fast and Mini have
+  // no 1080p output at the provider at all.
+  if (!supportsQuality(model, quality)) {
     return NextResponse.json(
       {
-        error: `${MODELS[model].label} does not render 1080p natively — use the upscaled option.`,
+        error: `${MODELS[model].label} does not render at ${quality} — pick another quality or another model.`,
       },
       { status: 400 }
     );
   }
   // Upscaling is a plan allowance. Every current plan has it, so this is
   // dormant — but it is the plan that decides, not the code.
-  if (!OUTPUT_MODES[outputMode].native && !canUpscale(user)) {
+  if (OUTPUT_MODES[outputMode].upscale !== "none" && !canUpscale(user)) {
     return NextResponse.json(
       {
         error: "plan_required",
-        message: "Upscaling is not included on your plan — render natively or upgrade.",
+        message:
+          "Upscaling is not included on your plan — deliver the render as-is, or upgrade.",
       },
       { status: 402 }
     );
