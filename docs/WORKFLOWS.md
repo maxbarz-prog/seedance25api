@@ -51,8 +51,13 @@ into `config.ts`. Needs the word `spend` typed into `confirm`.
 | `resolution` | Which to measure. `720p` is the one currently unmeasured |
 | `duration` | Seconds per clip. The frame size does not depend on it, so leave it at the minimum |
 | `models` | Limit to named model ids |
+| `reuse_run_id` | Resume from an earlier probe's artifact — models it already answered for are skipped, not re-rendered |
 
-About $2.35 for all four models at 720p, before promotions.
+About $2.35 for all four models at 720p, before promotions. Measurements are
+saved after **every** model, not once at the end, and the artifact uploads
+even when the run fails: a render is money already spent, so a stall on the
+next model must not cost the answers already bought. Resume with
+`reuse_run_id` rather than starting over.
 
 ### `upscale-4k.yml` — one clip to 4K
 Takes a file from an earlier bake-off artifact and upscales it, publishing

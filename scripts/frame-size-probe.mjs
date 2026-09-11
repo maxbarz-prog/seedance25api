@@ -25,7 +25,7 @@
 // estimated cost before doing anything.
 
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -50,7 +50,27 @@ const MODELS = [
   { id: "seedance-2.0-mini", upstream: "dreamina-seedance-2-0-mini-260615", rate: 3.5 },
 ];
 const ONLY = (process.env.PROBE_MODELS || "").split(/[,\s]+/).filter(Boolean);
-const models = ONLY.length ? MODELS.filter((m) => ONLY.includes(m.id)) : MODELS;
+let models = ONLY.length ? MODELS.filter((m) => ONLY.includes(m.id)) : MODELS;
+
+// Resuming: if an earlier run left measurements in this output directory —
+// restored from its artifact, say — the models it already answered for are
+// skipped. Re-rendering a model whose frame size is already known is paying
+// twice for the same fact.
+const existing = (() => {
+  try {
+    const prior = JSON.parse(readFileSync(join(OUT_DIR, "frame-sizes.json"), "utf8"));
+    return prior.resolution === RESOLUTION
+      ? prior.rows.filter((r) => r.status === "succeeded")
+      : [];
+  } catch {
+    return [];
+  }
+})();
+if (existing.length) {
+  const done = new Set(existing.map((r) => r.id));
+  models = models.filter((m) => !done.has(m.id));
+  console.log(`Resuming: ${[...done].join(", ")} already measured at ${RESOLUTION}.`);
+}
 
 const framesFor = (sec) => Math.round(sec * 24) + 1;
 // The obvious guess, for comparison only. If the measurement matches it, say
@@ -125,7 +145,19 @@ async function main() {
     process.exit(2);
   }
 
-  const rows = [];
+  const rows = [...existing];
+  // Written after EVERY model, not once at the end. A render is money
+  // already spent; if the run is killed — the workflow's own timeout, a
+  // cancelled job, a provider stall on the next model — the answers already
+  // paid for must survive rather than have to be bought again.
+  const resultPath = join(OUT_DIR, "frame-sizes.json");
+  const save = () =>
+    writeFileSync(
+      resultPath,
+      JSON.stringify({ resolution: RESOLUTION, durationS: DURATION_S, rows }, null, 2)
+    );
+  save();
+
   for (const m of models) {
     console.log(`\n[${m.id}] submitting ${DURATION_S}s at ${RESOLUTION}…`);
     const sub = await req(`${ARK}/contents/generations/tasks`, {
@@ -145,6 +177,7 @@ async function main() {
       const error = (sub.json?.error?.message || sub.text).slice(0, 300);
       console.log(`  SUBMIT FAILED: ${error}`);
       rows.push({ id: m.id, status: "submit-failed", error });
+      save();
       continue;
     }
     const done = await poll(sub.json.id, m.id);
@@ -152,6 +185,7 @@ async function main() {
       const error = JSON.stringify(done.error || done).slice(0, 300);
       console.log(`  FAILED: ${error}`);
       rows.push({ id: m.id, status: done.status, error });
+      save();
       continue;
     }
     const tokens = done.usage?.total_tokens ?? done.usage?.completion_tokens;
@@ -177,6 +211,7 @@ async function main() {
       usd: done.usage ? null : null,
     };
     rows.push(row);
+    save();
     console.log(
       `  ${tokens} tokens over ${frames} frames -> ${Math.round(pixels)} px/frame; ` +
         `delivered ${actual ? `${actual.width}x${actual.height}` : "unknown"}` +
@@ -202,8 +237,8 @@ async function main() {
       `\nWARNING: billed pixels and delivered frame disagree somewhere — price from the BILLED figure.`
     );
   }
-  writeFileSync(join(OUT_DIR, "frame-sizes.json"), JSON.stringify({ resolution: RESOLUTION, durationS: DURATION_S, rows }, null, 2));
-  console.log(`\nFull result: ${join(OUT_DIR, "frame-sizes.json")}`);
+  save();
+  console.log(`\nFull result: ${resultPath}`);
   if (ok.length !== rows.length) process.exit(1);
 }
 

@@ -37,6 +37,10 @@ on:
         description: "Only these model ids, comma separated (blank = all)"
         type: string
         default: ""
+      reuse_run_id:
+        description: "Run id of an earlier probe whose measurements to resume from — models it already answered for are skipped rather than re-rendered"
+        type: string
+        default: ""
 
 permissions:
   id-token: write
@@ -46,7 +50,12 @@ jobs:
   probe:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Each model is polled for up to 25 minutes, serially, so four of them can
+    # in principle run past an hour. The script now saves after every model
+    # and the artifact uploads even on failure, so a run that does hit this
+    # can be resumed with reuse_run_id instead of paying again — but the cap
+    # is set high enough that it should not come to that.
+    timeout-minutes: 115
     steps:
       - name: Check the confirmation
         run: |
@@ -65,6 +74,15 @@ jobs:
       # delivered frame with it to cross-check the billed pixel count.
       - name: Install ffprobe
         run: npm install --no-save ffprobe-static
+
+      - name: Resume from an earlier probe
+        if: inputs.reuse_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: frame-size-probe
+          path: framesize
+          run-id: ${{ inputs.reuse_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Assume deploy role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -108,6 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p framesize
+          ls -la framesize/ || true
           node scripts/frame-size-probe.mjs
 
       - name: Upload the clips and the measurements
