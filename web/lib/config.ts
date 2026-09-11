@@ -315,7 +315,9 @@ export const NATIVE_1080P_MODEL_IDS = MODEL_IDS.filter(
 //      0.83%, and in the direction that costs us money.
 //   2. "480p" is not one frame size. Seedance 2.5 emits 854x480; the 2.0
 //      family emits 864x496 — a 4.5% difference. Each model carries its own
-//      in `frameSize` above, rather than one global guess.
+//      in `frameSize` above, rather than one global guess. (720p, measured
+//      separately, happens to be 1280x720 on all four — but that had to be
+//      checked, not assumed.)
 //
 // Together these reproduce every measured token count exactly:
 //   2.0 family 5 s 480p -> 50,639 predicted, 50,638 billed
@@ -386,11 +388,17 @@ export const DEFAULT_QUALITY: Quality = "480p";
 // guessed low sells below cost and one guessed high overcharges, and
 // estimates are held to 0..+1% of the invoice.
 //
-// 720p is wired end to end but withheld until one short clip per model has
-// been generated and its billed token count read back — see
-// .github/workflows/model-frame-size.yml. Add "720p" here once those frame
-// sizes come from measurement rather than from the obvious guess.
-export const VERIFIED_QUALITIES: readonly Quality[] = ["480p", "1080p"];
+// All three are measured. 720p was added 2026-09-11 by
+// .github/workflows/model-frame-size.yml: one 4s clip per model, billed
+// token count read back and inverted through tokens = frames x w x h / 1024,
+// cross-checked against the delivered file with ffprobe. Every model billed
+// 87,300 tokens over 97 frames — 921,600 px, exactly 1280x720 — and the
+// billed figure agreed with the delivered frame in all four cases.
+//
+// Worth noting it did NOT have to come out that way: at 480p this family
+// emits two different frame sizes (854x480 and 864x496, a 4.5% spread),
+// which is precisely why the measurement is not optional.
+export const VERIFIED_QUALITIES: readonly Quality[] = ["480p", "720p", "1080p"];
 
 export const UPSCALES = {
   "4k": {

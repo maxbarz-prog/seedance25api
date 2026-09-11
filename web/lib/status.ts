@@ -83,6 +83,12 @@ const TOKEN_FIXTURES: {
   { model: "seedance-2.0", quality: "480p", seconds: 5, billed: 50638 },
   { model: "seedance-2.0-fast", quality: "480p", seconds: 5, billed: 50638 },
   { model: "seedance-2.0-mini", quality: "480p", seconds: 5, billed: 50638 },
+  // 720p, measured 2026-09-11 (model-frame-size.yml): every model billed the
+  // same 87,300 tokens for a 4s clip.
+  { model: "seedance-2.5", quality: "720p", seconds: 4, billed: 87300 },
+  { model: "seedance-2.0", quality: "720p", seconds: 4, billed: 87300 },
+  { model: "seedance-2.0-fast", quality: "720p", seconds: 4, billed: 87300 },
+  { model: "seedance-2.0-mini", quality: "720p", seconds: 4, billed: 87300 },
 ];
 // Never below the billed count; at most a percent above it.
 const TOKEN_MIN = 0;

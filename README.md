@@ -49,18 +49,30 @@ Seedance 2.5, 5 seconds, USD:
 | 720p | $1.52 | $1.39 | $1.35 |
 | 1080p | $2.55 | $2.42 | $2.38 |
 
+720p is poor value and the table says so: it delivers the same 3840×2160 as
+480p→4K for twice the price. What it buys is more real detail going into the
+upscaler, which matters on fine texture and small faces and nowhere else.
+
 480p → 4K costs a third of a native 1080p render and comes back at four times
 the resolution. That ordering is not a mistake: the render dominates the
 bill, so pixels bought at the upscaler are far cheaper than pixels rendered.
 See `docs/NEXT.md`.
 
-**720p is wired but not yet offered.** The price is derived from the frame
-size the model actually emits, and that is not predictable from the
-resolution name — "480p" is 854×480 on Seedance 2.5 and 864×496 on the 2.0
-family. Until each model's 720p frame has been measured against a real
-invoice, 720p stays out of `VERIFIED_QUALITIES` in `web/lib/config.ts`.
-`.github/workflows/model-frame-size.yml` measures it (≈$2.35, one short clip
-per model); add `"720p"` to that list with the numbers it prints.
+### A quality is not offered until its frame size is measured
+
+Price is derived from the frame size a model actually emits, and that is not
+predictable from the resolution name: "480p" is 854×480 on Seedance 2.5 and
+864×496 on the 2.0 family, a 4.5% spread. Guessing low sells below cost;
+guessing high overcharges. So a resolution stays out of `VERIFIED_QUALITIES`
+in `web/lib/config.ts` — and therefore off the site — until
+`.github/workflows/model-frame-size.yml` has measured it against a real
+invoice.
+
+All three qualities are measured. 720p was done on 2026-09-11: every model
+billed **87,300 tokens over 97 frames — 921,600 px, exactly 1280×720** — and
+the billed figure agreed with the delivered file in all four cases. Our
+estimate lands at +0.50%, inside the 0-to-+1% band. It did not have to come
+out uniform; 480p is not.
 
 ## Plans
 
