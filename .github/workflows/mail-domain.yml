@@ -79,6 +79,31 @@ jobs:
           printf '%s' "$id" | jq -r '.DkimAttributes.Tokens[]?' > /tmp/tokens.txt
           echo "  dkim tokens:   $(wc -l < /tmp/tokens.txt)"
 
+      # The inbound half lives in SES and S3 rather than DNS, and SES
+      # re-validates the S3 write on every rule update — a rule that worked
+      # for months fails to update the moment the bucket stops accepting
+      # SES's test object. So show both.
+      - name: The receipt rule and its bucket
+        run: |
+          set -uo pipefail
+          echo "  active rule set:"
+          aws ses describe-active-receipt-rule-set \
+            --query 'Rules[].{name:Name,recipients:Recipients,s3:Actions[?S3Action].S3Action.BucketName}' \
+            --output json | sed 's/^/    /' || true
+          b=$(aws s3api list-buckets --query "Buckets[?contains(Name, 'inboundbucket')].Name" --output text | tr '\t' '\n' | head -1)
+          if [ -z "$b" ]; then
+            echo "  no inbound bucket found"
+            exit 0
+          fi
+          echo "  bucket: $b"
+          echo "  policy:"
+          aws s3api get-bucket-policy --bucket "$b" --query Policy --output text 2>/dev/null \
+            | jq . | sed 's/^/    /' || echo "    (no policy)"
+          echo "  encryption:"
+          aws s3api get-bucket-encryption --bucket "$b" 2>/dev/null | jq -c '.ServerSideEncryptionConfiguration.Rules' | sed 's/^/    /' || echo "    (none)"
+          echo "  public access block:"
+          aws s3api get-public-access-block --bucket "$b" 2>/dev/null | jq -c '.PublicAccessBlockConfiguration' | sed 's/^/    /' || echo "    (none)"
+
       - name: What Cloudflare holds now
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
