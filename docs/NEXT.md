@@ -469,11 +469,27 @@ were never rendered.
    a reset over SES, but it belongs to the built-in cookie auth, which is off
    whenever `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is set, and nothing links to
    it.) So the sandbox blocks job-ready mail and anything added later —
-   receipts, dunning — and does not block sign-in. Requesting production
-   access is
-   `sesv2 put-account-details --production-access-enabled` with the site URL
-   and a use-case description, or the console; AWS reviews it, usually within
-   a day. Check with `aws sesv2 get-account --query ProductionAccessEnabled`.
+   receipts, dunning — and does not block sign-in.
+
+   **It was already requested, and DENIED** — case `178878528300157`, filed
+   while this account's `WebsiteURL` was `https://remerged.click`, which is
+   still what SES has on file. That closes the API route: `PutAccountDetails`
+   only works while the account has no details set and returns
+   `ConflictException` afterwards, so a resubmission has to be made in the
+   console (SES → Account dashboard → Request production access) or as a reply
+   on that case. The denial reason is visible only there — reading the case
+   over the API needs a paid support plan and this account is on Basic
+   (`SubscriptionRequiredException`).
+
+   `infra/ses-use-case.txt` is the text to paste, and what
+   `.github/workflows/ses-production.yml` submits when the API allows it: what
+   we send, to whom, the volume, bounce handling, and the DKIM/SPF/DMARC now in
+   place. Set the website to `https://remerged.ai` when resubmitting. Check the
+   outcome with `aws sesv2 get-account --query ProductionAccessEnabled`, or
+   that workflow in `show` mode.
+
+   Sandbox limits meanwhile: 200 messages a day, one per second, and only to
+   verified identities — `remerged.ai`, `remerged.click`, `maxbarz@gmail.com`.
 4. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
    production keys, live Stripe key, webhook `we_1UEfTk2Nd3VZM6rLnc726z12`
    for `https://remerged.ai/api/billing/webhook` with its secret,
