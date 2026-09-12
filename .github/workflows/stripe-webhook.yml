@@ -1,0 +1,202 @@
+name: Stripe webhook
+
+# Points Stripe's webhook at a stage, and files the signing secret in SSM.
+#
+# Doing this by hand means the signing secret travels Stripe -> clipboard ->
+# AWS console, and the event list gets picked from a dropdown by memory.
+# Neither is necessary: POST /v1/webhook_endpoints returns the secret in its
+# response (only at creation), and the events this app actually handles are
+# readable straight out of the webhook route.
+#
+# THE EVENT LIST IS DERIVED, not typed. It comes from the `case` labels in
+# web/app/api/billing/webhook/route.ts, so a handler added or removed there
+# cannot drift out of step with what Stripe is told to send.
+#
+# FREE. `list` is read-only. `create` writes a webhook endpoint and an SSM
+# parameter, so it needs the word typed.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/stripe-webhook.yml"
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Which stage's Stripe key and SSM path to use"
+        type: choice
+        options: ["prod", "dev"]
+        default: prod
+      site:
+        description: "Site the endpoint should call"
+        type: string
+        default: "remerged.ai"
+      mode:
+        description: "list = show what exists. create = add the endpoint and store its secret."
+        type: choice
+        options: ["list", "create"]
+        default: "list"
+      confirm:
+        description: 'For create: type "create" to confirm.'
+        type: string
+        default: ""
+      disable_others:
+        description: 'Also disable endpoints pointing at a DIFFERENT host ("yes"). Stops Stripe retrying a dead URL.'
+        type: choice
+        options: ["no", "yes"]
+        default: "no"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  webhook:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'create'
+        run: |
+          if [ "${{ inputs.confirm }}" != "create" ]; then
+            echo 'Not confirmed — type "create" in the confirm box.'
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load the Stripe key
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          v=$(aws ssm get-parameter --name "/remerged/$STAGE/STRIPE_SECRET_KEY" --with-decryption \
+            --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "STRIPE_SECRET_KEY=$v" >> "$GITHUB_ENV"
+          case "$v" in
+            sk_live_*) echo "  key: LIVE mode" ;;
+            sk_test_*) echo "  key: test mode" ;;
+            *) echo "Unrecognised Stripe key format."; exit 1 ;;
+          esac
+
+      - name: Work out which events this app handles
+        run: |
+          set -euo pipefail
+          route=web/app/api/billing/webhook/route.ts
+          # The webhook route's own case labels are the definition of what
+          # Stripe needs to send. Reading them means the two cannot drift.
+          grep -o 'case "[a-z_.]*"' "$route" | sed 's/case "//;s/"//' | sort -u > /tmp/events.txt
+          if [ ! -s /tmp/events.txt ]; then
+            echo "Found no event cases in $route — refusing to guess."
+            exit 1
+          fi
+          echo "  handled by $route:"
+          sed 's/^/    /' /tmp/events.txt
+          echo "EVENT_COUNT=$(wc -l < /tmp/events.txt)" >> "$GITHUB_ENV"
+
+      - name: What Stripe has now
+        env:
+          SITE: ${{ inputs.site }}
+        run: |
+          set -euo pipefail
+          r=$(curl -sS -u "$STRIPE_SECRET_KEY:" https://api.stripe.com/v1/webhook_endpoints)
+          if printf '%s' "$r" | jq -e '.error' >/dev/null 2>&1; then
+            echo "Stripe rejected the request:"
+            printf '%s' "$r" | jq -r '.error | "  \(.type): \(.message)"'
+            exit 1
+          fi
+          n=$(printf '%s' "$r" | jq -r '.data | length')
+          if [ "$n" = "0" ]; then
+            echo "  (no webhook endpoints configured)"
+          else
+            printf '%s' "$r" | jq -r '.data[] | "  \(.status)\t\(.url)\t(\(.enabled_events | length) events)"' | column -t
+          fi
+          printf '%s' "$r" > /tmp/endpoints.json
+          want="https://$SITE/api/billing/webhook"
+          if printf '%s' "$r" | jq -e --arg u "$want" '.data[] | select(.url == $u)' >/dev/null 2>&1; then
+            echo
+            echo "  NOTE: an endpoint for $want already exists."
+            echo "  Stripe only reveals a signing secret at creation, so creating"
+            echo "  a second one is how you get a usable secret — but two live"
+            echo "  endpoints means every event is delivered twice. Remove the"
+            echo "  old one in the dashboard first, or use disable_others."
+          fi
+
+      - name: Create the endpoint and file its secret
+        if: inputs.mode == 'create'
+        env:
+          SITE: ${{ inputs.site }}
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          url="https://$SITE/api/billing/webhook"
+
+          # Build the repeated enabled_events[] form fields from the derived list.
+          args=()
+          while read -r e; do
+            [ -n "$e" ] || continue
+            args+=(--data-urlencode "enabled_events[]=$e")
+          done < /tmp/events.txt
+
+          r=$(curl -sS -u "$STRIPE_SECRET_KEY:" https://api.stripe.com/v1/webhook_endpoints \
+            --data-urlencode "url=$url" \
+            --data-urlencode "description=Remerged $STAGE — created by stripe-webhook.yml" \
+            "${args[@]}")
+          if printf '%s' "$r" | jq -e '.error' >/dev/null 2>&1; then
+            echo "Stripe refused to create it:"
+            printf '%s' "$r" | jq -r '.error | "  \(.type): \(.message)"'
+            exit 1
+          fi
+
+          secret=$(printf '%s' "$r" | jq -r '.secret // empty')
+          if [ -z "$secret" ]; then
+            echo "Stripe created the endpoint but returned no signing secret."
+            echo "It is only revealed at creation, so this one cannot be used."
+            printf '%s' "$r" | jq -r '{id, url, status}'
+            exit 1
+          fi
+          echo "::add-mask::$secret"
+          id=$(printf '%s' "$r" | jq -r '.id')
+
+          # Straight from the response into SSM. The secret is never printed
+          # and never leaves this runner in readable form.
+          aws ssm put-parameter --name "/remerged/$STAGE/STRIPE_WEBHOOK_SECRET" \
+            --value "$secret" --type SecureString --overwrite >/dev/null
+
+          echo "  created  $id"
+          echo "  url      $url"
+          echo "  events   $EVENT_COUNT"
+          echo "  secret   written to /remerged/$STAGE/STRIPE_WEBHOOK_SECRET"
+          echo "  fingerprint $(printf '%s' "$secret" | sha256sum | cut -c1-12)"
+          echo
+          echo "SSM values are baked into the Lambda at deploy time, so this"
+          echo "takes effect on the next $STAGE deploy."
+
+      - name: Disable endpoints for other hosts
+        if: inputs.mode == 'create' && inputs.disable_others == 'yes'
+        env:
+          SITE: ${{ inputs.site }}
+        run: |
+          set -euo pipefail
+          # An endpoint left pointing at a domain we no longer serve makes
+          # Stripe retry a dead URL for days and eventually email about it.
+          ids=$(jq -r --arg h "$SITE" '.data[] | select((.url | contains($h)) | not) | select(.status == "enabled") | .id' /tmp/endpoints.json)
+          if [ -z "$ids" ]; then
+            echo "  nothing to disable"
+            exit 0
+          fi
+          for id in $ids; do
+            u=$(jq -r --arg i "$id" '.data[] | select(.id == $i) | .url' /tmp/endpoints.json)
+            curl -sS -u "$STRIPE_SECRET_KEY:" "https://api.stripe.com/v1/webhook_endpoints/$id" \
+              --data "disabled=true" >/dev/null
+            echo "  disabled  $id  $u"
+          done
