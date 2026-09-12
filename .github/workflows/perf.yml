@@ -67,12 +67,25 @@ jobs:
             done
           done
 
+      # Isolated: a browser that will not start is a missing measurement, not a
+      # reason to skip the server and CloudFront steps below — which is exactly
+      # what happened the first time.
       - name: Load it in a real browser
+        continue-on-error: true
         run: |
           set -uo pipefail
           host="remerged.ai"
           [ "$STAGE" = "dev" ] && host="dev.remerged.ai"
-          npm i -s playwright-core@1.49.1 >/dev/null 2>&1 || npm i -s playwright-core >/dev/null 2>&1
+          # playwright-core drives a browser but downloads none, and GitHub's
+          # runner image already ships Chrome. (This is a runner, not the
+          # agent sandbox — /opt/pw-browsers is the sandbox's, not here.)
+          mkdir -p /tmp/pw && cd /tmp/pw
+          npm init -y >/dev/null 2>&1 || true
+          npm i playwright-core@1.49.1 --no-audit --no-fund >/dev/null 2>&1 || true
+          if [ ! -d /tmp/pw/node_modules/playwright-core ]; then
+            echo "  playwright-core would not install — skipping the browser run"
+            exit 0
+          fi
           cat > /tmp/waterfall.mjs <<'JS'
           import { chromium } from 'playwright-core';
           const url = process.argv[2];
@@ -117,13 +130,13 @@ jobs:
           console.log(`  redirects: ${redirects.length ? redirects.join(', ') : 'none'}`);
           await browser.close();
           JS
-          CHROME=$(ls -d /opt/pw-browsers/chromium*/chrome-linux/chrome 2>/dev/null | head -1)
-          [ -n "$CHROME" ] || CHROME=$(which chromium-browser chromium google-chrome 2>/dev/null | head -1)
-          if [ -z "$CHROME" ]; then
-            npx -y playwright@1.49.1 install --with-deps chromium >/dev/null 2>&1 || true
-            CHROME=""
-          fi
-          CHROME="$CHROME" node /tmp/waterfall.mjs "https://$host/" || echo "  browser run failed"
+          CHROME=""
+          for c in /usr/bin/google-chrome /usr/bin/google-chrome-stable /usr/bin/chromium-browser /usr/bin/chromium; do
+            [ -x "$c" ] && CHROME="$c" && break
+          done
+          echo "  browser: ${CHROME:-none found}"
+          [ -n "$CHROME" ] || exit 0
+          cd /tmp/pw && CHROME="$CHROME" node /tmp/waterfall.mjs "https://$host/" || echo "  browser run failed"
 
       - name: What the server function reports
         run: |
