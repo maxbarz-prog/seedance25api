@@ -194,9 +194,9 @@ export default function AccountPanel() {
         ))}
         <p className="text-center text-sm text-muted">
           If nothing appears,{" "}
-          <a className="underline" href="/sign-in">
+          <Link className="underline" href="/sign-in">
             sign in
-          </a>
+          </Link>
           .
         </p>
       </div>

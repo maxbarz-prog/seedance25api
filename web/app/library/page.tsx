@@ -10,6 +10,7 @@ interface Job {
   status: string;
   provider_phase?: string | null;
   video_url: string | null;
+  poster_url?: string | null;
   created_at: number;
 }
 
@@ -76,7 +77,34 @@ export default function LibraryPage() {
             )}
             <Link href={`/jobs/${j.id}`} className="block">
               {j.status === "ready" && j.video_url ? (
-                <video src={j.video_url} muted loop playsInline className="aspect-video w-full object-cover" />
+                // A 40KB image, not a video. Rendering a <video> here made the
+                // browser download every clip in the grid — tens of megabytes
+                // each, in parallel — to paint a still frame. Jobs from before
+                // posters existed have none, so those keep the video, with
+                // preload off so it fetches nothing until asked.
+                j.poster_url ? (
+                  // Deliberately not next/image: these are already small,
+                  // already resized JPEGs behind a presigned URL, and routing
+                  // them through the optimizer would add a Lambda hop and a
+                  // per-image cost to save nothing.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={j.poster_url}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="aspect-video w-full object-cover"
+                  />
+                ) : (
+                  <video
+                    src={j.video_url}
+                    preload="none"
+                    muted
+                    loop
+                    playsInline
+                    className="aspect-video w-full object-cover"
+                  />
+                )
               ) : (
                 <div className="flex aspect-video items-center justify-center bg-bg text-sm text-muted">
                   {j.status === "failed"

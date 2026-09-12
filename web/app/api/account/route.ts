@@ -104,7 +104,10 @@ export async function POST(req: NextRequest) {
   // Videos first — the store's deleteUser removes the job rows, and once
   // those are gone nothing remembers which objects to remove.
   const jobs = await jobsFor(user.id, 10000);
-  for (const j of jobs) await deleteObject(j.video_url).catch(() => {});
+  for (const j of jobs) {
+    await deleteObject(j.video_url).catch(() => {});
+    await deleteObject(j.poster_key).catch(() => {});
+  }
 
   const remaining = await balance(user.id);
   await deleteUser(user.id);

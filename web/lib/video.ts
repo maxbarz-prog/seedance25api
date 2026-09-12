@@ -93,6 +93,45 @@ export async function durationOf(input: Buffer): Promise<number | null> {
   }
 }
 
+// A poster frame, so a library of videos can be a page of images.
+//
+// Without one, a thumbnail has to be a <video> pointing at the mp4, and the
+// browser downloads the file to paint a still — tens of megabytes per tile, in
+// parallel, for a grid. A 640px JPEG is about 40KB.
+//
+// Reads the URL directly rather than a buffer: ffmpeg range-requests what it
+// needs for one frame instead of pulling the whole video into memory, which in
+// a Lambda is the difference between working and not.
+export async function posterFromUrl(url: string, atSeconds = 1): Promise<Buffer | null> {
+  if (!ffmpegAvailable()) return null;
+  const dir = scratch();
+  const out = join(dir, "poster.jpg");
+  try {
+    // -ss before -i seeks without decoding everything up to it.
+    const { code } = await run([
+      "-hide_banner", "-y",
+      "-ss", String(atSeconds),
+      "-i", url,
+      "-frames:v", "1",
+      "-vf", "scale=640:-2",
+      "-q:v", "6",
+      out,
+    ]);
+    if (code !== 0 || !existsSync(out)) {
+      // A clip shorter than atSeconds has no frame there; take the first one.
+      const first = await run([
+        "-hide_banner", "-y", "-i", url, "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "6", out,
+      ]);
+      if (first.code !== 0 || !existsSync(out)) return null;
+    }
+    return readFileSync(out);
+  } catch {
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 // Last `seconds` of an MP4, re-encoded so the cut is frame-accurate.
 export async function trimTail(input: Buffer, seconds: number): Promise<Buffer | null> {
   if (!ffmpegAvailable()) return null;

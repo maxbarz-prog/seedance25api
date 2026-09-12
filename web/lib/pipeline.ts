@@ -8,11 +8,12 @@ import {
   storageEnabled,
   storeBuffer,
   storeVideoBuffer,
+  storePoster,
   storeVideoFromUrl,
 } from "./storage";
 import { sendEmail } from "./email";
 import { EXTEND_CONTEXT_S, modeInfo, SITE_DOMAIN, SITE_NAME } from "./config";
-import { concat, durationOf, trimTail } from "./video";
+import { concat, durationOf, posterFromUrl, trimTail } from "./video";
 import { checkMargin, currentHalt } from "./money";
 
 // Job pipeline: queued -> generating -> [upscaling ->] ready | failed.
@@ -331,9 +332,22 @@ async function finalize(job: Job, providerUrl: string) {
     const stored = joined
       ? await storeVideoBuffer(job.user_id, job.id, joined.video)
       : await storeVideoFromUrl(job.user_id, job.id, providerUrl);
+    // One frame, so the library is a page of images. Best effort and never
+    // fatal: a job with no poster still plays, it just costs the browser more
+    // to show a still. Taken from the provider's URL rather than ours because
+    // it is already in hand and ffmpeg only range-requests the start of it.
+    let posterKey: string | null = null;
+    try {
+      const jpeg = await posterFromUrl(providerUrl);
+      if (jpeg) posterKey = await storePoster(job.user_id, job.id, jpeg);
+    } catch (err) {
+      console.warn(`job ${job.id}: poster extraction failed:`, err);
+    }
+
     await updateJob(job.id, {
       video_url: stored.key,
       size_bytes: stored.bytes || job.duration_s * 500_000,
+      ...(posterKey ? { poster_key: posterKey } : {}),
       // The delivered clip is now source + continuation, so the row should
       // say how long the video actually is. The charge is unaffected: it was
       // quoted on the seconds added, which is what the provider billed us for.

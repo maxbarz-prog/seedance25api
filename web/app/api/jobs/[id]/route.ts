@@ -36,6 +36,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Still processing." }, { status: 409 });
   }
   await deleteObject(job.video_url);
+  // Its poster goes too. An orphaned thumbnail is invisible, billed, and
+  // impossible to find later.
+  await deleteObject(job.poster_key).catch(() => {});
   await deleteJob(id);
   return NextResponse.json({ ok: true });
 }

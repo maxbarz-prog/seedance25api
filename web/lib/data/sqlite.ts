@@ -93,6 +93,7 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE jobs ADD COLUMN source_job_id TEXT`,
       `ALTER TABLE jobs ADD COLUMN camera_fixed INTEGER`,
       `ALTER TABLE jobs ADD COLUMN provider_phase TEXT`,
+      `ALTER TABLE jobs ADD COLUMN poster_key TEXT`,
       `ALTER TABLE jobs ADD COLUMN provider_submitted_at INTEGER`,
       `ALTER TABLE jobs ADD COLUMN provider_started_at INTEGER`,
       `ALTER TABLE jobs ADD COLUMN provider_done_at INTEGER`,

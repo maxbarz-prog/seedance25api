@@ -74,6 +74,19 @@ export async function storeVideoFromUrl(
   return { key, bytes: head.ContentLength ?? 0 };
 }
 
+// A job's poster frame. Same shape as its video key so the two are obviously
+// a pair, and so deleting a member's videos can find them.
+export async function storePoster(
+  userId: string,
+  jobId: string,
+  jpeg: Buffer
+): Promise<string | null> {
+  if (!BUCKET) return null;
+  const key = `posters/${userId}/${jobId}.jpg`;
+  await storeBuffer(key, jpeg, "image/jpeg");
+  return key;
+}
+
 // Store a server-generated object (e.g. a trimmed reference clip).
 export async function storeBuffer(key: string, body: Buffer, contentType: string): Promise<void> {
   if (!BUCKET) throw new Error("storage not configured");

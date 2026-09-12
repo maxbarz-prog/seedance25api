@@ -25,6 +25,7 @@ interface Job {
   provider_phase?: string | null;
   quote_credits: number;
   video_url: string | null;
+  poster_url?: string | null;
   error: string | null;
   kind?: string | null;
   source_job_id?: string | null;
@@ -184,6 +185,7 @@ export default function JobView({ id }: { id: string }) {
         <div className="mt-8">
           <video
             src={job.video_url}
+            poster={job.poster_url ?? undefined}
             controls
             autoPlay
             loop

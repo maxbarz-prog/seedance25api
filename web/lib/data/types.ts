@@ -67,6 +67,11 @@ export interface Job {
   // "queued" while the provider is holding the task, "running" once it starts.
   provider_phase?: string | null;
   video_url: string | null; // storage key (see lib/storage); resolved to a URL on read
+  // A JPEG of one frame, so the library can be a page of images rather than a
+  // page of videos each downloading itself to show a still. Absent on rows
+  // written before posters existed, and on any job whose extraction failed —
+  // both fall back to the video with preload off.
+  poster_key?: string | null;
   image_keys?: string | null; // JSON array of {key, role} for all inputs (images, ref video/audio)
   kind?: "generate" | "extend" | null;
   source_job_id?: string | null; // for kind=extend: the clip being continued
