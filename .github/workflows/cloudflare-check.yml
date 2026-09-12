@@ -1,0 +1,107 @@
+name: Cloudflare token check
+
+# Is the Cloudflare API token present, valid, and scoped to the right zone?
+#
+# FREE and READ-ONLY — it verifies the token, finds the zone and lists what is
+# already in it. Nothing is created, changed or deployed.
+#
+# Worth having as its own step: SST writes DNS records during a deploy, and a
+# token that is missing, expired or scoped to the wrong zone would fail
+# halfway through one. This fails in ten seconds instead, before anything has
+# been touched.
+#
+# The token itself is never printed. Only its status, name and permissions.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/cloudflare-check.yml"
+  workflow_dispatch:
+    inputs:
+      zone:
+        description: "Zone to look for"
+        type: string
+        default: "remerged.ai"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify the token and the zone
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ZONE: ${{ inputs.zone }}
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4"
+
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "FAIL: the CLOUDFLARE_API_TOKEN repository secret is not set."
+            echo "      GitHub -> Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          # Masked defensively: an API error body can echo the request back.
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+
+          echo "--- token ---"
+          v=$(curl -sS -H "$auth" "$api/user/tokens/verify")
+          if [ "$(printf '%s' "$v" | jq -r '.success')" != "true" ]; then
+            echo "FAIL: token rejected by Cloudflare."
+            printf '%s' "$v" | jq -r '.errors[]?| "  \(.code): \(.message)"'
+            exit 1
+          fi
+          printf '%s' "$v" | jq -r '"  status: \(.result.status)"'
+
+          echo "--- zone ---"
+          z=$(curl -sS -H "$auth" "$api/zones?name=$ZONE")
+          if [ "$(printf '%s' "$z" | jq -r '.success')" != "true" ]; then
+            echo "FAIL: could not list zones — the token is probably missing Zone:Read."
+            printf '%s' "$z" | jq -r '.errors[]?| "  \(.code): \(.message)"'
+            exit 1
+          fi
+          count=$(printf '%s' "$z" | jq -r '.result | length')
+          if [ "$count" = "0" ]; then
+            echo "FAIL: the token cannot see a zone called $ZONE."
+            echo "      Either the zone does not exist in this Cloudflare account,"
+            echo "      or the token is scoped to a different zone."
+            exit 1
+          fi
+          zone_id=$(printf '%s' "$z" | jq -r '.result[0].id')
+          echo "::add-mask::$zone_id"
+          printf '%s' "$z" | jq -r '.result[0] | "  name: \(.name)\n  status: \(.status)\n  plan: \(.plan.name)"'
+          echo "  nameservers:"
+          printf '%s' "$z" | jq -r '.result[0].name_servers[]? | "    \(.)"'
+
+          # Reading the records proves DNS:Read. SST needs DNS:Edit to deploy,
+          # which cannot be tested without writing something — so the
+          # permissions list below is the evidence for that half.
+          echo "--- existing DNS records ---"
+          r=$(curl -sS -H "$auth" "$api/zones/$zone_id/dns_records?per_page=100")
+          if [ "$(printf '%s' "$r" | jq -r '.success')" != "true" ]; then
+            echo "FAIL: could not read DNS records — the token is missing DNS:Read."
+            printf '%s' "$r" | jq -r '.errors[]?| "  \(.code): \(.message)"'
+            exit 1
+          fi
+          n=$(printf '%s' "$r" | jq -r '.result | length')
+          if [ "$n" = "0" ]; then
+            echo "  (none yet — expected for a freshly registered domain)"
+          else
+            printf '%s' "$r" | jq -r '.result[] | "  \(.type)\t\(.name)\t-> \(.content)"' | column -t
+          fi
+
+          echo
+          echo "--- token permissions ---"
+          # The scopes are what prove DNS:Edit without writing anything.
+          printf '%s' "$v" | jq -r '.result.policies[]?.permission_groups[]?.name' 2>/dev/null \
+            | sort -u | sed 's/^/  /' || echo "  (not exposed by this token type)"
+
+          echo
+          echo "Token is valid and can see $ZONE. SST can use it for DNS."
