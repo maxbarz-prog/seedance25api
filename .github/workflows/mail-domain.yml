@@ -367,16 +367,40 @@ jobs:
             sleep 10
           done
 
+          # Storing the message is only half of it. The forward is a separate
+          # SES action, and it can fail while the S3 write succeeds — in which
+          # case SES bounces the message after storing it and the private inbox
+          # stays empty.
           fn="${MAIL_FORWARDER:-}"
           if [ -n "$fn" ]; then
-            echo "  forwarder log:"
-            # The invocation is asynchronous, so the log lags the S3 write.
+            echo "  forwarder: $fn"
+            # Asynchronous invocation, so the log lags the S3 write.
             sleep 25
+            echo "    log (errors shown, not hidden):"
             aws logs filter-log-events --log-group-name "/aws/lambda/$fn" \
               --start-time "$(( started * 1000 ))" \
-              --query 'events[].message' --output text 2>/dev/null \
-              | sed 's/^/    /' || echo "    (no log group yet)"
+              --query 'events[].message' --output text 2>&1 | sed 's/^/      /'
+            echo "    may SES invoke it:"
+            aws lambda get-policy --function-name "$fn" --query Policy --output text 2>&1 \
+              | (jq -c '[.Statement[]|{Sid,Principal,Action,Condition}]' 2>/dev/null || cat) | sed 's/^/      /'
+            for m in Invocations Errors; do
+              v=$(aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name "$m" \
+                --dimensions "Name=FunctionName,Value=$fn" \
+                --start-time "$(date -u -d @$(( started - 60 )) +%Y-%m-%dT%H:%M:%SZ)" \
+                --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --period 600 --statistics Sum \
+                --query 'Datapoints[0].Sum' --output text 2>/dev/null)
+              echo "    $m: ${v:-none}"
+            done
           fi
+          # A bounce here means SES stored the message and then refused it,
+          # which is what a failing Lambda action looks like from the outside.
+          for m in Bounce Reject; do
+            v=$(aws cloudwatch get-metric-statistics --namespace AWS/SES --metric-name "$m" \
+              --start-time "$(date -u -d @$(( started - 60 )) +%Y-%m-%dT%H:%M:%SZ)" \
+              --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --period 600 --statistics Sum \
+              --query 'Datapoints[0].Sum' --output text 2>/dev/null)
+            echo "  SES $m since the send: ${v:-none}"
+          done
           echo
           echo "If the log shows an error sending, the account is probably still in"
           echo "the SES sandbox and the forward destination is not a verified identity."
