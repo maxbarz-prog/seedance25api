@@ -68,6 +68,19 @@ jobs:
             --query 'EmailIdentities[].{id:IdentityName,type:IdentityType,verified:VerifiedForSendingStatus}' \
             --output json | sed 's/^/    /' || true
 
+          # A denied request leaves only a case id behind, and the reason lives
+          # in the case. Reading it needs a Business or Enterprise support plan;
+          # on Basic this fails, which is itself the answer — the reason can
+          # only be read in the console.
+          case_id=$(aws sesv2 get-account --query 'Details.ReviewDetails.CaseId' --output text 2>/dev/null)
+          if [ -n "$case_id" ] && [ "$case_id" != "None" ]; then
+            echo "  review case $case_id:"
+            { aws support describe-cases --case-id-list "$case_id" --include-resolved-cases \
+              --region us-east-1 --query 'cases[].{status:status,subject:subject,
+                latest:recentCommunications.communications[0].body}' --output json 2>&1 || true; } \
+              | head -c 3000 | sed 's/^/    /'
+          fi
+
       - name: Ask for production access
         if: inputs.mode == 'submit'
         env:
