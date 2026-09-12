@@ -228,6 +228,9 @@ export interface DataStore {
   // user or a job — currently the money-safety halt (lib/money.ts).
   getSystem(key: string): Promise<string | undefined>;
   setSystem(key: string, value: string | null): Promise<void>;
+  // Every key under a prefix, for the few cases that need the set rather than
+  // one entry — listing the invite codes an admin has issued, for instance.
+  listSystem(prefix: string): Promise<{ key: string; value: string }[]>;
 
   // Charges with no matching spend — see lib/data/reconcile.ts.
   moneyIssues(): Promise<MoneyIssue[]>;

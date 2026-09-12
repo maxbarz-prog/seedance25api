@@ -11,6 +11,8 @@ import {
 import { setStripeIds, userById, userByStripeCustomer } from "@/lib/db";
 import { grantPeriodCredits } from "@/lib/grants";
 import { effectivePlan } from "@/lib/plan";
+import { attachDiscount } from "@/lib/billing";
+import { consumeReward, revokeReferral, rewardsFor, vestReferral } from "@/lib/referrals";
 
 // Stripe webhook. Credits and membership activate ONLY here (or via the dev
 // mock), i.e. only after funds actually clear. Signature-verified; top-up
@@ -74,7 +76,49 @@ export async function POST(req: NextRequest) {
       // the sweep cannot both pay out.
       const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
       const member = await userByStripeCustomer(customerId);
-      if (member) await grantPeriodCredits(member.id, effectivePlan(member));
+      if (member) {
+        await grantPeriodCredits(member.id, effectivePlan(member));
+
+        // The referee has now actually paid, so whoever referred them has
+        // earned their reward. Only on the FIRST invoice of a subscription:
+        // billing_reason distinguishes that from every renewal after it, and a
+        // referral pays out once.
+        if (inv.billing_reason === "subscription_create") await vestReferral(member.id);
+
+        // And this member's own turn, if they have rewards waiting: one per
+        // billing period, attached now so it comes off the next invoice. Never
+        // two at once — attachDiscount refuses when a discount is already on
+        // the subscription, which is what keeps the queue sequential.
+        if ((await rewardsFor(member.id)).pending > 0) {
+          if (await attachDiscount(member, "referral")) await consumeReward(member.id);
+        }
+      }
+      break;
+    }
+    // Money came back. Withdraw the referrer's reward if it has not been spent
+    // on an invoice yet — the whole reason rewards are discounts rather than
+    // credits, which would already be gone by now.
+    case "charge.refunded":
+    case "charge.dispute.created": {
+      // A Charge carries the customer; a Dispute does not, so resolve it
+      // through the charge it is against. Without this step disputes — the
+      // case this exists for — would silently never revoke anything.
+      const obj = event.data.object as Stripe.Charge | Stripe.Dispute;
+      let charge: Stripe.Charge | null = null;
+      if (obj.object === "charge") {
+        charge = obj;
+      } else {
+        const ref = obj.charge;
+        const chargeId = typeof ref === "string" ? ref : ref?.id;
+        if (chargeId) charge = await stripeClient().charges.retrieve(chargeId);
+      }
+      const chargeCustomer =
+        typeof charge?.customer === "string" ? charge.customer : charge?.customer?.id ?? null;
+      if (!chargeCustomer) break;
+      const member = await userByStripeCustomer(chargeCustomer);
+      if (member) {
+        await revokeReferral(member.id, event.type === "charge.refunded" ? "refunded" : "disputed");
+      }
       break;
     }
     default:

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import InviteMinter from "@/components/InviteMinter";
 
 interface Overview {
   totals: {
@@ -573,6 +574,8 @@ export default function AdminPage() {
         />
         <Tile label="Failure rate" value={`${failPct}%`} detail={`${t.jobsFailed} failed`} />
       </section>
+
+      <InviteMinter />
 
       <section className="rounded-2xl border border-line bg-surface p-5">
         <h2 className="font-medium">Adjust credits</h2>

@@ -64,4 +64,5 @@ export const adminData: DataStore["adminData"] = () => store().adminData();
 export const allUsers: DataStore["allUsers"] = (...a) => store().allUsers(...a);
 export const getSystem: DataStore["getSystem"] = (...a) => store().getSystem(...a);
 export const setSystem: DataStore["setSystem"] = (...a) => store().setSystem(...a);
+export const listSystem: DataStore["listSystem"] = (...a) => store().listSystem(...a);
 export const moneyIssues: DataStore["moneyIssues"] = () => store().moneyIssues();

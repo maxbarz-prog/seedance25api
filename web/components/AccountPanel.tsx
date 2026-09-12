@@ -13,6 +13,7 @@ import {
 import { MIN_TOPUP_PLAN } from "@/lib/config";
 import IntervalToggle from "./IntervalToggle";
 import PlanPrice from "./PlanPrice";
+import ReferralCard from "./ReferralCard";
 
 interface LedgerEntry {
   id: string;
@@ -66,6 +67,9 @@ export default function AccountPanel() {
   // Which of the three leaving options is open. Only one at a time, and none
   // by default: these should take a deliberate act to reach.
   const [leaving, setLeaving] = useState<"unsubscribe" | "deactivate" | "delete" | null>(null);
+  // An invite code, if they were given one. Empty for almost everyone, so it
+  // sits under the plans rather than above them.
+  const [invite, setInvite] = useState("");
   const [confirmEmail, setConfirmEmail] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -104,7 +108,7 @@ export default function AccountPanel() {
     const key = `sub-${plan}-${billingInterval}`;
     const data = await post(
       "/api/billing/subscribe",
-      { plan, interval: billingInterval },
+      { plan, interval: billingInterval, ...(invite.trim() ? { invite: invite.trim() } : {}) },
       key
     );
     if (!data) return;
@@ -296,6 +300,21 @@ export default function AccountPanel() {
                 );
               })}
             </div>
+            <label className="mt-4 block text-sm">
+              <span className="text-muted">Have an invite code?</span>
+              <input
+                id="invite-code"
+                value={invite}
+                onChange={(e) => setInvite(e.target.value.toUpperCase())}
+                placeholder="First month free"
+                autoComplete="off"
+                spellCheck={false}
+                className="mt-1 w-full max-w-xs rounded-lg border border-line bg-bg px-3 py-2 font-mono tracking-wider uppercase placeholder:font-sans placeholder:normal-case placeholder:tracking-normal"
+              />
+              <span className="mt-1 block text-xs text-muted">
+                Enter it, then pick the plan it is for. Invites are for Standard, billed monthly.
+              </span>
+            </label>
           </>
         )}
       </section>
@@ -362,6 +381,8 @@ export default function AccountPanel() {
             {me.planLabel}
           </p>
       </section>
+
+      <ReferralCard />
 
       {/* Leaving */}
       <section className="rounded-2xl border border-line bg-surface p-5">

@@ -545,6 +545,26 @@ export class DynamoStore implements DataStore {
     );
   }
 
+  async listSystem(prefix: string): Promise<{ key: string; value: string }[]> {
+    const out: { key: string; value: string }[] = [];
+    let start: Record<string, unknown> | undefined;
+    do {
+      const r = await this.doc.send(
+        new QueryCommand({
+          TableName: LEDGER,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :p)",
+          ExpressionAttributeValues: { ":pk": SYSTEM_PK, ":p": prefix },
+          ExclusiveStartKey: start,
+        })
+      );
+      for (const item of (r.Items ?? []) as { sk: string; v?: string }[]) {
+        if (item.v !== undefined) out.push({ key: item.sk, value: item.v });
+      }
+      start = r.LastEvaluatedKey;
+    } while (start);
+    return out;
+  }
+
   async moneyIssues(): Promise<MoneyIssue[]> {
     const [ledger, jobs] = await Promise.all([
       this.scanAll<LedgerEntry & { pk: string }>(LEDGER, 20000),

@@ -16,6 +16,25 @@ export const MAIL_DOMAIN = "remerged.ai";
 
 export const CREDIT_USD = 0.01; // 1 credit = 1 cent
 
+// Referrals and invites. See lib/referrals.ts for why these shapes and not
+// others; the short version is that both instruments are DISCOUNTS, never
+// credits, because a discount that has not been applied yet can be withdrawn
+// after a chargeback and a spent credit cannot.
+//
+// The reward is a fixed dollar amount rather than a percentage on purpose. $3
+// is 20% of Standard monthly, so it reads the same to a member — but a
+// percentage applied to a plan that is already discounted goes underwater: 20%
+// off Pro annual leaves -$0.10 of margin, while $3 off it leaves +$2.31.
+export const REFERRAL_REWARD_USD = 3;
+// Both sides get the same thing: the referee's comes off their first month at
+// checkout, the referrer's off a future month once the referee actually pays.
+export const REFERRAL_REWARD_PER_REFERRAL = 1;
+// The plan an admin invite is good for. Its cost to us is that plan's whole
+// allocation if the member spends it — $6.03 on Standard, $21.71 on Pro,
+// $56.69 on Max — so the cheapest paid tier is the only sane default.
+export const INVITE_PLAN: PlanId = "standard";
+export const INVITE_EXPIRY_DAYS = 30;
+
 export const MIN_TOPUP_USD = 10;
 export const TOPUP_PRESETS_USD = [10, 20, 50];
 

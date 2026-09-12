@@ -358,6 +358,13 @@ export class SqliteStore implements DataStore {
       .run(key, value);
   }
 
+  async listSystem(prefix: string): Promise<{ key: string; value: string }[]> {
+    const rows = this.db()
+      .prepare(`SELECT k, v FROM system WHERE k LIKE ? ESCAPE '\\' ORDER BY k`)
+      .all(prefix.replace(/[%_\\]/g, "\\$&") + "%") as { k: string; v: string }[];
+    return rows.map((r) => ({ key: r.k, value: r.v }));
+  }
+
   async moneyIssues(): Promise<MoneyIssue[]> {
     const jobs = this.db().prepare(`SELECT * FROM jobs`).all() as Job[];
     const ledger = this.db().prepare(`SELECT * FROM ledger`).all() as LedgerEntry[];

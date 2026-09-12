@@ -6,6 +6,7 @@ import {
   PLANS,
   PlanId,
   planPriceUsd,
+  REFERRAL_REWARD_USD,
 } from "./config";
 import {
   addLedger,
@@ -64,15 +65,72 @@ export async function createTopupCheckout(
   return { url: s.url! };
 }
 
+// The two discounts this product issues, as Stripe coupons.
+//
+// Created on demand under fixed ids rather than kept in a dashboard: the code
+// that relies on a coupon is the code that guarantees it exists, so a fresh
+// Stripe account (or a switch from test to live keys) needs no manual setup.
+//
+// Both are `duration: "once"` — they come off ONE invoice. That is what makes
+// the reward queue work: rewards are attached one at a time, in turn, and a
+// member with twenty referrals gets twenty discounted months rather than one
+// free year, which is the difference between a profitable month and a loss.
+export type DiscountKind = "invite" | "referral";
+
+const COUPON_IDS: Record<DiscountKind, string> = {
+  invite: "remerged-invite-first-month-free",
+  referral: `remerged-referral-${REFERRAL_REWARD_USD}usd`,
+};
+
+export async function ensureCoupon(kind: DiscountKind): Promise<string> {
+  const id = COUPON_IDS[kind];
+  const stripe = stripeClient();
+  try {
+    await stripe.coupons.retrieve(id);
+    return id;
+  } catch {
+    // Not there yet (or a different account). Create it under the same id.
+  }
+  await stripe.coupons.create(
+    kind === "invite"
+      ? { id, percent_off: 100, duration: "once", name: "First month free" }
+      : {
+          id,
+          amount_off: Math.round(REFERRAL_REWARD_USD * 100),
+          currency: "usd",
+          duration: "once",
+          name: `Referral: $${REFERRAL_REWARD_USD} off`,
+        }
+  );
+  return id;
+}
+
+// Attach a one-off discount to an existing subscription, so it comes off the
+// NEXT invoice. Refuses when a discount is already attached: Stripe would
+// replace it, and two rewards on one month is exactly what the queue exists to
+// prevent. Returns whether it went on.
+export async function attachDiscount(user: User, kind: DiscountKind): Promise<boolean> {
+  if (!stripeEnabled() || !user.stripe_subscription_id) return false;
+  const stripe = stripeClient();
+  const sub = await stripe.subscriptions.retrieve(user.stripe_subscription_id);
+  if (sub.status !== "active" && sub.status !== "trialing") return false;
+  if ((sub.discounts ?? []).length > 0) return false;
+  const coupon = await ensureCoupon(kind);
+  await stripe.subscriptions.update(user.stripe_subscription_id, { discounts: [{ coupon }] });
+  return true;
+}
+
 export async function createMembershipCheckout(
   user: User,
   planId: PlanId,
   interval: BillingInterval,
-  origin: string
+  origin: string,
+  discount?: DiscountKind
 ): Promise<{ url: string }> {
   const plan = PLANS[planId];
   if (!stripeEnabled()) {
-    return { url: `/account?mock=subscribe&plan=${planId}&interval=${interval}` };
+    const d = discount ? `&discount=${discount}` : "";
+    return { url: `/account?mock=subscribe&plan=${planId}&interval=${interval}${d}` };
   }
   const s = await stripeClient().checkout.sessions.create({
     mode: "subscription",
@@ -92,7 +150,8 @@ export async function createMembershipCheckout(
     ...(user.stripe_customer_id
       ? { customer: user.stripe_customer_id }
       : { customer_email: user.email }),
-    metadata: { userId: user.id, kind: "membership", plan: planId, interval },
+    ...(discount ? { discounts: [{ coupon: await ensureCoupon(discount) }] } : {}),
+    metadata: { userId: user.id, kind: "membership", plan: planId, interval, ...(discount ? { discount } : {}) },
     subscription_data: { metadata: { userId: user.id, plan: planId, interval } },
     success_url: `${origin}/account?membership=success`,
     cancel_url: `${origin}/account?membership=cancelled`,

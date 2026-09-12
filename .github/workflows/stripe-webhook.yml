@@ -38,12 +38,12 @@ on:
         type: string
         default: "remerged.ai"
       mode:
-        description: "list = show what exists. create = add the endpoint and store its secret."
+        description: "list = show what exists. create = add the endpoint and store its secret. sync = update an existing endpoint's event list."
         type: choice
-        options: ["list", "create"]
+        options: ["list", "create", "sync"]
         default: "list"
       confirm:
-        description: 'For create: type "create" to confirm.'
+        description: 'For create: type "create" to confirm. sync needs no confirmation — it only changes which events are sent.'
         type: string
         default: ""
       disable_url:
@@ -184,6 +184,40 @@ jobs:
           echo
           echo "SSM values are baked into the Lambda at deploy time, so this"
           echo "takes effect on the next $STAGE deploy."
+
+      # The route gains a case, Stripe keeps sending the old list, and the new
+      # handler never runs — silently, because a webhook that is not subscribed
+      # to an event looks exactly like an event that never happened. sync
+      # reconciles an existing endpoint with what the route actually handles.
+      - name: Sync the event list onto the existing endpoint
+        if: inputs.mode == 'sync'
+        env:
+          SITE: ${{ inputs.site }}
+        run: |
+          set -euo pipefail
+          url="https://$SITE/api/billing/webhook"
+          id=$(curl -sS -u "$STRIPE_SECRET_KEY:" https://api.stripe.com/v1/webhook_endpoints \
+            | jq -r --arg u "$url" '.data[] | select(.url == $u) | .id' | head -1)
+          if [ -z "$id" ]; then
+            echo "No endpoint for $url. Use create mode first."
+            exit 1
+          fi
+          args=()
+          while read -r e; do
+            [ -n "$e" ] || continue
+            args+=(--data-urlencode "enabled_events[]=$e")
+          done < /tmp/events.txt
+          r=$(curl -sS -u "$STRIPE_SECRET_KEY:" "https://api.stripe.com/v1/webhook_endpoints/$id" \
+            "${args[@]}")
+          if [ "$(printf '%s' "$r" | jq -r '.id // empty')" != "$id" ]; then
+            echo "Stripe rejected the update:"
+            printf '%s' "$r" | jq -r '.error.message // .' | sed 's/^/  /'
+            exit 1
+          fi
+          echo "  synced $id"
+          printf '%s' "$r" | jq -r '.enabled_events[]' | sed 's/^/    /'
+          echo
+          echo "The signing secret is unchanged, so nothing in SSM needs touching."
 
       - name: Disable one named endpoint
         if: inputs.mode == 'create' && inputs.disable_url != ''
