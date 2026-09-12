@@ -467,33 +467,46 @@ jobs:
               --query 'LoggingConfig.LogGroup' --output text 2>/dev/null)
             [ -n "$lg" ] && [ "$lg" != "None" ] || lg="/aws/lambda/$fn"
             echo "    log group: $lg"
-            echo "    log (errors shown, not hidden):"
-            # || true on each: the runner's shell has -e, and a missing log
-            # group is a finding to print, not a reason to stop printing.
-            { aws logs filter-log-events --log-group-name "$lg" \
+            echo "    log since the send:"
+            # || true: the runner's shell has -e, and a missing log group is a
+            # finding to print, not a reason to stop printing.
+            events=$({ aws logs filter-log-events --log-group-name "$lg" \
               --start-time "$(( started * 1000 ))" \
-              --query 'events[].message' --output text 2>&1 || true; } | sed 's/^/      /'
-            echo "    may SES invoke it:"
-            { aws lambda get-policy --function-name "$fn" --query Policy --output text 2>&1 || true; } \
-              | (jq -c '[.Statement[]|{Sid,Principal,Action,Condition}]' 2>/dev/null || cat) | sed 's/^/      /'
-            # Then invoke it directly with the message that just landed. A
-            # synchronous invoke returns the error and the last 4KB of logs in
-            # the response, so it answers "does the forward work" without
-            # depending on a log group existing, and separates the forwarder's
-            # own behaviour from whether SES is calling it at all.
-            echo "    invoking it directly with ${key:-?}:"
-            payload=$(jq -nc --arg id "${key##inbound/}" --arg from "no-reply@$DOMAIN" \
-              '{Records:[{ses:{mail:{messageId:$id, source:$from,
-                 commonHeaders:{from:[$from], subject:"direct invoke check"}}}}]}')
-            code=$(aws lambda invoke --function-name "$fn" --log-type Tail \
-              --cli-binary-format raw-in-base64-out --payload "$payload" \
-              --query 'to_string([StatusCode, FunctionError || `ok`])' --output text /tmp/out.json 2>&1 || true)
-            echo "      status: $code"
-            echo "      response: $(head -c 400 /tmp/out.json 2>/dev/null)"
-            aws lambda invoke --function-name "$fn" --log-type Tail \
-              --cli-binary-format raw-in-base64-out --payload "$payload" \
-              --query LogResult --output text /tmp/out2.json 2>/dev/null \
-              | base64 -d 2>/dev/null | sed 's/^/      /' || true
+              --query 'events[].message' --output text 2>&1 || true; })
+            printf '%s\n' "$events" | sed 's/^/      /'
+
+            if printf '%s' "$events" | grep -q "REPORT RequestId"; then
+              # SES invoked it on its own, which is the whole path working. No
+              # reason to send a second copy of the same message to the inbox.
+              if printf '%s' "$events" | grep -q "ERROR"; then
+                echo "    SES invoked it and the invocation FAILED — see above"
+                exit 1
+              fi
+              echo "    SES invoked it and it succeeded: received, stored, forwarded"
+            else
+              echo "    nothing ran. May SES invoke it:"
+              { aws lambda get-policy --function-name "$fn" --query Policy --output text 2>&1 || true; } \
+                | (jq -c '[.Statement[]|{Sid,Principal,Action,Condition}]' 2>/dev/null || cat) | sed 's/^/      /'
+              # A synchronous invoke returns the function error and the last
+              # 4KB of its logs in the response, which separates "the forwarder
+              # is broken" from "SES is not calling it".
+              echo "    invoking it directly with ${key:-?}:"
+              payload=$(jq -nc --arg id "${key##inbound/}" --arg from "no-reply@$DOMAIN" \
+                '{Records:[{ses:{mail:{messageId:$id, source:$from,
+                   commonHeaders:{from:[$from], subject:"direct invoke check"}}}}]}')
+              code=$(aws lambda invoke --function-name "$fn" --log-type Tail \
+                --cli-binary-format raw-in-base64-out --payload "$payload" \
+                --query 'to_string([StatusCode, FunctionError || `ok`])' --output text /tmp/out.json 2>&1 || true)
+              echo "      status: $code"
+              echo "      response: $(head -c 400 /tmp/out.json 2>/dev/null)"
+              aws lambda invoke --function-name "$fn" --log-type Tail \
+                --cli-binary-format raw-in-base64-out --payload "$payload" \
+                --query LogResult --output text /tmp/out2.json 2>/dev/null \
+                | base64 -d 2>/dev/null | sed 's/^/      /' || true
+              echo "      If that says ok, the forwarder works and the problem"
+              echo "      is SES not invoking it."
+              exit 1
+            fi
 
             # Whether SES is calling it at all is a separate question from
             # whether it works, and these are the three things that hide the
