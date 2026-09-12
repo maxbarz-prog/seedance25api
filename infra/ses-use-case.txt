@@ -1,50 +1,33 @@
-Reply to case 178878528300157 — additional information about our use case.
-
-Since that case was opened, the service has moved to its own domain
-(remerged.ai) and the verified identity you asked for is in place. Answers to
-each of your questions follow.
-
---------------------------------------------------------------------------
-VERIFIED IDENTITY
-
-remerged.ai is a verified DOMAIN identity in us-east-1:
-  - Easy DKIM enabled, DkimAttributes.Status = SUCCESS, three CNAMEs
-    published (<token>._domainkey.remerged.ai -> <token>.dkim.amazonses.com)
-  - SPF at the apex: v=spf1 include:amazonses.com ~all
-  - DMARC at _dmarc.remerged.ai: v=DMARC1; p=none; rua=mailto:support@remerged.ai
-  - MX at the apex: 10 inbound-smtp.us-east-1.amazonaws.com, so the domain
-    also receives mail through SES
-
-All mail is sent from no-reply@remerged.ai, and support@remerged.ai is a real
-mailbox that a person reads (SES receives it, stores it in S3 and a Lambda
-forwards it to the operator's inbox). Replies and complaints reach a human.
-
---------------------------------------------------------------------------
-WHAT THE SERVICE IS
-
 Remerged (https://remerged.ai) generates video from a text prompt using
-third-party model APIs, and resells that capacity at cost. A member signs up,
+third-party model APIs and resells that capacity at cost. A member signs up,
 buys credits, submits a prompt, and a rendering job runs for one to several
-minutes.
+minutes. We are asking for production access in us-east-1 at the default
+quota. We do not need a raised sending rate — the sandbox's restriction to
+verified addresses is the only thing in our way, because it means a member
+who signs up cannot receive the notification for the video they just made.
 
---------------------------------------------------------------------------
+VERIFIED IDENTITY
+remerged.ai is a verified domain identity in us-east-1: Easy DKIM enabled
+with DkimAttributes.Status = SUCCESS and three CNAMEs published; SPF at the
+apex (v=spf1 include:amazonses.com ~all); DMARC at _dmarc.remerged.ai
+(v=DMARC1; p=none; rua=mailto:support@remerged.ai); and MX at the apex
+(10 inbound-smtp.us-east-1.amazonaws.com), so the domain also receives mail
+through SES. All mail is sent from no-reply@remerged.ai, and
+support@remerged.ai is a real mailbox a person reads — SES receives it, stores
+it in S3, and a Lambda forwards it to the operator's inbox. Replies and
+complaints reach a human.
+
 HOW OFTEN WE SEND
-
 Rarely, and never on a schedule. Every message is triggered by an action a
-member took in the product; there is no campaign, broadcast, digest or
-recurring send of any kind.
+member took in the product. There is no campaign, broadcast, digest or
+recurring send of any kind. The service has not launched and has no members;
+at launch we expect well under 100 messages a day. The only sends on this
+account so far are a few dozen of our own tests.
 
-The service has not launched and has no members. At launch we expect well
-under 100 messages a day. Our sandbox quota of 200/day has not been
-approached: the only sends on this account so far are a few dozen of our own
-tests. We are asking for production access because the recipients will be
-real members, not because we need volume.
+WHAT WE SEND — the complete list, with the content as sent
 
---------------------------------------------------------------------------
-WHAT WE SEND (the complete list, with the actual content)
-
-1. "Your video is ready" — one message when a rendering job the member
-   started has finished. This is the only message a member normally receives.
+1. "Your video is ready" — one message when a rendering job the member started
+   has finished. This is the only message a member normally receives.
 
      From:    Remerged <no-reply@remerged.ai>
      Subject: Your Remerged video is ready
@@ -54,7 +37,7 @@ WHAT WE SEND (the complete list, with the actual content)
 
        "a paper boat drifting down a rain-filled gutter at night"
 
-   (The duration, link and quoted prompt are the member's own job.)
+   The duration, link and quoted prompt are the member's own job.
 
 2. Password reset, for accounts using our built-in email-and-password login.
 
@@ -63,7 +46,7 @@ WHAT WE SEND (the complete list, with the actual content)
      Body:
        Use this link within the next hour to choose a new password:
 
-       https://remerged.ai/reset?token=<single-use token, 1 hour>
+       https://remerged.ai/reset?token=<single-use token, valid one hour>
 
        If you didn't ask for this, you can ignore it.
 
@@ -71,52 +54,30 @@ There is no third message type. Sign-in codes and email verification are sent
 by our authentication provider (Clerk) from its own infrastructure, not
 through SES.
 
---------------------------------------------------------------------------
 HOW WE MAINTAIN THE RECIPIENT LIST
-
 There is no list. Addresses live on account records in DynamoDB, one row per
 member, and an address gets there exactly one way: the person typed it into
-our sign-up form and confirmed it. Sign-up goes through Clerk, which verifies
+our sign-up form and confirmed it. Sign-up runs through Clerk, which verifies
 the address before the account becomes usable, so we never hold an
-unconfirmed address.
+unconfirmed address. We have never purchased, rented, imported or scraped a
+list, and we do not send to addresses that did not register themselves.
+Deleting an account removes the row and with it any possibility of mail;
+deletion and deactivation are both self-service in the product.
 
-We have never purchased, rented, imported, scraped or inherited a list, and
-we do not send to addresses that did not register themselves. We do not
-send to role addresses or to addresses harvested from anywhere.
-
-Deleting an account removes the row, and with it any possibility of mail.
-Account deletion is self-service in the product (Account -> Delete account),
-as is deactivation, which stops all activity while keeping the library.
-
---------------------------------------------------------------------------
-HOW WE HANDLE BOUNCES, COMPLAINTS AND UNSUBSCRIBES
-
+BOUNCES, COMPLAINTS AND UNSUBSCRIBES
 Bounces: the account-level suppression list is enabled for BOUNCE, so SES
-suppresses an address that hard-bounces and we do not attempt it again. We do
-not retry failed sends, because each message is tied to one completed job and
-has no value once stale.
-
-Complaints: the suppression list is also enabled for COMPLAINT, so a
-recipient marking a message as spam stops all further mail to that address
-immediately, at the SES level, without any action on our side.
-
+suppresses an address that hard-bounces and we never attempt it again. We do
+not retry failed sends — each message is tied to one completed job and has no
+value once stale.
+Complaints: suppression is also enabled for COMPLAINT, so a recipient marking
+a message as spam stops all further mail to that address immediately, at the
+SES level, with no action needed from us.
 Monitoring: bounce and complaint rates are watched through the AWS/SES
-CloudWatch metrics, alongside Send and Delivery. Our sending volume is small
-enough that a single bounce is visible.
-
+CloudWatch metrics alongside Send and Delivery. At our volume a single bounce
+is visible.
 Unsubscribes: both message types are transactional — one confirms work the
 member paid for and asked for, the other is a password reset they requested
-seconds earlier — so neither carries a marketing unsubscribe link, and there
-is no list to unsubscribe from. A member who wants no mail at all can
-deactivate or delete the account, which stops everything. If you would prefer
-we add a per-member switch for the job-completion notification, we will add
-one; it is a small change and we would rather do it than send mail anyone
-finds unwelcome.
-
---------------------------------------------------------------------------
-WHAT WE ARE ASKING FOR
-
-Production access in us-east-1, at the default quota. We do not need a raised
-sending rate; the sandbox restriction to verified addresses is the only thing
-in our way, because it means a member who signs up cannot receive the
-notification for the video they just generated.
+seconds earlier — so neither carries a marketing unsubscribe link and there is
+no list to unsubscribe from. A member who wants no mail at all can deactivate
+or delete their account, which stops everything. If you would prefer a
+per-member switch for the completion notification, we will add one.
