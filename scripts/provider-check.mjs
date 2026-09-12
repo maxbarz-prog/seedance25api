@@ -131,7 +131,6 @@ async function checkClerk() {
     } else {
       out.siteCheck = `ok: instance serves ${site}`;
       // Make sure the instance's CNAMEs exist in our hosted zone (idempotent).
-      if (process.env.CLERK_DNS === "upsert") out.dns = clerkDns(site, match);
     }
   }
   summary.checks.clerk = out;
@@ -141,25 +140,6 @@ async function checkClerk() {
 
 // Upsert a Clerk domain's CNAME targets into the Route 53 zone for `site`
 // (the deploy role has the permission; records are idempotent).
-function clerkDns(site, domain) {
-  const region = process.env.AWS_REGION || "us-east-1";
-  const zones = spawnSync("aws", [
-    "route53", "list-hosted-zones", "--query", `HostedZones[?Name=='${site}.'].Id`, "--output", "text", "--region", region,
-  ], { encoding: "utf8" });
-  const zoneId = (zones.stdout || "").trim();
-  if (!zoneId) return { error: `no hosted zone for ${site}` };
-  const changes = (domain.cnameTargets || []).map((t) => {
-    const [host, value] = t.replace(/ \(optional\)$/, "").split(" -> ");
-    return { Action: "UPSERT", ResourceRecordSet: { Name: host, Type: "CNAME", TTL: 300, ResourceRecords: [{ Value: value }] } };
-  });
-  if (!changes.length) return { result: "no CNAME targets" };
-  const r = spawnSync("aws", [
-    "route53", "change-resource-record-sets", "--hosted-zone-id", zoneId,
-    "--change-batch", JSON.stringify({ Changes: changes }), "--region", region,
-  ], { encoding: "utf8" });
-  return r.status === 0 ? { result: `upserted ${changes.length} records in ${zoneId}` } : { error: r.stderr.slice(0, 300) };
-}
-
 // ---------- ModelArk ----------
 function arkHeaders() {
   return { Authorization: `Bearer ${need("BYTEPLUS_API_KEY")}`, "Content-Type": "application/json" };

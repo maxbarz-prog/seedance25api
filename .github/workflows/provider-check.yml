@@ -30,11 +30,6 @@ on:
         type: choice
         options: [none, create, recreate]
         default: none
-      clerk_dns:
-        description: "Clerk DNS: none, or upsert the instance's CNAMEs into the Route 53 zone (only when the instance serves remerged.click)"
-        type: choice
-        options: [none, upsert]
-        default: none
 
 permissions:
   id-token: write
@@ -82,7 +77,6 @@ jobs:
           echo "WEBHOOK_URL=https://$host/api/billing/webhook" >> "$GITHUB_ENV"
           echo "WEBHOOK_PARAM=/remerged/$STAGE/STRIPE_WEBHOOK_SECRET" >> "$GITHUB_ENV"
           echo "SITE_DOMAIN=remerged.ai" >> "$GITHUB_ENV"
-          echo "CLERK_DNS=${{ inputs.clerk_dns }}" >> "$GITHUB_ENV"
 
       - name: Install ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg >/dev/null && ffprobe -version | head -1

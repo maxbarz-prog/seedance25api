@@ -10,8 +10,9 @@ name: Mail domain
 # polls for minutes is a job wearing a deployment's clothes. So: run this,
 # watch it go green, and only then change the receipt rule and MAIL_DOMAIN.
 #
-# infra/bootstrap.sh does the same job for remerged.click, whose zone is in
-# Route 53. That path is left alone — remerged.click keeps receiving mail.
+# remerged.click no longer receives anything: its MX is gone and the receipt
+# rule accepts support@remerged.ai alone. Its Route 53 zone and SES identity
+# still exist, and serve nothing.
 #
 # check and setup are FREE — SES identities, DKIM and DNS records cost nothing.
 # test sends one real message and receives it: about $0.0002 all in.
@@ -124,6 +125,12 @@ jobs:
           aws sesv2 get-account \
             --query '{production:ProductionAccessEnabled,sending:SendingEnabled,quota:SendQuota.Max24HourSend}' \
             --output json | sed 's/^/    /' || true
+          echo "  outbound sender per stage:"
+          for st in dev prod; do
+            v=$(aws ssm get-parameter --name "/remerged/$st/EMAIL_FROM" \
+              --query Parameter.Value --output text 2>/dev/null || echo "(unset)")
+            echo "    $st: $v"
+          done
           echo "  verified identities:"
           aws sesv2 list-email-identities --query 'EmailIdentities[].{id:IdentityName,verified:VerifiedForSendingStatus}' \
             --output json | sed 's/^/    /' || true

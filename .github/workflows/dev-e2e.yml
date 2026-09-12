@@ -17,7 +17,7 @@ on:
         type: string
         default: dev
       email:
-        description: "Test account email (default: a fresh e2e+<ts>@remerged.click)"
+        description: "Test account email (default: a fresh success+e2e-<ts>@simulator.amazonses.com, which never bounces)"
         type: string
         default: ""
       generate:

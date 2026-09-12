@@ -13,7 +13,7 @@ const ses = new SESv2Client({});
 const BUCKET = process.env.INBOUND_BUCKET!;
 const PREFIX = process.env.INBOUND_PREFIX || "inbound/";
 const FORWARD_TO = process.env.FORWARD_TO!;
-const MAIL_FROM = process.env.MAIL_FROM!; // e.g. support@remerged.click
+const MAIL_FROM = process.env.MAIL_FROM!; // e.g. support@remerged.ai
 
 interface SesEvent {
   Records: { ses: { mail: { messageId: string; source: string; commonHeaders?: { from?: string[]; subject?: string } } } }[];

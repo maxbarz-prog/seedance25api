@@ -509,6 +509,10 @@ were never rendered.
 ## Housekeeping
 
 Test accounts named `e2e+<timestamp>@remerged.click` exist in the Clerk
-development instance and the dev Dynamo tables; delete them when convenient.
+development instance and the dev Dynamo tables. Delete them: remerged.click has
+no MX any more, so anything the app sends them — the job-ready notification, a
+reset — HARD BOUNCES, and bounce rate is what AWS is judging while production
+access is under review. New e2e accounts use
+`success+e2e-<ts>@simulator.amazonses.com`, which accepts and discards.
 One stray user `e2e+1788896363551@remerged.click` sits in the old
 facematch Clerk app.

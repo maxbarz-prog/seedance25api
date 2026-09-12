@@ -13,9 +13,14 @@ import { chromium } from "playwright";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
 
-const BASE = (process.env.BASE_URL || "https://dev.remerged.click").replace(/\/$/, "");
+const BASE = (process.env.BASE_URL || "https://dev.remerged.ai").replace(/\/$/, "");
 const CLERK = process.env.CLERK_SECRET_KEY;
-const EMAIL = process.env.E2E_EMAIL || `e2e+${Date.now()}@remerged.click`;
+// AWS's mailbox simulator, not a domain of ours. A test account's address gets
+// real mail sent to it — the job-ready notification, for one — and an address
+// at a domain with no MX hard-bounces, which damages the sending reputation
+// this account is currently being reviewed on. success@simulator.amazonses.com
+// accepts and discards, and counts as a delivery rather than a bounce.
+const EMAIL = process.env.E2E_EMAIL || `success+e2e-${Date.now()}@simulator.amazonses.com`;
 const DURATION_S = Number(process.env.DURATION_S || 4);
 const EXTEND_S = Number(process.env.EXTEND_S || 4);
 const OUT = process.env.E2E_OUT || "e2e-out";
