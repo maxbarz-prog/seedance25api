@@ -337,6 +337,8 @@ jobs:
               echo "    received $(( now - before )) message(s):"
               aws s3api list-objects-v2 --bucket "$b" --prefix inbound/ \
                 --query 'sort_by(Contents, &LastModified)[-3:].[Key,LastModified]' --output text | sed 's/^/      /'
+              key=$(aws s3api list-objects-v2 --bucket "$b" --prefix inbound/ \
+                --query 'sort_by(Contents, &LastModified)[-1].Key' --output text)
               break
             fi
             if [ "$(date +%s)" -ge "$deadline" ]; then
@@ -390,6 +392,25 @@ jobs:
             echo "    may SES invoke it:"
             { aws lambda get-policy --function-name "$fn" --query Policy --output text 2>&1 || true; } \
               | (jq -c '[.Statement[]|{Sid,Principal,Action,Condition}]' 2>/dev/null || cat) | sed 's/^/      /'
+            # Then invoke it directly with the message that just landed. A
+            # synchronous invoke returns the error and the last 4KB of logs in
+            # the response, so it answers "does the forward work" without
+            # depending on a log group existing, and separates the forwarder's
+            # own behaviour from whether SES is calling it at all.
+            echo "    invoking it directly with ${key:-?}:"
+            payload=$(jq -nc --arg id "${key##inbound/}" --arg from "no-reply@$DOMAIN" \
+              '{Records:[{ses:{mail:{messageId:$id, source:$from,
+                 commonHeaders:{from:[$from], subject:"direct invoke check"}}}}]}')
+            code=$(aws lambda invoke --function-name "$fn" --log-type Tail \
+              --cli-binary-format raw-in-base64-out --payload "$payload" \
+              --query 'to_string([StatusCode, FunctionError || `ok`])' --output text /tmp/out.json 2>&1 || true)
+            echo "      status: $code"
+            echo "      response: $(head -c 400 /tmp/out.json 2>/dev/null)"
+            aws lambda invoke --function-name "$fn" --log-type Tail \
+              --cli-binary-format raw-in-base64-out --payload "$payload" \
+              --query LogResult --output text /tmp/out2.json 2>/dev/null \
+              | base64 -d 2>/dev/null | sed 's/^/      /' || true
+
             for m in Invocations Errors; do
               v=$(aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name "$m" \
                 --dimensions "Name=FunctionName,Value=$fn" \
