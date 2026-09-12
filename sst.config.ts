@@ -179,50 +179,56 @@ export default $config({
       const legacyMailDomain = "remerged.click";
       const account = aws.getCallerIdentityOutput();
       const zone = aws.route53.getZoneOutput({ name: legacyMailDomain });
-      const inbound = new sst.aws.Bucket("Inbound");
-      // Let SES write received messages into inbound/.
-      //
-      // Its own policy resource, not a transform appending to SST's. SST only
-      // manages a bucket policy when the bucket needs one, and for a private
-      // bucket it manages none — so a transform on `policy` never ran and this
-      // bucket sat with NO policy at all. SES then cannot write, which is not
-      // a quiet degradation: it fails the validation write on every
-      // CreateReceiptRule/UpdateReceiptRule, and refuses delivery.
-      //
-      // Two statements rather than one because SES has changed how it
-      // identifies itself. aws:SourceAccount/aws:SourceArn is the current
-      // form; aws:Referer is the older one AWS documented for years. Either
-      // satisfies the grant and both pin it to this account, so the bucket is
-      // never writable by another account's SES that happens to know the
-      // name — and the rule does not break on whichever signal SES sends.
-      const inboundPolicy = new aws.s3.BucketPolicy("InboundPolicy", {
-        bucket: inbound.name,
-        policy: $resolve([inbound.name, account.accountId]).apply(([bucket, acct]) =>
-          JSON.stringify({
-            Version: "2012-10-17",
-            Statement: [
-              {
-                Sid: "AllowSESPutsBySource",
-                Effect: "Allow",
-                Principal: { Service: "ses.amazonaws.com" },
-                Action: "s3:PutObject",
-                Resource: `arn:aws:s3:::${bucket}/inbound/*`,
-                Condition: {
-                  StringEquals: { "aws:SourceAccount": acct },
-                  StringLike: { "aws:SourceArn": `arn:aws:ses:us-east-1:${acct}:*` },
-                },
-              },
-              {
-                Sid: "AllowSESPutsByReferer",
-                Effect: "Allow",
-                Principal: { Service: "ses.amazonaws.com" },
-                Action: "s3:PutObject",
-                Resource: `arn:aws:s3:::${bucket}/inbound/*`,
-                Condition: { StringEquals: { "aws:Referer": acct } },
-              },
-            ],
-          })
-        ),
+      const inbound = new sst.aws.Bucket("Inbound", {
+        transform: {
+          // Let SES write received messages into inbound/, appended to the
+          // policy SST manages for the bucket. This is SST's own extension
+          // point: it creates the policy resource (an "InboundPolicy" child),
+          // so a second aws.s3.BucketPolicy of our own collides with it.
+          //
+          // Two statements rather than one because SES changed how it
+          // identifies itself. aws:SourceAccount with aws:SourceArn is the
+          // form AWS documents now; aws:Referer is the form it documented for
+          // years, and the one this grant used to carry alone — which is why
+          // the rule stopped accepting updates with
+          //
+          //   InvalidS3Configuration: Could not write to bucket
+          //
+          // while nothing about the bucket had changed. Either statement
+          // satisfies the grant and both pin it to this account, so the
+          // bucket is never writable by another account's SES that happens to
+          // know the name.
+          policy: (args) => {
+            args.policy = $resolve([args.policy, args.bucket, account.accountId]).apply(
+              ([policy, bucket, acct]) => {
+                const doc = JSON.parse(String(policy));
+                const resource = `arn:aws:s3:::${bucket}/inbound/*`;
+                doc.Statement.push(
+                  {
+                    Sid: "AllowSESPutsBySource",
+                    Effect: "Allow",
+                    Principal: { Service: "ses.amazonaws.com" },
+                    Action: "s3:PutObject",
+                    Resource: resource,
+                    Condition: {
+                      StringEquals: { "aws:SourceAccount": acct },
+                      StringLike: { "aws:SourceArn": `arn:aws:ses:us-east-1:${acct}:*` },
+                    },
+                  },
+                  {
+                    Sid: "AllowSESPutsByReferer",
+                    Effect: "Allow",
+                    Principal: { Service: "ses.amazonaws.com" },
+                    Action: "s3:PutObject",
+                    Resource: resource,
+                    Condition: { StringEquals: { "aws:Referer": acct } },
+                  }
+                );
+                return JSON.stringify(doc);
+              }
+            );
+          },
+        },
       });
       const forwarder = new sst.aws.Function("MailForwarder", {
         handler: "functions/mail-forward.handler",
@@ -255,10 +261,7 @@ export default $config({
         scanEnabled: true,
         s3Actions: [{ bucketName: inbound.name, objectKeyPrefix: "inbound/", position: 1 }],
         lambdaActions: [{ functionArn: forwarder.arn, invocationType: "Event", position: 2 }],
-        // SES test-writes to the bucket while creating or updating the rule,
-        // so the policy has to be in place first. Nothing in the arguments
-        // says so, hence the explicit edge.
-      }, { dependsOn: [inboundPolicy] });
+      });
       // remerged.ai's MX is written by the workflow; this is the other one.
       new aws.route53.Record("MailMx", {
         zoneId: zone.zoneId,

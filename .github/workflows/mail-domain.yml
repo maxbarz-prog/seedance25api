@@ -97,8 +97,15 @@ jobs:
           fi
           echo "  bucket: $b"
           echo "  policy:"
-          aws s3api get-bucket-policy --bucket "$b" --query Policy --output text 2>/dev/null \
-            | jq . | sed 's/^/    /' || echo "    (no policy)"
+          # Never 2>/dev/null here. An AccessDenied on s3:GetBucketPolicy looks
+          # exactly like an absent policy once stderr is thrown away, and the
+          # difference is the whole diagnosis.
+          if pol=$(aws s3api get-bucket-policy --bucket "$b" --query Policy --output text 2>&1); then
+            printf '%s' "$pol" | jq . | sed 's/^/    /'
+          else
+            echo "    could not read it:"
+            printf '%s\n' "$pol" | sed 's/^/    /'
+          fi
           echo "  encryption:"
           aws s3api get-bucket-encryption --bucket "$b" 2>/dev/null | jq -c '.ServerSideEncryptionConfiguration.Rules' | sed 's/^/    /' || echo "    (none)"
           echo "  public access block:"
