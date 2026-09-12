@@ -33,6 +33,7 @@ import {
 import CreditsDialog, { CreditsBlock } from "./CreditsDialog";
 import { PricingConstants, quoteWith } from "@/lib/pricing";
 import { BALANCE_EVENT } from "./Header";
+import { fetchMe } from "@/lib/me-client";
 
 const ROLE_LABELS: Record<ImageRole, string> = {
   reference: "Reference",
@@ -75,6 +76,10 @@ export default function Composer({
   const [uploading, setUploading] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [seed, setSeed] = useState<string>("");
+  // Known before anything is clicked. Posting a job to be told 401 costs a
+  // round trip to us-east-1 to learn something the page could have asked while
+  // the prompt was being typed.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
   const [cameraFixed, setCameraFixed] = useState(false);
   const [variations, setVariations] = useState(1);
 
@@ -140,7 +145,7 @@ export default function Composer({
           body: JSON.stringify({ contentType: file.type }),
         });
         if (res.status === 401) {
-          router.push("/signup?next=/");
+          router.push("/sign-up");
           return;
         }
         const p = await res.json();
@@ -180,6 +185,17 @@ export default function Composer({
       setUploading(false);
     }
   }
+
+  // Asked once while the prompt is being typed, so a click never waits on it.
+  useEffect(() => {
+    fetchMe().then((d) => setSignedIn(!!d.user)).catch(() => {});
+  }, []);
+
+  // Prefetched so signup is already loaded by the time it is needed, rather
+  // than a cold page load of Clerk's route after the click.
+  useEffect(() => {
+    if (signedIn === false) router.prefetch("/sign-up");
+  }, [signedIn, router]);
 
   // Draft survives the signup/membership/top-up detour.
   useEffect(() => {
@@ -252,6 +268,12 @@ export default function Composer({
       setError("Describe the video you want first.");
       return;
     }
+    // Signed out: straight to signup, no round trip. The draft is already kept
+    // in localStorage, so the prompt is waiting when they come back.
+    if (signedIn === false) {
+      router.push("/sign-up");
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch("/api/jobs", {
@@ -272,7 +294,7 @@ export default function Composer({
       });
       const data = await res.json();
       if (res.status === 401) {
-        router.push("/signup?next=/");
+        router.push("/sign-up");
         return;
       }
       if (res.status === 402) {

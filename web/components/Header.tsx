@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { CREDIT_USD, SITE_NAME } from "@/lib/config";
+import { fetchMe } from "@/lib/me-client";
 
 interface Me {
   email: string;
@@ -19,9 +20,10 @@ export default function Header() {
   const [me, setMe] = useState<Me | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const load = useCallback(() => {
-    fetch("/api/me")
-      .then((r) => r.json())
+  // force: the shared answer is cached for the page load, and these events mean
+  // it has changed — a purchase, a spend, or coming back to the tab.
+  const load = useCallback((force = false) => {
+    fetchMe(force)
       .then((d) => setMe(d.user))
       .catch(() => {})
       .finally(() => setLoaded(true));
@@ -29,12 +31,12 @@ export default function Header() {
 
   useEffect(() => {
     load();
-    const onFocus = () => load();
-    window.addEventListener(BALANCE_EVENT, load);
-    window.addEventListener("focus", onFocus);
+    const refresh = () => load(true);
+    window.addEventListener(BALANCE_EVENT, refresh);
+    window.addEventListener("focus", refresh);
     return () => {
-      window.removeEventListener(BALANCE_EVENT, load);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener(BALANCE_EVENT, refresh);
+      window.removeEventListener("focus", refresh);
     };
   }, [load]);
 
