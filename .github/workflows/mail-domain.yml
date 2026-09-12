@@ -487,7 +487,21 @@ jobs:
               --query LogResult --output text /tmp/out2.json 2>/dev/null \
               | base64 -d 2>/dev/null | sed 's/^/      /' || true
 
-            for m in Invocations Errors; do
+            # Whether SES is calling it at all is a separate question from
+            # whether it works, and these are the three things that hide the
+            # answer: a throttled function is never invoked and writes no log,
+            # a role without logs permissions runs invisibly, and the rule's
+            # own action list is the only record of what SES was told to do.
+            echo "    reserved concurrency: $(aws lambda get-function-concurrency \
+              --function-name "$fn" --query ReservedConcurrentExecutions --output text 2>&1 || true)"
+            role=$(aws lambda get-function-configuration --function-name "$fn" \
+              --query Role --output text 2>/dev/null || true)
+            echo "    role: ${role##*/}"
+            { aws iam list-attached-role-policies --role-name "${role##*/}" \
+              --query 'AttachedPolicies[].PolicyName' --output text 2>&1 || true; } | sed 's/^/      attached: /'
+            { aws iam list-role-policies --role-name "${role##*/}" \
+              --query 'PolicyNames' --output text 2>&1 || true; } | sed 's/^/      inline: /'
+            for m in Invocations Errors Throttles; do
               v=$(aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name "$m" \
                 --dimensions "Name=FunctionName,Value=$fn" \
                 --start-time "$(date -u -d @$(( started - 60 )) +%Y-%m-%dT%H:%M:%SZ)" \
@@ -505,6 +519,9 @@ jobs:
               --query 'Datapoints[0].Sum' --output text 2>/dev/null)
             echo "  SES $m since the send: ${v:-none}"
           done
+          echo "  the rule exactly as SES holds it:"
+          aws ses describe-active-receipt-rule-set --output json \
+            | jq -c '.Rules[]' | sed 's/^/    /' || true
           echo
           echo "If the log shows an error sending, the account is probably still in"
           echo "the SES sandbox and the forward destination is not a verified identity."
