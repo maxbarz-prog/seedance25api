@@ -13,9 +13,8 @@ Live at **[remerged.ai](https://remerged.ai)** (production) and
 > unchanged; SST writes the records through `sst.cloudflare.dns()` using the
 > `CLOUDFLARE_API_TOKEN` repository secret. Mail is on `remerged.ai` too — its
 > SES identity, DKIM, MX, SPF and DMARC come from
-> `.github/workflows/mail-domain.yml`. `remerged.click` stays registered in
-> Route 53 and keeps receiving at `support@`, so nothing sent to the old
-> address is ever bounced.
+> `.github/workflows/mail-domain.yml`. `remerged.click` is still registered in
+> Route 53 but serves nothing: not the site, not auth, not mail.
 
 > The repository root previously held a marketing README for an unrelated
 > product (reAPI's API gateway). It is preserved at

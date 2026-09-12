@@ -431,10 +431,11 @@ were never rendered.
      MX at `inbound-smtp.us-east-1.amazonaws.com`, SPF, and DMARC at
      `p=none`, all in the Cloudflare zone.
      `.github/workflows/mail-domain.yml` did it and can do it again;
-     `check` mode reports without touching anything. The receipt rule accepts
-     `support@remerged.ai` **and** `support@remerged.click`, so the old
-     address keeps working indefinitely, and `infra/bootstrap.sh` moves
-     `EMAIL_FROM` to the primary domain only once SES reports it verified.
+     `check` mode reports without touching anything and `test` mode sends one
+     real message through the whole path for about $0.0002. The receipt rule
+     accepts `support@remerged.ai` only — `remerged.click` no longer receives
+     and its MX is gone — and `infra/bootstrap.sh` sets `EMAIL_FROM` on the
+     domain only once SES reports it verified.
      What is left is one browser step nobody else can do: adding
      `support@remerged.ai` to Gmail as "Send mail as" over SES SMTP
      (`email-smtp.us-east-1.amazonaws.com:587`, username in

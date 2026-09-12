@@ -88,7 +88,7 @@ jobs:
           set -uo pipefail
           echo "  active rule set:"
           aws ses describe-active-receipt-rule-set \
-            --query 'Rules[].{name:Name,recipients:Recipients,s3:Actions[?S3Action].S3Action.BucketName}' \
+            --query 'Rules[].{name:Name,recipients:Recipients,enabled:Enabled,s3:Actions[?S3Action].S3Action.BucketName,lambda:Actions[?LambdaAction].LambdaAction.FunctionArn}' \
             --output json | sed 's/^/    /' || true
           # Read the bucket off the rule, not by guessing at its name. The name
           # is generated and has already changed once; the rule is the only
@@ -128,9 +128,14 @@ jobs:
           aws sesv2 list-email-identities --query 'EmailIdentities[].{id:IdentityName,verified:VerifiedForSendingStatus}' \
             --output json | sed 's/^/    /' || true
 
-          fn=$(aws lambda list-functions \
-            --query "Functions[?contains(FunctionName, 'MailForwarder')].FunctionName" --output text \
+          # Off the rule again, for the same reason as the bucket: the rule is
+          # what SES actually invokes. Matching function names by pattern found
+          # a MailForwarder that nothing was calling, which reads exactly like
+          # a broken forwarder.
+          fn=$(aws ses describe-active-receipt-rule-set \
+            --query 'Rules[].Actions[?LambdaAction].LambdaAction.FunctionArn' --output text \
             | tr '\t' '\n' | head -1)
+          fn="${fn##*:function:}"
           if [ -n "$fn" ]; then
             echo "  forwarder: $fn"
             aws lambda get-function-configuration --function-name "$fn" \
@@ -297,8 +302,8 @@ jobs:
       # mail still not arrive. Send one message to support@, watch it land in
       # S3, then read the forwarder's own log for what it did with it.
       # An end-to-end test, because every part of this can look right and the
-      # mail still not arrive. Send to both accepted addresses, watch for S3 to
-      # fill, then read the forwarder's own log for what it did with it. When
+      # mail still not arrive. Send to support@, watch for S3 to fill, then
+      # read the forwarder's own log for what it did with it. When
       # nothing lands, print the evidence that separates the three possible
       # failures rather than leaving it to guesswork: never reached SES, SES
       # matched no rule, or the rule's action failed and the message bounced.
@@ -312,7 +317,7 @@ jobs:
             --query 'length(Contents || `[]`)' --output text 2>/dev/null || echo 0)
           echo "  objects under inbound/ before: $before"
 
-          for to in "support@$DOMAIN" "support@remerged.click"; do
+          for to in "support@$DOMAIN"; do
             cat > /tmp/content.json <<JSON
           {"Simple":{"Subject":{"Data":"Remerged mail path test to $to"},
             "Body":{"Text":{"Data":"If this reached the private inbox, receiving and forwarding both work."}}}}

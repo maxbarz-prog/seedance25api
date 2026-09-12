@@ -12,11 +12,10 @@
 // records live at Cloudflare, and SST writes them through
 // sst.cloudflare.dns() using the CLOUDFLARE_API_TOKEN repository secret.
 //
-// remerged.click stays registered in Route 53 and keeps receiving mail (see
-// the SES block below), but nothing else. It is not redirected to
-// remerged.ai: with no users, no inbound links and no rankings there is
-// nothing to preserve, and a redirect spanning two DNS providers is real
-// complexity for no gain.
+// remerged.click is registered in Route 53 and now serves nothing: not the
+// site, not auth, not mail. It is not even redirected to remerged.ai — with
+// no users, no inbound links and no rankings there is nothing to preserve,
+// and a redirect spanning two DNS providers is real complexity for no gain.
 
 export default $config({
   app(input) {
@@ -80,8 +79,7 @@ export default $config({
     // to /help on the canonical host, so there is one URL per article.
     //
     // `dns` applies to every name in this block, which is why they must all
-    // sit in the same Cloudflare zone. Nothing on remerged.click can be
-    // listed here.
+    // sit in the same Cloudflare zone.
     const dns = sst.cloudflare.dns();
     const domain =
       $app.stage === "prod"
@@ -163,22 +161,18 @@ export default $config({
     // global, so exactly one stage owns them (MAIL_STAGE, default dev until
     // prod exists).
     //
-    // Two domains receive, and will keep doing so: remerged.ai is where
-    // support@ is published, remerged.click is what the SES identity and MX
-    // were first built on and what anything already sent is addressed to.
-    // Accepting both costs one extra entry in the rule and means no message
-    // is ever bounced by a cutover.
+    // One address, on remerged.ai. remerged.click received support mail until
+    // tonight and does not any more: there are no members and nothing was ever
+    // sent to it, so keeping it alive would only mean a second address nobody
+    // reads. Its MX is gone with this, which bounces anything addressed there
+    // at the sender rather than accepting it silently.
     //
-    // Their DNS lives in different places, so each gets its records from a
-    // different direction: remerged.click from the Route 53 zone below and
-    // infra/bootstrap.sh, remerged.ai from .github/workflows/mail-domain.yml,
-    // which writes into Cloudflare and waits for SES to verify. Nothing here
-    // creates the remerged.ai records — run that workflow first.
+    // The remerged.ai records are NOT created here — the SES identity, DKIM,
+    // MX, SPF and DMARC come from .github/workflows/mail-domain.yml, which
+    // writes into Cloudflare and waits for SES to verify. Run that first.
     if ($app.stage === (process.env.MAIL_STAGE || "dev")) {
       const mailDomain = "remerged.ai";
-      const legacyMailDomain = "remerged.click";
       const account = aws.getCallerIdentityOutput();
-      const zone = aws.route53.getZoneOutput({ name: legacyMailDomain });
       // A plain S3 bucket, not sst.aws.Bucket, because this one needs a bucket
       // policy and SST owns that decision for its own component. SST only
       // instantiates a policy resource when the bucket needs one, and for a
@@ -264,7 +258,7 @@ export default $config({
       new aws.ses.ReceiptRule("SupportRule", {
         ruleSetName: ruleSet.ruleSetName,
         name: "support",
-        recipients: [`support@${mailDomain}`, `support@${legacyMailDomain}`],
+        recipients: [`support@${mailDomain}`],
         enabled: true,
         scanEnabled: true,
         s3Actions: [{ bucketName: inbound.bucket, objectKeyPrefix: "inbound/", position: 1 }],
@@ -272,14 +266,6 @@ export default $config({
         // SES test-writes to the bucket while creating or updating the rule, so
         // the grant has to exist first. Nothing in the arguments says so.
       }, { dependsOn: [inboundPolicy] });
-      // remerged.ai's MX is written by the workflow; this is the other one.
-      new aws.route53.Record("MailMx", {
-        zoneId: zone.zoneId,
-        name: legacyMailDomain,
-        type: "MX",
-        ttl: 300,
-        records: ["10 inbound-smtp.us-east-1.amazonaws.com"],
-      });
     }
 
     return { url: site.url, bucket: media.name };

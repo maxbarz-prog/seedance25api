@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
 # Idempotent per-stage bootstrap, run by the deploy workflow before `sst deploy`.
 # Creates what a stage needs that isn't in code: random secrets (only if
-# absent), the SES sending identity for the legacy mail domain with DKIM
-# records in Route 53, and the EMAIL_FROM parameter. Safe to re-run every
-# deploy.
+# absent), the EMAIL_FROM parameter and the SES SMTP credentials. Safe to
+# re-run every deploy.
 #
-# remerged.ai is the primary domain, but its zone is at Cloudflare, which
-# nothing here can write to. Its SES identity and DNS come from
+# Mail lives on remerged.ai, whose zone is at Cloudflare, which nothing here
+# can write to. Its SES identity and DNS come from
 # .github/workflows/mail-domain.yml instead. This script only reads that
 # identity, to decide where outbound mail says it is from.
 set -euo pipefail
 
 STAGE="${1:?stage}"
 DOMAIN="remerged.ai"
-LEGACY_DOMAIN="remerged.click"
 REGION="us-east-1"
 PREFIX="/remerged/$STAGE"
 
@@ -53,38 +51,16 @@ set_param() {
 ensure_secret SESSION_SECRET
 ensure_secret CRON_SECRET
 
-# SES domain identity with Easy DKIM for the legacy domain; its DKIM CNAMEs go
-# into its Route 53 hosted zone. It keeps sending and receiving: mail already
-# addressed to support@remerged.click must not start bouncing.
-if ! aws sesv2 get-email-identity --email-identity "$LEGACY_DOMAIN" --region "$REGION" >/dev/null 2>&1; then
-  aws sesv2 create-email-identity --email-identity "$LEGACY_DOMAIN" --region "$REGION" >/dev/null
-  echo "created SES identity $LEGACY_DOMAIN"
-fi
-TOKENS=$(aws sesv2 get-email-identity --email-identity "$LEGACY_DOMAIN" --region "$REGION" \
-  --query 'DkimAttributes.Tokens' --output text)
-ZONE_ID=$(aws route53 list-hosted-zones --query "HostedZones[?Name=='$LEGACY_DOMAIN.'].Id" --output text)
-if [ -n "$TOKENS" ] && [ -n "$ZONE_ID" ]; then
-  CHANGES="["
-  for t in $TOKENS; do
-    CHANGES+="{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$t._domainkey.$LEGACY_DOMAIN\",\"Type\":\"CNAME\",\"TTL\":1800,\"ResourceRecords\":[{\"Value\":\"$t.dkim.amazonses.com\"}]}},"
-  done
-  CHANGES="${CHANGES%,}]"
-  aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" \
-    --change-batch "{\"Changes\":$CHANGES}" >/dev/null
-  echo "DKIM records upserted"
-fi
-
-# Outbound mail follows the primary domain — a member on remerged.ai should
-# not get password resets from some other domain — but only once SES can
-# actually sign for it. Sending from an unverified domain is a hard failure,
-# so until mail-domain.yml has verified remerged.ai this stays on the legacy
-# one and moves by itself on the next deploy afterwards.
-FROM_DOMAIN="$LEGACY_DOMAIN"
+# Outbound sender, set only once SES can actually sign for the domain:
+# sending from an unverified identity is a hard failure, so a half-finished
+# mail setup should leave EMAIL_FROM alone rather than break every password
+# reset. mail-domain.yml is what makes it verified.
 if [ "$(aws sesv2 get-email-identity --email-identity "$DOMAIN" --region "$REGION" \
   --query 'DkimAttributes.Status' --output text 2>/dev/null)" = "SUCCESS" ]; then
-  FROM_DOMAIN="$DOMAIN"
+  set_param EMAIL_FROM "no-reply@$DOMAIN"
+else
+  echo "SES has not verified $DOMAIN; leaving EMAIL_FROM as it is"
 fi
-set_param EMAIL_FROM "no-reply@$FROM_DOMAIN"
 
 # SMTP credentials so the owner can "Send mail as" support@ from Gmail via
 # SES. Created once; username/password stored under /remerged/mail/*.
