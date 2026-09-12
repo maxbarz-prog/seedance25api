@@ -5,15 +5,17 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
   BillingInterval,
+  CREDIT_USD,
+  MIN_TOPUP_PLAN,
   PAID_PLAN_IDS,
   PLANS,
   PlanId,
   TOPUP_PRESETS_USD,
 } from "@/lib/config";
-import { MIN_TOPUP_PLAN } from "@/lib/config";
 import IntervalToggle from "./IntervalToggle";
 import PlanPrice from "./PlanPrice";
 import ReferralCard from "./ReferralCard";
+import { BALANCE_EVENT } from "./Header";
 
 interface LedgerEntry {
   id: string;
@@ -74,6 +76,8 @@ export default function AccountPanel() {
   // immediately, which is a surprising amount of consequence for one click on
   // something that looks like a choice.
   const [selected, setSelected] = useState<PlanId | null>(null);
+  // Short-lived confirmation for things that now happen without a page change.
+  const [toast, setToast] = useState<string | null>(null);
   const [confirmEmail, setConfirmEmail] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -142,12 +146,26 @@ export default function AccountPanel() {
     }
     const data = await post("/api/billing/topup", { usd }, `top-${usd}`);
     if (!data) return;
+    // Charged on the card already on file: nobody leaves the page.
+    if (data.charged) {
+      setToast(`${Math.round(usd / CREDIT_USD).toLocaleString()} credits added.`);
+      refresh();
+      window.dispatchEvent(new Event(BALANCE_EVENT));
+      return;
+    }
     if (data.url.startsWith("/account?mock=")) {
       await post("/api/billing/mock", { kind: "topup", usd }, `top-${usd}`);
       refresh();
-    } else {
-      window.location.href = data.url;
+      return;
     }
+    // Only reached when there is no usable card, or the bank wants them
+    // present for this one. Say which before the page changes under them.
+    setToast(
+      data.reason === "needs_auth"
+        ? "Your bank wants to confirm this one — taking you to the card page."
+        : "Taking you to the card page."
+    );
+    window.location.href = data.url;
   }
 
   async function account(action: string, extra: Record<string, unknown> = {}) {
@@ -381,6 +399,7 @@ export default function AccountPanel() {
         {topupNudge && (
           <p className="mt-1 text-sm text-bad">Add credits to run your video.</p>
         )}
+        {toast && <p className="mt-1 text-sm text-good">{toast}</p>}
         <div className="mt-4 flex flex-wrap gap-3">
           {TOPUP_PRESETS_USD.map((usd) => (
             <button

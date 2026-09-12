@@ -95,6 +95,21 @@ export async function POST(req: NextRequest) {
       }
       break;
     }
+    // A saved-card top-up, confirmed off-session by /api/billing/topup. That
+    // route grants the credits itself so the balance is right immediately; this
+    // is the belt to its braces, for the case where the request died between
+    // Stripe accepting the charge and us writing the ledger. Idempotent on the
+    // payment intent id, so the second one to arrive does nothing.
+    case "payment_intent.succeeded": {
+      const pi = event.data.object as Stripe.PaymentIntent;
+      if (pi.metadata?.kind !== "topup") break;
+      const userId = pi.metadata.userId;
+      const usd = Number(pi.metadata.usd);
+      if (!userId || !Number.isFinite(usd) || usd <= 0) break;
+      if (!(await userById(userId))) break;
+      await applyTopup(userId, usd, pi.id);
+      break;
+    }
     // Money came back. Withdraw the referrer's reward if it has not been spent
     // on an invoice yet — the whole reason rewards are discounts rather than
     // credits, which would already be gone by now.

@@ -159,6 +159,65 @@ export async function createMembershipCheckout(
   return { url: s.url! };
 }
 
+// Charge a card we already have, without sending anyone back to Stripe.
+//
+// A member who has paid for a plan has a card on file, and making them re-enter
+// it to buy credits is friction for nothing. This confirms a PaymentIntent
+// off-session against their default card and returns what happened.
+//
+// Three outcomes, all of which the caller has to handle:
+//   charged      — done, credits can be granted
+//   needs_card   — no usable card on file; fall back to hosted checkout
+//   needs_auth   — the bank wants the member present (3-D Secure). Also falls
+//                  back to checkout, which is the only place that can ask.
+export type ChargeResult =
+  | { outcome: "charged"; paymentIntentId: string }
+  | { outcome: "needs_card" }
+  | { outcome: "needs_auth" };
+
+async function defaultPaymentMethod(customerId: string): Promise<string | null> {
+  const stripe = stripeClient();
+  const customer = await stripe.customers.retrieve(customerId);
+  if (customer.deleted) return null;
+  const preferred = customer.invoice_settings?.default_payment_method;
+  if (preferred) return typeof preferred === "string" ? preferred : preferred.id;
+  // Nothing marked default: the card that paid for the subscription is the one
+  // they expect to be charged, and it is the only card we ever attach.
+  const cards = await stripe.paymentMethods.list({ customer: customerId, type: "card", limit: 1 });
+  return cards.data[0]?.id ?? null;
+}
+
+export async function chargeSavedCard(user: User, usd: number): Promise<ChargeResult> {
+  if (!stripeEnabled() || !user.stripe_customer_id) return { outcome: "needs_card" };
+  const paymentMethod = await defaultPaymentMethod(user.stripe_customer_id);
+  if (!paymentMethod) return { outcome: "needs_card" };
+  try {
+    const intent = await stripeClient().paymentIntents.create({
+      amount: Math.round(usd * 100),
+      currency: "usd",
+      customer: user.stripe_customer_id,
+      payment_method: paymentMethod,
+      // off_session says the member is not here to answer a challenge, so the
+      // bank either accepts it or tells us it needs them.
+      off_session: true,
+      confirm: true,
+      description: `Remerged credits, $${usd.toFixed(2)}`,
+      metadata: { userId: user.id, kind: "topup", usd: String(usd) },
+    });
+    if (intent.status === "succeeded") return { outcome: "charged", paymentIntentId: intent.id };
+    // requires_action and friends: the member has to be present.
+    return { outcome: "needs_auth" };
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "authentication_required") return { outcome: "needs_auth" };
+    // A declined card is not an error to swallow — but the recovery is the
+    // same: put them in front of Stripe, where the decline can be explained
+    // and another card entered.
+    console.warn(`saved-card charge for ${user.id} failed:`, code ?? err);
+    return { outcome: "needs_card" };
+  }
+}
+
 // Cancel at period end — never immediately. They have paid for the period
 // they are in, so they keep it; the plan lapses to free when it runs out,
 // which syncSubscription already handles on the resulting webhook.
