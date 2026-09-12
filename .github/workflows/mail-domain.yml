@@ -459,10 +459,18 @@ jobs:
             echo "  forwarder: $fn"
             # Asynchronous invocation, so the log lags the S3 write.
             sleep 25
+            # Ask the function where it logs. SST gives its functions an
+            # explicit log group, so /aws/lambda/<name> does not exist and its
+            # absence looks exactly like a function that has never run — which
+            # cost me two wrong conclusions tonight.
+            lg=$(aws lambda get-function-configuration --function-name "$fn" \
+              --query 'LoggingConfig.LogGroup' --output text 2>/dev/null)
+            [ -n "$lg" ] && [ "$lg" != "None" ] || lg="/aws/lambda/$fn"
+            echo "    log group: $lg"
             echo "    log (errors shown, not hidden):"
             # || true on each: the runner's shell has -e, and a missing log
             # group is a finding to print, not a reason to stop printing.
-            { aws logs filter-log-events --log-group-name "/aws/lambda/$fn" \
+            { aws logs filter-log-events --log-group-name "$lg" \
               --start-time "$(( started * 1000 ))" \
               --query 'events[].message' --output text 2>&1 || true; } | sed 's/^/      /'
             echo "    may SES invoke it:"
