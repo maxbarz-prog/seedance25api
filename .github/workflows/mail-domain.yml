@@ -90,9 +90,14 @@ jobs:
           aws ses describe-active-receipt-rule-set \
             --query 'Rules[].{name:Name,recipients:Recipients,s3:Actions[?S3Action].S3Action.BucketName}' \
             --output json | sed 's/^/    /' || true
-          b=$(aws s3api list-buckets --query "Buckets[?contains(Name, 'inboundbucket')].Name" --output text | tr '\t' '\n' | head -1)
+          # Read the bucket off the rule, not by guessing at its name. The name
+          # is generated and has already changed once; the rule is the only
+          # thing that actually decides where received mail goes.
+          b=$(aws ses describe-active-receipt-rule-set \
+            --query 'Rules[].Actions[?S3Action].S3Action.BucketName' --output text \
+            | tr '\t' '\n' | head -1)
           if [ -z "$b" ]; then
-            echo "  no inbound bucket found"
+            echo "  the active rule set has no S3 action — nothing stores received mail"
             exit 0
           fi
           echo "  bucket: $b"
