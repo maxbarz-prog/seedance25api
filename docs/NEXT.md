@@ -401,16 +401,28 @@ were never rendered.
    - After an extension, check the Lambda log via `logs.yml` for
      "ffmpeg unavailable" or "tail trim failed"; neither should appear.
    - Compare the ModelArk and fal invoices against the measured table below.
-2. **Domain move to remerged.ai.** DONE for the site; two console steps left,
-   both yours and both needed BEFORE the prod cutover:
-   - **Clerk**: the production instance still serves `remerged.click`
-     (`pk_live_`/`sk_live_`). Repoint it at `remerged.ai` and add its five
-     CNAMEs to **Cloudflare** — `.github/workflows/dns.yml` writes them into
-     Route 53 and so no longer applies. Repointing invalidates every existing
-     session, which costs nothing today.
+2. **Domain move to remerged.ai.** Site, DNS and Clerk are DONE. One console
+   step left, and it is the only thing blocking the prod cutover:
    - **Stripe**: add a webhook endpoint for
      `https://remerged.ai/api/billing/webhook` and put its signing secret into
-     `/remerged/prod/STRIPE_WEBHOOK_SECRET`.
+     `/remerged/prod/STRIPE_WEBHOOK_SECRET`. It has to be done by hand — a
+     secret key cannot create an endpoint, and the signing secret must reach
+     SSM without passing through a chat transcript.
+
+   Done on 2026-09-12:
+   - **Site + help** on `remerged.ai` / `dev.remerged.ai`, DNS at Cloudflare
+     via `sst.cloudflare.dns()`. The deploy derives
+     `CLOUDFLARE_DEFAULT_ACCOUNT_ID` from a zone lookup, so the API token
+     stays scoped to the one zone.
+   - **Clerk production instance** repointed from `remerged.click` to
+     `remerged.ai` (domain `dmn_3J3kyzbq0xN4uLpZMuxJVKleJfA`). It now serves
+     `https://clerk.remerged.ai` and `https://accounts.remerged.ai`, and every
+     session from before that moment is invalid.
+     `.github/workflows/clerk-domain.yml` did it and can do it again: it reads
+     Clerk's own `cname_targets`, writes them into Cloudflare with
+     `proxied: false`, waits for them to resolve, and only then PATCHes the
+     domain. `dns.yml` is deleted — it wrote the same records into Route 53,
+     which cannot serve this domain.
 
    Mail is deliberately still on `remerged.click`: the SES identity, DKIM and
    MX records all sit in its Route 53 zone, and `MAIL_DOMAIN` in
