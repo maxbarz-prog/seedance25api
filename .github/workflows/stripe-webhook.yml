@@ -14,6 +14,11 @@ name: Stripe webhook
 #
 # FREE. `list` is read-only. `create` writes a webhook endpoint and an SSM
 # parameter, so it needs the word typed.
+#
+# NOTE: this Stripe account is shared with other products. Anything that
+# disables an endpoint therefore names ONE exact URL rather than reasoning
+# about which endpoints "look like ours" — a rule that got that wrong would
+# take someone else's product offline.
 
 on:
   push:
@@ -41,11 +46,10 @@ on:
         description: 'For create: type "create" to confirm.'
         type: string
         default: ""
-      disable_others:
-        description: 'Also disable endpoints pointing at a DIFFERENT host ("yes"). Stops Stripe retrying a dead URL.'
-        type: choice
-        options: ["no", "yes"]
-        default: "no"
+      disable_url:
+        description: "Disable exactly this one endpoint URL afterwards (e.g. the old domain's). Blank = touch nothing."
+        type: string
+        default: ""
 
 permissions:
   id-token: write
@@ -128,7 +132,7 @@ jobs:
             echo "  Stripe only reveals a signing secret at creation, so creating"
             echo "  a second one is how you get a usable secret — but two live"
             echo "  endpoints means every event is delivered twice. Remove the"
-            echo "  old one in the dashboard first, or use disable_others."
+            echo "  old one in the dashboard first, or name it in disable_url."
           fi
 
       - name: Create the endpoint and file its secret
@@ -181,22 +185,23 @@ jobs:
           echo "SSM values are baked into the Lambda at deploy time, so this"
           echo "takes effect on the next $STAGE deploy."
 
-      - name: Disable endpoints for other hosts
-        if: inputs.mode == 'create' && inputs.disable_others == 'yes'
+      - name: Disable one named endpoint
+        if: inputs.mode == 'create' && inputs.disable_url != ''
         env:
-          SITE: ${{ inputs.site }}
+          DISABLE_URL: ${{ inputs.disable_url }}
         run: |
           set -euo pipefail
-          # An endpoint left pointing at a domain we no longer serve makes
-          # Stripe retry a dead URL for days and eventually email about it.
-          ids=$(jq -r --arg h "$SITE" '.data[] | select((.url | contains($h)) | not) | select(.status == "enabled") | .id' /tmp/endpoints.json)
-          if [ -z "$ids" ]; then
-            echo "  nothing to disable"
+          # ONE exact URL, named by the operator. This used to be "disable
+          # anything not pointing at the new site", which was a loaded gun:
+          # this Stripe account also serves other products, and that rule
+          # would have switched their webhooks off. An endpoint is only ever
+          # disabled if its URL is typed in full.
+          id=$(jq -r --arg u "$DISABLE_URL" '.data[] | select(.url == $u) | .id' /tmp/endpoints.json)
+          if [ -z "$id" ]; then
+            echo "  no endpoint with URL exactly: $DISABLE_URL"
+            echo "  (nothing disabled — the URL must match in full)"
             exit 0
           fi
-          for id in $ids; do
-            u=$(jq -r --arg i "$id" '.data[] | select(.id == $i) | .url' /tmp/endpoints.json)
-            curl -sS -u "$STRIPE_SECRET_KEY:" "https://api.stripe.com/v1/webhook_endpoints/$id" \
-              --data "disabled=true" >/dev/null
-            echo "  disabled  $id  $u"
-          done
+          curl -sS -u "$STRIPE_SECRET_KEY:" "https://api.stripe.com/v1/webhook_endpoints/$id" \
+            --data "disabled=true" >/dev/null
+          echo "  disabled  $id  $DISABLE_URL"
