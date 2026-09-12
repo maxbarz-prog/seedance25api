@@ -142,6 +142,8 @@ jobs:
               --query 'Environment.Variables.{from:MAIL_FROM,to:FORWARD_TO,bucket:INBOUND_BUCKET,prefix:INBOUND_PREFIX}' \
               --output json | sed 's/^/    /' || true
             echo "MAIL_FORWARDER=$fn" >> "$GITHUB_ENV"
+            echo "FORWARD_TO=$(aws lambda get-function-configuration --function-name "$fn" \
+              --query 'Environment.Variables.FORWARD_TO' --output text)" >> "$GITHUB_ENV"
           else
             echo "  no forwarder function found"
           fi
@@ -298,9 +300,83 @@ jobs:
           echo "MX now resolves to:"
           dig +short MX "$DOMAIN" @1.1.1.1 | sed 's/^/  /'
 
+      # In the SES sandbox — which every account starts in — SES will only send
+      # to addresses it has verified. The forwarder's destination is a personal
+      # inbox, so without this the whole path works and the last hop is refused:
+      #
+      #   MessageRejected: Email address is not verified
+      #
+      # Verifying the destination is free and takes one click in the mail
+      # Amazon sends to it. Production access is the real fix, and it is a
+      # review, so it does not belong in the middle of a test.
+      - name: The forward destination has to be verified
+        if: inputs.mode != 'check'
+        run: |
+          set -uo pipefail
+          to="${FORWARD_TO:-}"
+          if [ -z "$to" ] || [ "$to" = "None" ]; then
+            echo "The forwarder has no FORWARD_TO — set SUPPORT_FORWARD_TO or ADMIN_EMAILS."
+            exit 1
+          fi
+          if [ "$(aws sesv2 get-account --query ProductionAccessEnabled --output text)" = "True" ]; then
+            echo "  account has production access — any destination is allowed"
+            exit 0
+          fi
+          echo "  account is in the SES sandbox, so $to must be verified"
+          st=$(aws sesv2 get-email-identity --email-identity "$to" \
+            --query VerifiedForSendingStatus --output text 2>/dev/null || echo missing)
+          case "$st" in
+            True) echo "  $to is verified — the forward can go out" ;;
+            *)
+              aws sesv2 create-email-identity --email-identity "$to" >/dev/null 2>&1 || true
+              echo "  $to is NOT verified (status: $st)."
+              echo "  Amazon has now emailed a verification link to it — subject"
+              echo "  \"Amazon Web Services – Email Address Verification Request\"."
+              echo "  Click that link, then run this workflow in test mode again."
+              exit 1
+              ;;
+          esac
+
       # An end-to-end test, because every part of this can look right and the
       # mail still not arrive. Send one message to support@, watch it land in
       # S3, then read the forwarder's own log for what it did with it.
+      # In the SES sandbox — which every account starts in — SES will only send
+      # to addresses it has verified. The forwarder's destination is a personal
+      # inbox, so without this the whole path works and the last hop is refused:
+      #
+      #   MessageRejected: Email address is not verified
+      #
+      # Verifying the destination is free and takes one click in the mail
+      # Amazon sends to it. Production access is the real fix, and it is a
+      # review, so it does not belong in the middle of a test.
+      - name: The forward destination has to be verified
+        if: inputs.mode != 'check'
+        run: |
+          set -uo pipefail
+          to="${FORWARD_TO:-}"
+          if [ -z "$to" ] || [ "$to" = "None" ]; then
+            echo "The forwarder has no FORWARD_TO — set SUPPORT_FORWARD_TO or ADMIN_EMAILS."
+            exit 1
+          fi
+          if [ "$(aws sesv2 get-account --query ProductionAccessEnabled --output text)" = "True" ]; then
+            echo "  account has production access — any destination is allowed"
+            exit 0
+          fi
+          echo "  account is in the SES sandbox, so $to must be verified"
+          st=$(aws sesv2 get-email-identity --email-identity "$to" \
+            --query VerifiedForSendingStatus --output text 2>/dev/null || echo missing)
+          case "$st" in
+            True) echo "  $to is verified — the forward can go out" ;;
+            *)
+              aws sesv2 create-email-identity --email-identity "$to" >/dev/null 2>&1 || true
+              echo "  $to is NOT verified (status: $st)."
+              echo "  Amazon has now emailed a verification link to it — subject"
+              echo "  \"Amazon Web Services – Email Address Verification Request\"."
+              echo "  Click that link, then run this workflow in test mode again."
+              exit 1
+              ;;
+          esac
+
       # An end-to-end test, because every part of this can look right and the
       # mail still not arrive. Send to support@, watch for S3 to fill, then
       # read the forwarder's own log for what it did with it. When
