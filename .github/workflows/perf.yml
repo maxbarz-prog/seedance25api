@@ -60,12 +60,70 @@ jobs:
           for p in $PATHS; do
             for i in $(seq 1 "$REPEATS"); do
               out=$(curl -sS -o /tmp/body -w '%{time_namelookup} %{time_appconnect} %{time_starttransfer} %{time_total} %{http_code} %{size_download}' \
-                --max-time 30 "https://$host$p" 2>/dev/null || echo "- - - - 000 0")
+                --max-time 30 "https://$host$p" 2>/dev/null || echo "0 0 0 0 000 0")
               set -- $out
-              printf '  %-14s %8.3f %8.3f %8.3f %8.3f %6s %s\n' "$p" "$1" "$2" "$3" "$4" "$5" "$6" 2>/dev/null \
-                || printf '  %-14s  failed\n' "$p"
+              printf '  %-14s %8.3f %8.3f %8.3f %8.3f %6s %s\n' "$p" "$1" "$2" "$3" "$4" "$5" "$6"
+              echo "$p $3" >> /tmp/ttfb.txt
             done
           done
+
+      - name: Load it in a real browser
+        run: |
+          set -uo pipefail
+          host="remerged.ai"
+          [ "$STAGE" = "dev" ] && host="dev.remerged.ai"
+          npm i -s playwright-core@1.49.1 >/dev/null 2>&1 || npm i -s playwright-core >/dev/null 2>&1
+          cat > /tmp/waterfall.mjs <<'JS'
+          import { chromium } from 'playwright-core';
+          const url = process.argv[2];
+          // A runner in us-east-1 sits next to the origin, so absolute numbers
+          // flatter us. What transfers, in what order, and how many round trips
+          // the browser is forced into does not depend on distance — that is
+          // what this is for.
+          const browser = await chromium.launch({ executablePath: process.env.CHROME });
+          const ctx = await browser.newContext();
+          const page = await ctx.newPage();
+          const reqs = [];
+          page.on('requestfinished', async (r) => {
+            const t = r.timing();
+            let size = 0;
+            try { size = (await r.response()).headers()['content-length'] ?? 0 } catch {}
+            reqs.push({ url: r.url(), type: r.resourceType(),
+                        ms: Math.round(t.responseEnd - t.startTime), size: Number(size) || 0 });
+          });
+          const redirects = [];
+          page.on('response', (r) => { if (r.status() >= 300 && r.status() < 400) redirects.push(`${r.status()} ${r.url()}`) });
+          const t0 = Date.now();
+          await page.goto(url, { waitUntil: 'load', timeout: 60000 });
+          const load = Date.now() - t0;
+          const nav = await page.evaluate(() => {
+            const n = performance.getEntriesByType('navigation')[0] || {};
+            const p = performance.getEntriesByType('paint');
+            return { ttfb: Math.round(n.responseStart || 0), dcl: Math.round(n.domContentLoadedEventEnd || 0),
+                     loadEvent: Math.round(n.loadEventEnd || 0),
+                     fcp: Math.round((p.find(x => x.name === 'first-contentful-paint') || {}).startTime || 0) };
+          });
+          await page.waitForTimeout(3000); // let post-load fetches (/api/me, Clerk) land
+          const by = {};
+          for (const r of reqs) { by[r.type] = by[r.type] || { n: 0, bytes: 0, ms: 0 };
+            by[r.type].n++; by[r.type].bytes += r.size; by[r.type].ms = Math.max(by[r.type].ms, r.ms) }
+          console.log(`  navigation: ttfb ${nav.ttfb}ms  fcp ${nav.fcp}ms  dcl ${nav.dcl}ms  load ${nav.loadEvent}ms  wall ${load}ms`);
+          console.log(`  requests: ${reqs.length}, total ${(reqs.reduce((a, r) => a + r.size, 0) / 1024).toFixed(0)} KB`);
+          for (const [t, v] of Object.entries(by).sort((a, b) => b[1].bytes - a[1].bytes))
+            console.log(`    ${t.padEnd(12)} ${String(v.n).padStart(3)} reqs  ${(v.bytes / 1024).toFixed(0).padStart(6)} KB  slowest ${v.ms}ms`);
+          console.log('  slowest 12 requests:');
+          for (const r of reqs.sort((a, b) => b.ms - a.ms).slice(0, 12))
+            console.log(`    ${String(r.ms).padStart(5)}ms ${(r.size / 1024).toFixed(0).padStart(5)}KB ${r.url.slice(0, 110)}`);
+          console.log(`  redirects: ${redirects.length ? redirects.join(', ') : 'none'}`);
+          await browser.close();
+          JS
+          CHROME=$(ls -d /opt/pw-browsers/chromium*/chrome-linux/chrome 2>/dev/null | head -1)
+          [ -n "$CHROME" ] || CHROME=$(which chromium-browser chromium google-chrome 2>/dev/null | head -1)
+          if [ -z "$CHROME" ]; then
+            npx -y playwright@1.49.1 install --with-deps chromium >/dev/null 2>&1 || true
+            CHROME=""
+          fi
+          CHROME="$CHROME" node /tmp/waterfall.mjs "https://$host/" || echo "  browser run failed"
 
       - name: What the server function reports
         run: |
@@ -111,6 +169,17 @@ jobs:
             --filter-pattern "REPORT" --query 'events[].message' --output text 2>&1 \
             | tr '\t' '\n' | grep -o '\tDuration: [0-9.]* ms' \
             | awk '{print $2}' | sort -rn | head -5 | sed 's/^/    /' || true
+
+      - name: Summary
+        if: always()
+        run: |
+          set -uo pipefail
+          echo "TTFB per path (seconds), from a runner in us-east-1 — next to the"
+          echo "origin, so these are a floor, not what a distant visitor sees:"
+          awk '{c[$1]++; s[$1]+=$2; if($2>mx[$1])mx[$1]=$2; if(mn[$1]==""||$2<mn[$1])mn[$1]=$2}
+               END{printf "  %-14s %8s %8s %8s\n","path","min","mean","max";
+                   for(p in c) printf "  %-14s %8.3f %8.3f %8.3f\n", p, mn[p], s[p]/c[p], mx[p]}' \
+            /tmp/ttfb.txt 2>/dev/null | sort || echo "  no samples"
 
       - name: Is CloudFront caching anything
         run: |
