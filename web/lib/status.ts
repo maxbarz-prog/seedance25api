@@ -4,7 +4,7 @@ import { ffmpegAvailable } from "./video";
 import { clerkEnabled } from "./auth";
 import { stripeEnabled } from "./billing";
 import { currentHalt } from "./money";
-import { ModelId, Quality, tokensFor } from "./config";
+import { MAIL_DOMAIN, ModelId, Quality, tokensFor } from "./config";
 import { planMargins } from "./economics";
 
 // System status for the admin page.
@@ -119,6 +119,8 @@ async function timed<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<{ ok: 
 // ---------- config ----------
 
 function configChecks(): Check[] {
+  // Read once: process.env lookups inside a long object literal read badly.
+  const emailFrom = process.env.EMAIL_FROM;
   const live = process.env.PROVIDER_MODE === "live";
   const generator = live && process.env.BYTEPLUS_API_KEY ? "byteplus" : "mock";
   const upscaler = live && process.env.FAL_KEY ? "fal" : live && process.env.TOPAZ_API_KEY ? "topaz" : "mock";
@@ -165,6 +167,21 @@ function configChecks(): Check[] {
       key: "config.billing", group: "config", label: "Billing", value: stripeEnabled() ? "Stripe" : "mock",
       level: stripeEnabled() ? "good" : "bad",
       note: stripeEnabled() ? "Stripe key configured" : "no Stripe key — payments cannot be taken",
+    },
+    {
+      // Where outbound mail claims to come from, checked against the domain
+      // that mail is actually set up on. These drifted apart at the domain
+      // move and nothing noticed: SES will refuse to send from an unverified
+      // domain, so a stale value here is silent until the first password reset
+      // or job notification fails.
+      key: "config.email_from", group: "config", label: "Sends mail as",
+      value: emailFrom || "not set",
+      level: !emailFrom ? "warn" : emailFrom.endsWith(`@${MAIL_DOMAIN}`) ? "good" : "bad",
+      note: !emailFrom
+        ? "EMAIL_FROM unset — transactional mail is logged, not sent"
+        : emailFrom.endsWith(`@${MAIL_DOMAIN}`)
+          ? `on ${MAIL_DOMAIN}, which SES has verified`
+          : `not on ${MAIL_DOMAIN} — SES will refuse to send as this`,
     },
     {
       key: "config.webhook", group: "config", label: "Webhook secret", value: process.env.STRIPE_WEBHOOK_SECRET ? "set" : "missing",
