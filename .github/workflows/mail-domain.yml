@@ -291,50 +291,82 @@ jobs:
       # An end-to-end test, because every part of this can look right and the
       # mail still not arrive. Send one message to support@, watch it land in
       # S3, then read the forwarder's own log for what it did with it.
+      # An end-to-end test, because every part of this can look right and the
+      # mail still not arrive. Send to both accepted addresses, watch for S3 to
+      # fill, then read the forwarder's own log for what it did with it. When
+      # nothing lands, print the evidence that separates the three possible
+      # failures rather than leaving it to guesswork: never reached SES, SES
+      # matched no rule, or the rule's action failed and the message bounced.
       - name: Send one message through it
         if: inputs.mode == 'test'
         run: |
-          set -euo pipefail
+          set -uo pipefail
           started=$(date +%s)
-          subject="Remerged mail path test $(date -u +%H:%M:%SZ)"
-          cat > /tmp/content.json <<JSON
-          {"Simple":{"Subject":{"Data":"$subject"},
+          b="${INBOUND_BUCKET:-}"
+          before=$(aws s3api list-objects-v2 --bucket "$b" --prefix inbound/ \
+            --query 'length(Contents || `[]`)' --output text 2>/dev/null || echo 0)
+          echo "  objects under inbound/ before: $before"
+
+          for to in "support@$DOMAIN" "support@remerged.click"; do
+            cat > /tmp/content.json <<JSON
+          {"Simple":{"Subject":{"Data":"Remerged mail path test to $to"},
             "Body":{"Text":{"Data":"If this reached the private inbox, receiving and forwarding both work."}}}}
           JSON
-          from="no-reply@$DOMAIN"
-          echo "  sending $from -> support@$DOMAIN"
-          aws sesv2 send-email --from-email-address "$from" \
-            --destination "ToAddresses=support@$DOMAIN" \
-            --content file:///tmp/content.json \
-            --query MessageId --output text | sed 's/^/    message id /'
+            id=$(aws sesv2 send-email --from-email-address "no-reply@$DOMAIN" \
+              --destination "ToAddresses=$to" --content file:///tmp/content.json \
+              --query MessageId --output text 2>&1)
+            echo "  sent to $to -> $id"
+          done
 
-          b="${INBOUND_BUCKET:-}"
-          if [ -n "$b" ]; then
-            echo "  waiting for an object under inbound/ in $b"
-            deadline=$(( $(date +%s) + 180 ))
-            while :; do
-              latest=$(aws s3api list-objects-v2 --bucket "$b" --prefix inbound/ \
-                --query 'sort_by(Contents, &LastModified)[-1].{k:Key,t:LastModified}' --output json 2>/dev/null || echo null)
-              k=$(printf '%s' "$latest" | jq -r '.k // empty')
-              t=$(printf '%s' "$latest" | jq -r '.t // empty')
-              if [ -n "$t" ] && [ "$(date -d "$t" +%s)" -ge "$started" ]; then
-                echo "    received: $k"
-                break
+          echo "  waiting up to 5 minutes for new objects in $b"
+          deadline=$(( $(date +%s) + 300 ))
+          while :; do
+            now=$(aws s3api list-objects-v2 --bucket "$b" --prefix inbound/ \
+              --query 'length(Contents || `[]`)' --output text 2>/dev/null || echo 0)
+            if [ "$now" -gt "$before" ]; then
+              echo "    received $(( now - before )) message(s):"
+              aws s3api list-objects-v2 --bucket "$b" --prefix inbound/ \
+                --query 'sort_by(Contents, &LastModified)[-3:].[Key,LastModified]' --output text | sed 's/^/      /'
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "    nothing arrived. Evidence:"
+              echo "    active rule set:"
+              aws ses describe-active-receipt-rule-set --output json \
+                | jq -c '{name:.Metadata.Name, rules:[.Rules[]|{Name,Recipients,Enabled,actions:[.Actions[]|keys[0]]}]}' \
+                | sed 's/^/      /'
+              echo "    bucket policy:"
+              if pol=$(aws s3api get-bucket-policy --bucket "$b" --query Policy --output text 2>&1); then
+                printf '%s' "$pol" | jq -c '[.Statement[]|{Sid,Principal,Action,Condition}]' | sed 's/^/      /'
+              else
+                printf '%s\n' "$pol" | sed 's/^/      /'
               fi
-              if [ "$(date +%s)" -ge "$deadline" ]; then
-                echo "    nothing new after 3 minutes. SES did not write to the bucket:"
-                echo "    check the bucket policy above, and that the MX for $DOMAIN resolves."
-                exit 1
-              fi
-              sleep 10
-            done
-          fi
+              # Sending metrics settle the first question. A Bounce or Reject
+              # means SES took the message and something downstream refused it;
+              # a Send with no Delivery and no Bounce means it is still in
+              # flight or was dropped before reaching the inbound endpoint.
+              echo "    SES metrics since the send:"
+              for m in Send Delivery Bounce Reject; do
+                v=$(aws cloudwatch get-metric-statistics --namespace AWS/SES --metric-name "$m" \
+                  --start-time "$(date -u -d @$(( started - 60 )) +%Y-%m-%dT%H:%M:%SZ)" \
+                  --end-time "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --period 600 --statistics Sum \
+                  --query 'Datapoints[0].Sum' --output text 2>/dev/null)
+                echo "      $m: ${v:-none}"
+              done
+              echo "    MX seen from public resolvers:"
+              for r in 1.1.1.1 8.8.8.8; do
+                echo "      @$r: $(dig +short MX "$DOMAIN" @$r | tr '\n' ' ')"
+              done
+              exit 1
+            fi
+            sleep 10
+          done
 
           fn="${MAIL_FORWARDER:-}"
           if [ -n "$fn" ]; then
             echo "  forwarder log:"
             # The invocation is asynchronous, so the log lags the S3 write.
-            sleep 20
+            sleep 25
             aws logs filter-log-events --log-group-name "/aws/lambda/$fn" \
               --start-time "$(( started * 1000 ))" \
               --query 'events[].message' --output text 2>/dev/null \
