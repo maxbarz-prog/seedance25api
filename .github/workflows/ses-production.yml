@@ -1,0 +1,138 @@
+name: SES production access
+
+# Asks AWS to take the account out of the SES sandbox, where SES will only
+# send to addresses it has already verified. Until then the one member-facing
+# SES message — "your video is ready" — reaches nobody real. Sign-in,
+# verification and password resets are Clerk's and are unaffected.
+#
+# It is an API call, not a console form: sesv2 PutAccountDetails carries the
+# same fields the console collects. Doing it here means the use case AWS
+# reviews is in the repository, reviewable, and identical every time rather
+# than retyped from memory into a text box.
+#
+# FREE. AWS reviews the request, usually within a day. Check the outcome with
+# `show`, which reads ProductionAccessEnabled.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "show = report the account's sending status. submit = request production access."
+        type: choice
+        options: ["show", "submit"]
+        default: "show"
+      website:
+        description: "The site AWS will look at"
+        type: string
+        default: "https://remerged.ai"
+      confirm:
+        description: 'For submit only: type "submit". It opens a case with AWS in the account owner''s name.'
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  request:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'submit'
+        run: |
+          if [ "${{ inputs.confirm }}" != "submit" ]; then
+            echo 'Not confirmed — type "submit" to open the request.'
+            exit 1
+          fi
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Where the account stands
+        run: |
+          set -uo pipefail
+          aws sesv2 get-account --query '{
+            production:ProductionAccessEnabled,
+            sending:SendingEnabled,
+            enforcement:EnforcementStatus,
+            quota:SendQuota,
+            suppression:SuppressionAttributes,
+            details:Details}' --output json | sed 's/^/  /' || true
+          echo "  verified identities:"
+          aws sesv2 list-email-identities \
+            --query 'EmailIdentities[].{id:IdentityName,type:IdentityType,verified:VerifiedForSendingStatus}' \
+            --output json | sed 's/^/    /' || true
+
+      - name: Ask for production access
+        if: inputs.mode == 'submit'
+        env:
+          WEBSITE: ${{ inputs.website }}
+        run: |
+          set -uo pipefail
+          if [ "$(aws sesv2 get-account --query ProductionAccessEnabled --output text)" = "True" ]; then
+            echo "Already out of the sandbox — nothing to request."
+            exit 0
+          fi
+
+          # Written to be checkable against the code rather than to sound
+          # impressive: a reviewer rejects a vague use case, and an inaccurate
+          # one is worse than a rejection.
+          cat > /tmp/usecase.txt <<'TXT'
+          Remerged (https://remerged.ai) is an at-cost AI video generation
+          service. SES carries transactional mail only, to people who created an
+          account on the site.
+
+          What we send:
+          1. "Your video is ready" — one message when a rendering job the member
+             started has finished, linking to that job. This is the only SES
+             message a member normally receives.
+          2. Password resets, for accounts using the built-in email-and-password
+             login. Sign-in, email verification and reset mail for accounts using
+             our auth provider (Clerk) are sent by Clerk, not SES.
+
+          Who we send to: only addresses belonging to accounts registered on the
+          site. No marketing, newsletters, digests or announcements. No purchased,
+          rented, scraped or imported lists, and no mail to addresses that did not
+          register themselves.
+
+          Volume: very low. The service has not launched and has no members yet.
+          Each message corresponds to one video a member generated, so we expect
+          well under 100 messages a day at launch.
+
+          Bounces and complaints: the account-level suppression list is enabled,
+          so SES drops sends to addresses that have hard-bounced or complained.
+          Bounce and complaint rates are watched in CloudWatch. Every send is
+          triggered by an action the member took, and deleting the account (a
+          self-service option in the product) stops all mail immediately.
+
+          Inbound: we also receive support@remerged.ai through SES email
+          receiving, which stores each message in S3 and forwards it to the
+          operator's mailbox.
+          TXT
+          echo "Submitting this use case:"
+          sed 's/^/  /' /tmp/usecase.txt
+
+          if out=$(aws sesv2 put-account-details \
+            --production-access-enabled \
+            --mail-type TRANSACTIONAL \
+            --website-url "$WEBSITE" \
+            --contact-language EN \
+            --use-case-description "$(cat /tmp/usecase.txt)" 2>&1); then
+            echo
+            echo "Submitted. AWS reviews it, usually within a day."
+            echo "Check with: this workflow in show mode, or"
+            echo "aws sesv2 get-account --query ProductionAccessEnabled"
+          else
+            echo
+            echo "AWS did not accept the request:"
+            printf '%s\n' "$out" | sed 's/^/  /'
+            echo
+            echo "A ConflictException means account details are already set —"
+            echo "the request exists, or was made before; show mode says which."
+            exit 1
+          fi
