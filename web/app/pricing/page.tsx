@@ -15,7 +15,11 @@ import {
 import { fmtUsd, quote, rates } from "@/lib/pricing";
 import PricingPlans from "@/components/PricingPlans";
 
-export const dynamic = "force-dynamic";
+// Revalidated rather than rendered per request. The rates come from the same
+// environment for every visitor, so this HTML is identical for all of them and
+// belongs in the CDN; a deploy replaces it, and 5 minutes bounds how long a
+// live SSM change takes to appear.
+export const revalidate = 300;
 
 export default function PricingPage() {
   const r = rates();

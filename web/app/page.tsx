@@ -1,23 +1,20 @@
+import { Suspense } from "react";
 import { DEFAULT_MODE, DEFAULT_MODEL } from "@/lib/config";
 import Composer from "@/components/Composer";
+import Farewell from "@/components/Farewell";
 import Link from "next/link";
 import { fmtUsd, pricingConstants, quote } from "@/lib/pricing";
 import { storageEnabled } from "@/lib/storage";
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{ deactivated?: string; deleted?: string }>;
-}) {
-  // Deactivating and deleting both end the session, so the member lands back
-  // here signed out. Saying what just happened is the difference between a
-  // completed action and an unexplained logout.
-  const sp = await searchParams;
-  const farewell = sp.deleted
-    ? "Your account and everything in it has been deleted. Nothing further is billed."
-    : sp.deactivated
-      ? "Your account is deactivated and billing has stopped. Sign in whenever you want it back — your videos are waiting."
-      : null;
+// Rendered once and revalidated, not per request. Nothing on this page differs
+// between visitors: the prices come from the same constants for everyone, and
+// the member-specific parts (the balance in the header, the composer's state)
+// are client-side. Rendering it per request meant every visitor waited for a
+// round trip to us-east-1 for identical HTML, and CloudFront reported a miss
+// on every single request.
+export const revalidate = 300;
+
+export default async function Home() {
   // Resolved once, at render, and handed to the composer. Saves the browser
   // two round trips on first paint and makes every later price change
   // instant.
@@ -28,11 +25,9 @@ export default async function Home({
 
   return (
     <div className="py-10">
-      {farewell && (
-        <p className="mb-8 rounded-2xl border border-line bg-surface px-5 py-4 text-center text-sm">
-          {farewell}
-        </p>
-      )}
+      <Suspense fallback={null}>
+        <Farewell />
+      </Suspense>
       <section className="mb-8 text-center">
         <h1 className="text-4xl font-semibold tracking-tight">
           Seedance video, without the markup.

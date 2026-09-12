@@ -6,7 +6,11 @@ import { SUPPORT_EMAIL } from "@/lib/legal";
 import { SITE_NAME } from "@/lib/config";
 import HelpBody from "@/components/HelpBody";
 
-export const dynamic = "force-dynamic";
+// Revalidated rather than rendered per request. The rates come from the same
+// environment for every visitor, so this HTML is identical for all of them and
+// belongs in the CDN; a deploy replaces it, and 5 minutes bounds how long a
+// live SSM change takes to appear.
+export const revalidate = 300;
 
 export function generateStaticParams() {
   return HELP.flatMap((c) => c.articles.map((a) => ({ category: c.slug, article: a.slug })));

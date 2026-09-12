@@ -38,10 +38,20 @@ function helpAliasRedirect(req: NextRequest): NextResponse | null {
 // auth.
 let clerk: ((req: NextRequest, event: NextFetchEvent) => unknown) | null = null;
 
+// Pages that are the same for everyone and hold nothing private. Clerk's
+// middleware is skipped for these: it inspects and refreshes the session on
+// every request it sees, which marks the response as belonging to one visitor
+// and takes it out of the CDN. Nothing here reads the session — the header
+// fetches the balance client-side from /api/me, which Clerk does see.
+const PUBLIC = /^\/(?:$|pricing|help|terms|privacy|refunds)/;
+
 export default function middleware(req: NextRequest, event: NextFetchEvent) {
+  // Runs for every path, including public ones: help.<domain>/anything has to
+  // redirect whether or not the target needs auth.
   const redirect = helpAliasRedirect(req);
   if (redirect) return redirect;
   if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) return NextResponse.next();
+  if (PUBLIC.test(req.nextUrl.pathname)) return NextResponse.next();
   clerk ??= clerkMiddleware() as (req: NextRequest, event: NextFetchEvent) => unknown;
   return clerk(req, event) as ReturnType<typeof NextResponse.next>;
 }

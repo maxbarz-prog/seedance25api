@@ -4,7 +4,11 @@ import type { Metadata } from "next";
 import { HELP, categoryBySlug } from "@/lib/help";
 import { SITE_NAME } from "@/lib/config";
 
-export const dynamic = "force-dynamic";
+// Revalidated rather than rendered per request. The rates come from the same
+// environment for every visitor, so this HTML is identical for all of them and
+// belongs in the CDN; a deploy replaces it, and 5 minutes bounds how long a
+// live SSM change takes to appear.
+export const revalidate = 300;
 
 export function generateStaticParams() {
   return HELP.map((c) => ({ category: c.slug }));

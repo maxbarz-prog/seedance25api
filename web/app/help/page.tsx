@@ -13,7 +13,11 @@ export const metadata: Metadata = {
 // Prices in the articles come from the pricing code, which reads the
 // environment, so this renders per request rather than at build time. That is
 // the point: a help centre quoting last month's prices is worse than none.
-export const dynamic = "force-dynamic";
+// Revalidated rather than rendered per request. The rates come from the same
+// environment for every visitor, so this HTML is identical for all of them and
+// belongs in the CDN; a deploy replaces it, and 5 minutes bounds how long a
+// live SSM change takes to appear.
+export const revalidate = 300;
 
 export default function HelpHome() {
   return (
