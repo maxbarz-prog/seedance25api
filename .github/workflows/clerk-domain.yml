@@ -210,6 +210,34 @@ jobs:
             echo "  ok  $label.$DOMAIN -> $value"
           done < /tmp/targets.tsv
 
+      # Records resolving is not the same as Clerk serving. The dashboard can
+      # still show a domain as unverified while every CNAME is correct, so ask
+      # the two questions separately: what does Clerk itself say about the
+      # domain, and does its frontend API answer on our hostname with a
+      # certificate for it.
+      - name: Does Clerk actually serve it
+        env:
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -uo pipefail
+          echo "Clerk's own record of the domain:"
+          curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/domains \
+            | jq --arg n "$DOMAIN" '.data[] | select(.name == $n)' | sed 's/^/  /'
+
+          for host in "clerk.$DOMAIN" "accounts.$DOMAIN"; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://$host/" 2>/dev/null || echo 000)
+            echo "  https://$host/ -> HTTP $code"
+          done
+          code=$(curl -sS -o /tmp/env.json -w '%{http_code}' --max-time 20 \
+            "https://clerk.$DOMAIN/v1/environment" 2>/dev/null || echo 000)
+          echo "  https://clerk.$DOMAIN/v1/environment -> HTTP $code"
+          jq -r '"    instance: \(.display_config.instance_environment_type // "?")  home: \(.display_config.home_url // "?")"' /tmp/env.json 2>/dev/null || true
+
+          echo "  certificate on clerk.$DOMAIN:"
+          echo | openssl s_client -servername "clerk.$DOMAIN" -connect "clerk.$DOMAIN:443" 2>/dev/null \
+            | openssl x509 -noout -subject -issuer -dates 2>/dev/null | sed 's/^/    /' \
+            || echo "    no certificate presented"
+
       - name: Repoint Clerk
         if: inputs.mode == 'flip'
         env:
