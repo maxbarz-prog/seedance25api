@@ -1,0 +1,243 @@
+name: Clerk domain move
+
+# Repoints the Clerk PRODUCTION instance at a new primary domain, writing the
+# CNAMEs it needs into Cloudflare first.
+#
+# Order is the whole point. Clerk's own docs: "When you update a production
+# instance's primary domain name, you have to make sure that you've completed
+# all the necessary setup steps for DNS and emails to work. Expect downtime
+# otherwise." Doing this by hand means copying five records between two
+# dashboards and hoping the sequence was right. Here it is one order, every
+# time: read what Clerk wants, write it, wait for it to resolve, and only then
+# flip the domain.
+#
+# Replaces dns.yml, which upserted the same records into a Route 53 hosted
+# zone. remerged.ai is served from Cloudflare, so that no longer applies.
+#
+# FREE — no provider spend. But `flip` changes production auth and signs out
+# every existing session, so it needs the word typed.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/clerk-domain.yml"
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "The domain Clerk should serve"
+        type: string
+        default: "remerged.ai"
+      mode:
+        description: "dns = write and verify records only. flip = that, then repoint Clerk."
+        type: choice
+        options: ["dns", "flip"]
+        default: "dns"
+      confirm:
+        description: 'For flip only: type "flip" to confirm. It signs out every session.'
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  move:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'flip'
+        run: |
+          if [ "${{ inputs.confirm }}" != "flip" ]; then
+            echo 'Not confirmed — type "flip" in the confirm box to repoint Clerk.'
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load the Clerk production secret from SSM
+        run: |
+          set -euo pipefail
+          v=$(aws ssm get-parameter --name "/remerged/prod/CLERK_SECRET_KEY" --with-decryption \
+            --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "CLERK_SECRET_KEY=$v" >> "$GITHUB_ENV"
+          case "$v" in
+            sk_live_*) echo "Loaded a PRODUCTION Clerk key." ;;
+            sk_test_*) echo "That is a development key (sk_test_). Production instances are the only ones with custom domains."; exit 1 ;;
+            *) echo "Unrecognised Clerk key format."; exit 1 ;;
+          esac
+
+      - name: Ask Clerk what it needs
+        env:
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -euo pipefail
+          d=$(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/domains)
+          if ! printf '%s' "$d" | jq -e '.data' >/dev/null 2>&1; then
+            echo "Clerk rejected the request:"
+            printf '%s' "$d" | jq -r '.errors[]?| "  \(.code): \(.message)"' || printf '%s\n' "$d"
+            exit 1
+          fi
+
+          # The primary domain is the one that is not a satellite. Everything
+          # this workflow does hangs off its id.
+          primary=$(printf '%s' "$d" | jq -c '[.data[] | select(.is_satellite == false)] | .[0]')
+          if [ "$primary" = "null" ] || [ -z "$primary" ]; then
+            echo "No primary domain found on this instance."
+            printf '%s' "$d" | jq .
+            exit 1
+          fi
+          id=$(printf '%s' "$primary" | jq -r '.id')
+          current=$(printf '%s' "$primary" | jq -r '.name')
+          echo "  primary domain: $current  (id $id)"
+          echo "  target:         $DOMAIN"
+          echo "CLERK_DOMAIN_ID=$id" >> "$GITHUB_ENV"
+          echo "CLERK_CURRENT=$current" >> "$GITHUB_ENV"
+
+          if [ "$current" = "$DOMAIN" ]; then
+            echo "Clerk already serves $DOMAIN. The records below are still checked."
+          fi
+
+          # cname_targets carries host + value. The host is expressed against
+          # the CURRENT domain, so the label is what transfers: clerk,
+          # accounts, clkmail, clk._domainkey, clk2._domainkey. Deriving the
+          # label rather than hardcoding it means this keeps working if Clerk
+          # changes what it asks for.
+          printf '%s' "$primary" | jq -r --arg cur "$current" --arg new "$DOMAIN" '
+            .cname_targets[]?
+            | (.host | sub("\\." + ($cur | gsub("\\."; "\\.")) + "$"; "")) as $label
+            | "\($label)\t\(.value)\t\(.required)"
+          ' > /tmp/targets.tsv
+
+          if [ ! -s /tmp/targets.tsv ]; then
+            echo "Clerk returned no cname_targets. Nothing to write."
+            printf '%s' "$primary" | jq .
+            exit 1
+          fi
+          echo "  records Clerk wants (label -> target, required):"
+          sed 's/^/    /' /tmp/targets.tsv | column -t
+
+      - name: Write them into Cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          api="https://api.cloudflare.com/client/v4"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+
+          z=$(curl -sS -H "$auth" "$api/zones?name=$DOMAIN")
+          zone=$(printf '%s' "$z" | jq -r '.result[0].id // empty')
+          if [ -z "$zone" ]; then
+            echo "No Cloudflare zone for $DOMAIN with this token."
+            exit 1
+          fi
+          echo "::add-mask::$zone"
+
+          while IFS=$'\t' read -r label value required; do
+            [ -n "$label" ] || continue
+            fqdn="$label.$DOMAIN"
+            # proxied MUST be false. Clerk needs the CNAME to resolve to its
+            # own host; Cloudflare's proxy would answer with its own IPs and
+            # break both the frontend API and DKIM.
+            body=$(jq -nc --arg n "$fqdn" --arg c "$value" \
+              '{type:"CNAME", name:$n, content:$c, ttl:1, proxied:false}')
+            existing=$(curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=CNAME&name=$fqdn" \
+              | jq -r '.result[0].id // empty')
+            if [ -n "$existing" ]; then
+              r=$(curl -sS -X PUT -H "$auth" -H "Content-Type: application/json" \
+                --data "$body" "$api/zones/$zone/dns_records/$existing")
+              action="updated"
+            else
+              r=$(curl -sS -X POST -H "$auth" -H "Content-Type: application/json" \
+                --data "$body" "$api/zones/$zone/dns_records")
+              action="created"
+            fi
+            if [ "$(printf '%s' "$r" | jq -r '.success')" != "true" ]; then
+              echo "  FAILED $fqdn"
+              printf '%s' "$r" | jq -r '.errors[]?| "    \(.code): \(.message)"'
+              exit 1
+            fi
+            echo "  $action  $fqdn -> $value"
+          done < /tmp/targets.tsv
+
+      - name: Wait for them to resolve
+        env:
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -uo pipefail
+          # Cloudflare is authoritative and fast, but "fast" is not "instant"
+          # and flipping Clerk before these answer is exactly the downtime its
+          # docs warn about.
+          deadline=$(( $(date +%s) + 300 ))
+          while :; do
+            missing=0
+            while IFS=$'\t' read -r label value required; do
+              [ -n "$label" ] || continue
+              got=$(dig +short CNAME "$label.$DOMAIN" @1.1.1.1 | sed 's/\.$//')
+              if [ "$got" != "$value" ]; then
+                missing=$((missing+1))
+              fi
+            done < /tmp/targets.tsv
+            [ "$missing" -eq 0 ] && break
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "Timed out with $missing record(s) not resolving yet:"
+              while IFS=$'\t' read -r label value required; do
+                [ -n "$label" ] || continue
+                got=$(dig +short CNAME "$label.$DOMAIN" @1.1.1.1 | sed 's/\.$//')
+                [ "$got" = "$value" ] || echo "  $label.$DOMAIN -> ${got:-(nothing)}  expected $value"
+              done < /tmp/targets.tsv
+              echo "They may simply need longer. Re-run in dns mode before flipping."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "All records resolve:"
+          while IFS=$'\t' read -r label value required; do
+            [ -n "$label" ] || continue
+            echo "  ok  $label.$DOMAIN -> $value"
+          done < /tmp/targets.tsv
+
+      - name: Repoint Clerk
+        if: inputs.mode == 'flip'
+        env:
+          DOMAIN: ${{ inputs.domain }}
+        run: |
+          set -euo pipefail
+          if [ "$CLERK_CURRENT" = "$DOMAIN" ]; then
+            echo "Clerk already serves $DOMAIN — nothing to change."
+            exit 0
+          fi
+          echo "Repointing Clerk from $CLERK_CURRENT to $DOMAIN…"
+          r=$(curl -sS -X PATCH \
+            -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+            -H "Content-Type: application/json" \
+            --data "$(jq -nc --arg n "$DOMAIN" '{name:$n}')" \
+            "https://api.clerk.com/v1/domains/$CLERK_DOMAIN_ID")
+          if [ "$(printf '%s' "$r" | jq -r '.name // empty')" != "$DOMAIN" ]; then
+            echo "Clerk did not accept the change:"
+            printf '%s' "$r" | jq -r '.errors[]?| "  \(.code): \(.message)"' || printf '%s\n' "$r"
+            exit 1
+          fi
+          printf '%s' "$r" | jq -r '"  now: \(.name)\n  frontend api: \(.frontend_api_url // "-")\n  accounts portal: \(.accounts_portal_url // "-")"'
+          echo
+          echo "Every existing session is now invalid. Members sign in again."
+          echo "Next: the Stripe webhook still points at the old domain."
+
+      - name: What happens next
+        if: inputs.mode == 'dns'
+        run: |
+          echo "DNS only — Clerk still serves $CLERK_CURRENT."
+          echo "Re-run with mode=flip and confirm=flip to repoint it."
