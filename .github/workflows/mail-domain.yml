@@ -13,8 +13,8 @@ name: Mail domain
 # infra/bootstrap.sh does the same job for remerged.click, whose zone is in
 # Route 53. That path is left alone — remerged.click keeps receiving mail.
 #
-# FREE — no provider spend. SES identities, DKIM and DNS records cost nothing;
-# receiving is billed per message ($0.10 per 1,000).
+# check and setup are FREE — SES identities, DKIM and DNS records cost nothing.
+# test sends one real message and receives it: about $0.0002 all in.
 
 on:
   push:
@@ -29,9 +29,9 @@ on:
         type: string
         default: "remerged.ai"
       mode:
-        description: "check = report only. setup = create the identity and write the records."
+        description: "check = report only. setup = create the identity and write the records. test = send one message to support@ and follow it through."
         type: choice
-        options: ["check", "setup"]
+        options: ["check", "setup", "test"]
         default: "check"
       replace_mx:
         description: "setup only: delete MX records pointing somewhere other than SES. Leave off unless check says they are in the way."
@@ -103,6 +103,31 @@ jobs:
           aws s3api get-bucket-encryption --bucket "$b" 2>/dev/null | jq -c '.ServerSideEncryptionConfiguration.Rules' | sed 's/^/    /' || echo "    (none)"
           echo "  public access block:"
           aws s3api get-public-access-block --bucket "$b" 2>/dev/null | jq -c '.PublicAccessBlockConfiguration' | sed 's/^/    /' || echo "    (none)"
+          echo "INBOUND_BUCKET=$b" >> "$GITHUB_ENV"
+
+          # Sandbox is the quiet killer: receiving works, and the forward out
+          # to a personal inbox is refused because that address is not a
+          # verified identity. Worth seeing before blaming the rule.
+          echo "  ses account:"
+          aws sesv2 get-account \
+            --query '{production:ProductionAccessEnabled,sending:SendingEnabled,quota:SendQuota.Max24HourSend}' \
+            --output json | sed 's/^/    /' || true
+          echo "  verified identities:"
+          aws sesv2 list-email-identities --query 'EmailIdentities[].{id:IdentityName,verified:VerifiedForSendingStatus}' \
+            --output json | sed 's/^/    /' || true
+
+          fn=$(aws lambda list-functions \
+            --query "Functions[?contains(FunctionName, 'MailForwarder')].FunctionName" --output text \
+            | tr '\t' '\n' | head -1)
+          if [ -n "$fn" ]; then
+            echo "  forwarder: $fn"
+            aws lambda get-function-configuration --function-name "$fn" \
+              --query 'Environment.Variables.{from:MAIL_FROM,to:FORWARD_TO,bucket:INBOUND_BUCKET,prefix:INBOUND_PREFIX}' \
+              --output json | sed 's/^/    /' || true
+            echo "MAIL_FORWARDER=$fn" >> "$GITHUB_ENV"
+          else
+            echo "  no forwarder function found"
+          fi
 
       - name: What Cloudflare holds now
         env:
@@ -255,6 +280,62 @@ jobs:
           done
           echo "MX now resolves to:"
           dig +short MX "$DOMAIN" @1.1.1.1 | sed 's/^/  /'
+
+      # An end-to-end test, because every part of this can look right and the
+      # mail still not arrive. Send one message to support@, watch it land in
+      # S3, then read the forwarder's own log for what it did with it.
+      - name: Send one message through it
+        if: inputs.mode == 'test'
+        run: |
+          set -euo pipefail
+          started=$(date +%s)
+          subject="Remerged mail path test $(date -u +%H:%M:%SZ)"
+          cat > /tmp/content.json <<JSON
+          {"Simple":{"Subject":{"Data":"$subject"},
+            "Body":{"Text":{"Data":"If this reached the private inbox, receiving and forwarding both work."}}}}
+          JSON
+          from="no-reply@$DOMAIN"
+          echo "  sending $from -> support@$DOMAIN"
+          aws sesv2 send-email --from-email-address "$from" \
+            --destination "ToAddresses=support@$DOMAIN" \
+            --content file:///tmp/content.json \
+            --query MessageId --output text | sed 's/^/    message id /'
+
+          b="${INBOUND_BUCKET:-}"
+          if [ -n "$b" ]; then
+            echo "  waiting for an object under inbound/ in $b"
+            deadline=$(( $(date +%s) + 180 ))
+            while :; do
+              latest=$(aws s3api list-objects-v2 --bucket "$b" --prefix inbound/ \
+                --query 'sort_by(Contents, &LastModified)[-1].{k:Key,t:LastModified}' --output json 2>/dev/null || echo null)
+              k=$(printf '%s' "$latest" | jq -r '.k // empty')
+              t=$(printf '%s' "$latest" | jq -r '.t // empty')
+              if [ -n "$t" ] && [ "$(date -d "$t" +%s)" -ge "$started" ]; then
+                echo "    received: $k"
+                break
+              fi
+              if [ "$(date +%s)" -ge "$deadline" ]; then
+                echo "    nothing new after 3 minutes. SES did not write to the bucket:"
+                echo "    check the bucket policy above, and that the MX for $DOMAIN resolves."
+                exit 1
+              fi
+              sleep 10
+            done
+          fi
+
+          fn="${MAIL_FORWARDER:-}"
+          if [ -n "$fn" ]; then
+            echo "  forwarder log:"
+            # The invocation is asynchronous, so the log lags the S3 write.
+            sleep 20
+            aws logs filter-log-events --log-group-name "/aws/lambda/$fn" \
+              --start-time "$(( started * 1000 ))" \
+              --query 'events[].message' --output text 2>/dev/null \
+              | sed 's/^/    /' || echo "    (no log group yet)"
+          fi
+          echo
+          echo "If the log shows an error sending, the account is probably still in"
+          echo "the SES sandbox and the forward destination is not a verified identity."
 
       - name: What is left to do by hand
         if: inputs.mode == 'setup'
