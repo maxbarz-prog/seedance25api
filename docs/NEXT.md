@@ -471,9 +471,15 @@ were never rendered.
    it.) So the sandbox blocks job-ready mail and anything added later —
    receipts, dunning — and does not block sign-in.
 
-   **It was already requested, and DENIED** — case `178878528300157`, filed
-   while this account's `WebsiteURL` was `https://remerged.click`, which is
-   still what SES has on file. That closes the API route: `PutAccountDetails`
+   **It was already requested and the case closed DENIED** — case
+   `178878528300157`, filed while this account's `WebsiteURL` was
+   `https://remerged.click`, which is still what SES has on file. AWS did not
+   reject the use case on its merits: they asked for more detail (how often we
+   send, how the recipient list is maintained, how bounces, complaints and
+   unsubscribes are handled, and examples of the content) and noted that a
+   verified identity is expected before access is granted. The case lapsed
+   unanswered. Every one of those now has a concrete answer, and the identity
+   requirement is met. That closes the API route: `PutAccountDetails`
    only works while the account has no details set and returns
    `ConflictException` afterwards, so a resubmission has to be made in the
    console (SES → Account dashboard → Request production access) or as a reply

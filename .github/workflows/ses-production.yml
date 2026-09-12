@@ -118,6 +118,11 @@ jobs:
           # whether the request is made from here or pasted into the console,
           # and so it can be reviewed against the code. A reviewer rejects a
           # vague use case, and an inaccurate one is worse than a rejection.
+          #
+          # On THIS account that file is addressed as a reply to case
+          # 178878528300157, because a reviewed request closes the API route
+          # and the case is the only way back in. Reword the opening if this
+          # ever runs against an account with no history.
           cp infra/ses-use-case.txt /tmp/usecase.txt
           echo "Submitting this use case:"
           sed 's/^/  /' /tmp/usecase.txt
