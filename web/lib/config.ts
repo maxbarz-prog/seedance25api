@@ -3,10 +3,15 @@
 
 export const SITE_NAME = "Remerged";
 export const SITE_TAGLINE = "AI video, priced at cost";
-// The registered domain. Used for the support address on the legal pages and
-// for links in outbound email, so it must match the deployed prod domain and
-// the SES identity (both remerged.click).
-export const SITE_DOMAIN = "remerged.click";
+// The registered domain: what members see, and what links in outbound email
+// point at. DNS for it lives at Cloudflare (see sst.config.ts).
+export const SITE_DOMAIN = "remerged.ai";
+
+// Where support mail is received. NOT the same as SITE_DOMAIN yet — the SES
+// identity, DKIM records and MX record still sit on remerged.click, and
+// moving them is a separate job from the domain switch. Anything that has to
+// match what SES accepts uses this; anything a member reads uses SITE_DOMAIN.
+export const MAIL_DOMAIN = "remerged.click";
 
 export const CREDIT_USD = 0.01; // 1 credit = 1 cent
 

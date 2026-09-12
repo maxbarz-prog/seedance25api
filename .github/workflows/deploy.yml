@@ -66,10 +66,30 @@ jobs:
             load "$name"
           done
 
+      # DNS for remerged.ai is at Cloudflare, so the deploy needs write access
+      # to that zone. A repository secret, not an SSM parameter: only the
+      # deploy uses it and it must never reach the Lambda environment. Verify
+      # it first with .github/workflows/cloudflare-check.yml if a deploy
+      # starts failing on DNS.
+      - name: Check the Cloudflare token is present
+        run: |
+          if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
+            echo "CLOUDFLARE_API_TOKEN is not set. Add it under"
+            echo "Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+          echo "Cloudflare token present."
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
       - name: Install dependencies
         run: |
           npm install
           npm install --prefix web
 
       - name: Deploy ${{ env.STAGE }} stage
+        env:
+          # How the Cloudflare provider authenticates when SST writes the
+          # domain's DNS and certificate-validation records.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npx sst deploy --stage "$STAGE"

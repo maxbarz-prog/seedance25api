@@ -1,5 +1,16 @@
 name: DNS records
 
+# LEGACY — this targets remerged.click, which is no longer the site's domain.
+#
+# The site moved to remerged.ai, whose DNS is at CLOUDFLARE, not Route 53, so
+# this workflow cannot write its records: it upserts into a Route 53 hosted
+# zone. When the Clerk production instance is repointed at remerged.ai its
+# CNAMEs go into Cloudflare by hand (or through a rewrite of this using the
+# Cloudflare API, as .github/workflows/cloudflare-check.yml does).
+#
+# Kept because remerged.click still holds the SES mail zone and a working
+# record of what Clerk needed.
+#
 # Applies the Clerk production-instance records for remerged.click into the
 # Route 53 hosted zone, from infra/clerk-dns.json (values live in that file so
 # nothing is retyped). UPSERT, so re-running is safe and idempotent.

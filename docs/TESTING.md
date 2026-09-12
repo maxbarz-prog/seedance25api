@@ -1,6 +1,6 @@
 # Dev testing checklist
 
-For a manual pass over **dev.remerged.click** before production. Work top to
+For a manual pass over **dev.remerged.ai** before production. Work top to
 bottom: each section assumes the ones above it passed.
 
 **Costs.** Everything up to §6 is free. §6 onwards spends real money at the

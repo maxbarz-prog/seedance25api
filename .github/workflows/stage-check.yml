@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       stage:
-        description: "Stage to read (dev -> https://dev.remerged.click)"
+        description: "Stage to read (dev -> https://dev.remerged.ai)"
         type: string
         default: dev
 
@@ -34,8 +34,8 @@ jobs:
           STAGE: ${{ inputs.stage }}
         run: |
           set -uo pipefail
-          base="https://$STAGE.remerged.click"
-          [ "$STAGE" = "prod" ] && base="https://remerged.click"
+          base="https://$STAGE.remerged.ai"
+          [ "$STAGE" = "prod" ] && base="https://remerged.ai"
           echo "base=$base"
           fail=0
 

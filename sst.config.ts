@@ -1,9 +1,21 @@
 /// <reference path="./.sst/platform/config.d.ts" />
 
-// Remerged infrastructure. Stages: `dev` -> dev.remerged.click,
-// `prod` -> remerged.click (+ www redirect). Deployed from GitHub Actions
+// Remerged infrastructure. Stages: `dev` -> dev.remerged.ai,
+// `prod` -> remerged.ai (+ www redirect). Deployed from GitHub Actions
 // via OIDC (.github/workflows/deploy.yml); secrets come from SSM Parameter
 // Store under /remerged/<stage>/*.
+//
+// DNS lives at CLOUDFLARE, not Route 53. remerged.ai is registered with
+// Cloudflare Registrar, which requires its own nameservers as a condition of
+// selling at cost — so the zone cannot be delegated to Route 53 without
+// moving the registration. Everything else still runs on AWS; only the
+// records live at Cloudflare, and SST writes them through
+// sst.cloudflare.dns() using the CLOUDFLARE_API_TOKEN repository secret.
+//
+// remerged.click stays registered in Route 53 and still holds the mail zone
+// (see the SES block below). It is not redirected to remerged.ai: with no
+// users, no inbound links and no rankings there is nothing to preserve, and
+// a redirect spanning two DNS providers is real complexity for no gain.
 
 export default $config({
   app(input) {
@@ -12,7 +24,13 @@ export default $config({
       removal: input?.stage === "prod" ? "retain" : "remove",
       protect: input?.stage === "prod",
       home: "aws",
-      providers: { aws: { region: "us-east-1" } },
+      providers: {
+        aws: { region: "us-east-1" },
+        // Authenticates from CLOUDFLARE_API_TOKEN, a GitHub Actions secret
+        // rather than an SSM parameter: only the deploy needs it, and it must
+        // never reach the Lambda environment.
+        cloudflare: true,
+      },
     };
   },
   async run() {
@@ -59,16 +77,23 @@ export default $config({
     // second site: the help centre is pages in this app, reading live prices
     // from the same code that charges people. Middleware redirects the alias
     // to /help on the canonical host, so there is one URL per article.
+    //
+    // `dns` applies to every name in this block, which is why they must all
+    // sit in the same Cloudflare zone. Nothing on remerged.click can be
+    // listed here.
+    const dns = sst.cloudflare.dns();
     const domain =
       $app.stage === "prod"
         ? {
-            name: "remerged.click",
-            redirects: ["www.remerged.click"],
-            aliases: ["help.remerged.click"],
+            name: "remerged.ai",
+            redirects: ["www.remerged.ai"],
+            aliases: ["help.remerged.ai"],
+            dns,
           }
         : {
-            name: `${$app.stage}.remerged.click`,
-            aliases: [`help.${$app.stage}.remerged.click`],
+            name: `${$app.stage}.remerged.ai`,
+            aliases: [`help.${$app.stage}.remerged.ai`],
+            dns,
           };
 
     const environment = {
@@ -136,6 +161,13 @@ export default $config({
     // forwarder re-sends to the private inbox. Receipt rules are account-
     // global, so exactly one stage owns them (MAIL_STAGE, default dev until
     // prod exists).
+    //
+    // Still on remerged.click, deliberately. Moving mail to remerged.ai means
+    // a second SES identity, DKIM records and an MX record in Cloudflare, and
+    // it is worth doing separately from the domain switch: outbound (what
+    // members see) can move on its own, and the receipt rule can accept both
+    // addresses at once so the old one never stops working. The zone below is
+    // the Route 53 one for remerged.click, which is untouched by any of this.
     if ($app.stage === (process.env.MAIL_STAGE || "dev")) {
       const mailDomain = "remerged.click";
       const account = aws.getCallerIdentityOutput();

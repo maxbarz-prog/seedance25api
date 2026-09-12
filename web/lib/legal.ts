@@ -1,6 +1,8 @@
-import { SITE_NAME, SITE_DOMAIN } from "./config";
+import { MAIL_DOMAIN, SITE_NAME } from "./config";
 
-export const SUPPORT_EMAIL = `support@${SITE_DOMAIN}`;
+// The address mail is actually received at, which is not yet on SITE_DOMAIN.
+// Printing an address SES does not accept would send support mail nowhere.
+export const SUPPORT_EMAIL = `support@${MAIL_DOMAIN}`;
 export const LEGAL_UPDATED = "September 2026";
 
 export const TERMS = [

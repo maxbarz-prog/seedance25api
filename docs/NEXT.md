@@ -33,8 +33,8 @@ it.
   plus the commits on `claude/seedance-1080p-verify-c8cbha` (provider fixes,
   the check workflows, this brief). Pushing `web/**`, `functions/**`,
   `sst.config.ts` or `package.json` to the platform branch deploys the `dev`
-  stage (https://dev.remerged.click) via `.github/workflows/deploy.yml`; a
-  `prod-*` tag deploys `prod` (https://remerged.click). The Deploy workflow
+  stage (https://dev.remerged.ai) via `.github/workflows/deploy.yml`; a
+  `prod-*` tag deploys `prod` (https://remerged.ai). The Deploy workflow
   can also be dispatched manually on any branch: a branch ref deploys dev
   from that branch, a `prod-*` tag ref deploys prod.
 - All keys are in SSM Parameter Store under `/remerged/dev/` and
@@ -390,7 +390,7 @@ were never rendered.
 
 1. **Owner's manual generation test on dev** (deliberately not automated —
    the owner wants to validate output quality personally). Sign in at
-   https://dev.remerged.click, join, top up, then generate a short clip in
+   https://dev.remerged.ai, join, top up, then generate a short clip in
    each mode, extend one, and download. What to watch:
    - The default is 480p rendered, upscaled to 4K. Quality and upscale are
      now separate controls: 480p/1080p × 4K/1080p/none. Native 1080p is the
@@ -401,14 +401,32 @@ were never rendered.
    - After an extension, check the Lambda log via `logs.yml` for
      "ffmpeg unavailable" or "tail trim failed"; neither should appear.
    - Compare the ModelArk and fal invoices against the measured table below.
-2. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
+2. **Domain move to remerged.ai.** DONE for the site; two console steps left,
+   both yours and both needed BEFORE the prod cutover:
+   - **Clerk**: the production instance still serves `remerged.click`
+     (`pk_live_`/`sk_live_`). Repoint it at `remerged.ai` and add its five
+     CNAMEs to **Cloudflare** — `.github/workflows/dns.yml` writes them into
+     Route 53 and so no longer applies. Repointing invalidates every existing
+     session, which costs nothing today.
+   - **Stripe**: add a webhook endpoint for
+     `https://remerged.ai/api/billing/webhook` and put its signing secret into
+     `/remerged/prod/STRIPE_WEBHOOK_SECRET`.
+
+   Mail is deliberately still on `remerged.click`: the SES identity, DKIM and
+   MX records all sit in its Route 53 zone, and `MAIL_DOMAIN` in
+   `web/lib/config.ts` keeps `SUPPORT_EMAIL` pointing at an address SES
+   actually accepts. Moving it is a separate job — outbound (`EMAIL_FROM`)
+   can move on its own, and the receipt rule takes an array of recipients so
+   both addresses can work at once.
+
+3. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
    production keys, live Stripe key, webhook `we_1UDNRZ2Nd3VZM6rLW1KGdxoR`
    for `https://remerged.click/api/billing/webhook` with its secret,
    `MOCK_BILLING=0`, `PROVIDER_MODE=live`, and the `COST_*` values. Cut a
    `prod-YYYY-MM-DD` tag on the platform branch to deploy. The apex domain
    does not resolve until that first prod deploy, which is also when
    https://remerged.click/terms and /privacy go live.
-3. **After the first real generations**, reconcile `COST_*` in SSM against
+4. **After the first real generations**, reconcile `COST_*` in SSM against
    the invoices and redeploy (the deploy bakes SSM values into the Lambda).
 
 ## Housekeeping

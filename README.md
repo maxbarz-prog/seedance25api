@@ -4,8 +4,15 @@ AI video generation, sold at cost. Members pay a membership; generation is
 billed at what the providers charge us plus the real cost of delivering it,
 with no markup on usage.
 
-Live at **[remerged.click](https://remerged.click)** (production) and
-**[dev.remerged.click](https://dev.remerged.click)** (staging).
+Live at **[remerged.ai](https://remerged.ai)** (production) and
+**[dev.remerged.ai](https://dev.remerged.ai)** (staging).
+
+> DNS for `remerged.ai` lives at **Cloudflare**, not Route 53 — Cloudflare
+> Registrar requires its own nameservers as a condition of selling at cost, so
+> the zone cannot be delegated without moving the registration. Hosting is
+> unchanged; SST writes the records through `sst.cloudflare.dns()` using the
+> `CLOUDFLARE_API_TOKEN` repository secret. `remerged.click` stays registered
+> in Route 53 and still holds the **mail** zone.
 
 > The repository root previously held a marketing README for an unrelated
 > product (reAPI's API gateway). It is preserved at
@@ -165,7 +172,7 @@ Delivery, overhead and processing stay tunable from SSM.
 
 ## Help centre
 
-`/help`, with `help.remerged.click` as an alias that 308s to it — one
+`/help`, with `help.remerged.ai` as an alias that 308s to it — one
 canonical URL per article, no second copy to keep in step.
 
 It is built from `web/lib/help.ts`, which is content as data rather than
