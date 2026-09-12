@@ -451,9 +451,18 @@ were never rendered.
        identities failed the check in region US-EAST-1: maxbarz@gmail.com
 
    Verifying that one address (`mail-domain.yml` asks SES to send the link)
-   unblocks the support forward, and nothing else. Members cannot receive
-   password resets, receipts or job notifications until the account leaves the
-   sandbox, so **this blocks launch, not the cutover**. Requesting it is
+   unblocks the support forward, and nothing else.
+
+   What SES actually carries to members is narrower than it looks, because
+   **Clerk sends its own mail** — sign-in codes, verification and password
+   resets all come from Clerk over the `clkmail` and `clk*._domainkey` records,
+   not from SES. The only SES message a member receives is the "your video is
+   ready" notification in `lib/pipeline.ts`. (`app/api/auth/forgot` also sends
+   a reset over SES, but it belongs to the built-in cookie auth, which is off
+   whenever `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is set, and nothing links to
+   it.) So the sandbox blocks job-ready mail and anything added later —
+   receipts, dunning — and does not block sign-in. Requesting production
+   access is
    `sesv2 put-account-details --production-access-enabled` with the site URL
    and a use-case description, or the console; AWS reviews it, usually within
    a day. Check with `aws sesv2 get-account --query ProductionAccessEnabled`.
