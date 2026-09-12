@@ -95,14 +95,31 @@ export async function storeVideoBuffer(
 
 // Resolve a stored key to something a browser (or an upstream provider, for
 // reference images) can fetch for the next hour.
-export async function readUrl(key: string | null | undefined): Promise<string | null> {
+//
+// `filename` asks S3 to send Content-Disposition: attachment, which is the only
+// way to make a browser SAVE a video rather than play it. An <a download> cannot
+// do it: that attribute is ignored on a cross-origin href, so a link straight to
+// a presigned URL opens the mp4 in the tab instead — which is exactly what it
+// did before this existed.
+export async function readUrl(
+  key: string | null | undefined,
+  opts: { filename?: string } = {}
+): Promise<string | null> {
   if (!key) return null;
   if (key.startsWith("url:")) return key.slice(4);
   if (key.startsWith("http://") || key.startsWith("https://")) return key; // legacy rows
   if (!BUCKET) return null;
-  return getSignedUrl(s3(), new GetObjectCommand({ Bucket: BUCKET, Key: key }), {
-    expiresIn: SIGNED_URL_TTL_S,
-  });
+  return getSignedUrl(
+    s3(),
+    new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      ...(opts.filename
+        ? { ResponseContentDisposition: `attachment; filename="${opts.filename}"` }
+        : {}),
+    }),
+    { expiresIn: SIGNED_URL_TTL_S }
+  );
 }
 
 export async function deleteObject(key: string | null | undefined): Promise<void> {

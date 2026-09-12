@@ -35,9 +35,20 @@ export default async function Home() {
         <p className="mx-auto mt-3 max-w-2xl text-muted">
           Members generate at our cost — the membership is the business model.
           A 5-second 4K video runs{" "}
-          <span className="font-medium text-ink">{fmtUsd(q5.usd)}</span>; a full
-          30-second Seedance 2.5 clip is{" "}
-          <span className="font-medium text-ink">{fmtUsd(q30.usd)}</span>.
+          <span className="font-medium text-ink">
+            {q5.credits.toLocaleString()} credits
+          </span>
+          ; a full 30-second Seedance 2.5 clip is{" "}
+          <span className="font-medium text-ink">
+            {q30.credits.toLocaleString()}
+          </span>
+          .
+        </p>
+        {/* Said once, plainly, for anyone who has not met a credit before.
+            Every price on the site is in credits; this is the only conversion
+            they should need. */}
+        <p className="mx-auto mt-2 max-w-2xl text-sm text-muted">
+          Credits cost a cent each — {fmtUsd(1)} buys 100.
         </p>
       </section>
 

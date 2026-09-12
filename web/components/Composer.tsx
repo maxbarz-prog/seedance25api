@@ -275,6 +275,7 @@ export default function Composer({
       return;
     }
     setBusy(true);
+    let navigating = false;
     try {
       const res = await fetch("/api/jobs", {
         method: "POST",
@@ -318,9 +319,14 @@ export default function Composer({
         localStorage.removeItem(DRAFT_KEY);
       } catch {}
       window.dispatchEvent(new Event(BALANCE_EVENT));
+      // Stays busy from here on. The job exists and we are navigating to it, so
+      // releasing the button would flick it back to "Generate" for the moment
+      // before the next page paints — which reads as the click having failed.
+      // finally still runs after a return, hence the flag rather than one.
+      navigating = true;
       router.push(variations > 1 ? "/library" : `/jobs/${data.id}`);
     } finally {
-      setBusy(false);
+      if (!navigating) setBusy(false);
     }
   }
 
@@ -598,8 +604,10 @@ export default function Composer({
           {q ? (
             <>
               {variations > 1 ? `${variations} videos: ` : "This video: "}
-              <span className="font-semibold text-ink">${(q.usd * variations).toFixed(2)}</span>{" "}
-              · {(q.credits * variations).toLocaleString()} credits
+              <span className="font-semibold text-ink tabular-nums">
+                {(q.credits * variations).toLocaleString()}
+              </span>{" "}
+              credits
             </>
           ) : (
             "…"

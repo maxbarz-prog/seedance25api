@@ -27,7 +27,10 @@ export default function PricingPage() {
   const priceFor = (model: ModelId, mode: OutputMode, d: number) => {
     if (d > MODELS[model].maxDurationS) return "—";
     if (!supportsQuality(model, OUTPUT_MODES[mode].quality)) return "—";
-    return fmtUsd(quote({ model, durationS: d, mode }).usd);
+    // Credits, because credits are what a member spends. The table says once,
+    // above, what a credit costs; repeating a dollar figure in every cell
+    // invites the arithmetic to be done twice and disagree.
+    return quote({ model, durationS: d, mode }).credits.toLocaleString();
   };
   // Seedance 1.5 Pro is the one model priced by soundtrack rather than
   // resolution, so its rows would otherwise understate a video with audio.
@@ -57,6 +60,12 @@ export default function PricingPage() {
 
       <section className="mt-10">
         <h2 className="text-xl font-medium">What videos cost</h2>
+        {/* The unit, stated once. Every figure in the table is credits, so the
+            conversion belongs here rather than in ninety table cells. */}
+        <p className="mt-2 text-sm text-muted">
+          In credits, which is what you spend. A credit costs a cent, so{" "}
+          {fmtUsd(10)} buys 1,000 of them.
+        </p>
         <div className="mt-4 overflow-x-auto rounded-2xl border border-line bg-surface">
           <table className="w-full text-sm">
             <thead>

@@ -34,9 +34,19 @@ const STEPS = ["queued", "generating", "upscaling", "ready"] as const;
 const LABELS: Record<string, string> = {
   queued: "Queued",
   generating: "Generating",
-  upscaling: "Upscaling to 1080p",
+  upscaling: "Upscaling",
   ready: "Ready",
 };
+
+// The upscale step's name depends on the route this job took. It used to read
+// "Upscaling to 1080p" for every job, which told someone who had paid for 4K
+// that they were getting a quarter of it — the render was always correct, the
+// label was not.
+function labelFor(step: string, job: Job): string {
+  if (step !== "upscaling") return LABELS[step];
+  const target = modeInfo(job.mode).upscale;
+  return target === "4k" ? "Upscaling to 4K" : "Upscaling to 1080p";
+}
 
 // A submitted job sits in the provider's queue until a rendering slot frees
 // up. Showing "Generating" for that whole time makes a working queue look
@@ -65,7 +75,7 @@ export default function JobView({ id }: { id: string }) {
       signal: ctl.signal,
     })
       .then((r) => r.json())
-      .then((q) => setExtendQuote(q.usd ?? null))
+      .then((q) => setExtendQuote(q.credits ?? null))
       .catch(() => {});
     return () => ctl.abort();
   }, [job, extendOpen, extendS]);
@@ -157,7 +167,7 @@ export default function JobView({ id }: { id: string }) {
         {`${modeInfo(job.mode).label} (${
           modeInfo(job.mode).resolution
         })`}{" "}
-        · ${(job.quote_credits * 0.01).toFixed(2)}
+        · {job.quote_credits.toLocaleString()} credits
       </p>
 
       {job.status === "failed" ? (
@@ -198,9 +208,12 @@ export default function JobView({ id }: { id: string }) {
             >
               Extend
             </button>
+            {/* Our own route, which redirects to a presign that carries
+                Content-Disposition: attachment. Pointing straight at S3 with a
+                `download` attribute silently opened the video instead: the
+                attribute does nothing cross-origin. */}
             <a
-              href={job.video_url}
-              download
+              href={`/api/jobs/${job.id}/download`}
               className="rounded-full bg-accent px-6 py-2 text-sm font-medium text-accent-ink"
             >
               Download
@@ -242,7 +255,9 @@ export default function JobView({ id }: { id: string }) {
                   <span className="w-8 font-medium">{extendS}s</span>
                 </label>
                 <span className="text-muted">
-                  {extendQuote !== null ? `$${extendQuote.toFixed(2)}` : "…"}
+                  {extendQuote !== null
+                    ? `${extendQuote.toLocaleString()} credits`
+                    : "…"}
                 </span>
                 <button
                   onClick={extend}
@@ -276,7 +291,7 @@ export default function JobView({ id }: { id: string }) {
                     }`}
                   />
                   <span className={state === "todo" ? "text-muted" : ""}>
-                    {LABELS[s]}
+                    {labelFor(s, job)}
                     {state === "now" && "…"}
                   </span>
                 </li>

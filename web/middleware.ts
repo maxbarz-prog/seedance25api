@@ -43,7 +43,12 @@ let clerk: ((req: NextRequest, event: NextFetchEvent) => unknown) | null = null;
 // every request it sees, which marks the response as belonging to one visitor
 // and takes it out of the CDN. Nothing here reads the session — the header
 // fetches the balance client-side from /api/me, which Clerk does see.
-const PUBLIC = /^\/(?:$|pricing|help|terms|privacy|refunds)/;
+// Pages whose HTML is the same for everyone. Not "pages anyone may use":
+// /account and /library are behind sign-in, but their markup is a shell that
+// fetches the member's data from /api/me in the browser, so the document itself
+// carries nothing private and belongs in the CDN. Protection lives in the API
+// handlers, which Clerk does still see.
+const PUBLIC = /^\/(?:$|pricing|help|terms|privacy|refunds|account|library)/;
 
 export default function middleware(req: NextRequest, event: NextFetchEvent) {
   // Runs for every path, including public ones: help.<domain>/anything has to

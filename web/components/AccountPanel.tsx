@@ -70,6 +70,10 @@ export default function AccountPanel() {
   // An invite code, if they were given one. Empty for almost everyone, so it
   // sits under the plans rather than above them.
   const [invite, setInvite] = useState("");
+  // Picking and paying are two acts. Clicking a plan used to leave for Stripe
+  // immediately, which is a surprising amount of consequence for one click on
+  // something that looks like a choice.
+  const [selected, setSelected] = useState<PlanId | null>(null);
   const [confirmEmail, setConfirmEmail] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -176,13 +180,25 @@ export default function AccountPanel() {
   }
 
   if (!me) {
+    // A shape rather than a word. The page shell is static and arrives
+    // immediately; this is the second or so that /api/me takes, and an empty
+    // screen for that long reads as broken.
     return (
-      <div className="py-16 text-center text-muted">
-        Loading… if nothing appears,{" "}
-        <a className="underline" href="/login?next=/account">
-          sign in
-        </a>
-        .
+      <div className="space-y-6" aria-busy="true">
+        {[0, 1, 2].map((i) => (
+          <section key={i} className="rounded-2xl border border-line bg-surface p-5">
+            <div className="h-4 w-28 rounded bg-line" />
+            <div className="mt-4 h-8 w-40 rounded bg-line opacity-70" />
+            <div className="mt-3 h-3 w-3/4 rounded bg-line opacity-50" />
+          </section>
+        ))}
+        <p className="text-center text-sm text-muted">
+          If nothing appears,{" "}
+          <a className="underline" href="/sign-in">
+            sign in
+          </a>
+          .
+        </p>
       </div>
     );
   }
@@ -279,10 +295,11 @@ export default function AccountPanel() {
                 return (
                   <button
                     key={id}
-                    onClick={() => subscribe(id, interval)}
-                    disabled={busy !== null}
-                    className={`rounded-xl border px-5 py-3 text-left text-sm disabled:opacity-50 ${
-                      id === (pickedPlan ?? "pro")
+                    type="button"
+                    onClick={() => setSelected(id)}
+                    aria-pressed={id === (selected ?? pickedPlan)}
+                    className={`rounded-xl border px-5 py-3 text-left text-sm ${
+                      id === (selected ?? pickedPlan)
                         ? "border-accent ring-1 ring-accent"
                         : "border-line hover:border-accent"
                     }`}
@@ -315,6 +332,26 @@ export default function AccountPanel() {
                 Enter it, then pick the plan it is for. Invites are for Standard, billed monthly.
               </span>
             </label>
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  const plan = selected ?? pickedPlan;
+                  if (plan) void subscribe(plan, interval);
+                }}
+                disabled={busy !== null || !(selected ?? pickedPlan)}
+                className="rounded-full bg-accent px-6 py-2.5 font-medium text-accent-ink hover:opacity-90 disabled:opacity-50"
+              >
+                {busy?.startsWith("sub-")
+                  ? "Opening payment…"
+                  : (selected ?? pickedPlan)
+                    ? `Continue with ${PLANS[(selected ?? pickedPlan)!].label}`
+                    : "Choose a plan"}
+              </button>
+              <span className="text-xs text-muted">
+                {interval === "year" ? "Billed yearly" : "Billed monthly"} · cancel any time
+              </span>
+            </div>
           </>
         )}
       </section>
@@ -322,11 +359,12 @@ export default function AccountPanel() {
       {/* Credits */}
       <section className="rounded-2xl border border-line bg-surface p-5">
         <h2 className="font-medium">Credits</h2>
-        <p className="mt-2 text-3xl font-semibold">
-          ${(me.balanceCredits * 0.01).toFixed(2)}
-          <span className="ml-2 text-sm font-normal text-muted">
-            {me.balanceCredits.toLocaleString()} credits
-          </span>
+        {/* Credits are the unit members spend and the unit every price is
+            quoted in, so the balance is a credit figure. Dollars appear when
+            money actually moves: buying credits, and the plan price. */}
+        <p className="mt-2 text-3xl font-semibold tabular-nums">
+          {me.balanceCredits.toLocaleString()}
+          <span className="ml-2 text-sm font-normal text-muted">credits</span>
         </p>
         {/* Granted credits expire with the plan period; bought ones do not,
             so the split is worth showing rather than one opaque total. */}
@@ -540,9 +578,8 @@ export default function AccountPanel() {
                 </p>
                 {me.balanceCredits > 0 && (
                   <p className="text-bad">
-                    You still hold {me.balanceCredits.toLocaleString()} credits
-                    (${(me.balanceCredits * 0.01).toFixed(2)}), and deleting
-                    forfeits every one of them.
+                    You still hold {me.balanceCredits.toLocaleString()} credits,
+                    and deleting forfeits every one of them.
                     {me.creditRefundUsd > 0 ? (
                       <>
                         {" "}
@@ -607,6 +644,15 @@ export default function AccountPanel() {
           <p className="mt-2 text-sm text-muted">No activity yet.</p>
         ) : (
           <table className="mt-3 w-full text-sm">
+            {/* The amounts are credits now, and a bare signed number needs
+                saying which. */}
+            <thead className="text-left text-xs text-muted">
+              <tr>
+                <th className="pb-1 font-normal">When</th>
+                <th className="pb-1 font-normal">What</th>
+                <th className="pb-1 text-right font-normal">Credits</th>
+              </tr>
+            </thead>
             <tbody>
               {me.ledger.map((e) => (
                 <tr key={e.id} className="border-t border-line">
@@ -620,7 +666,7 @@ export default function AccountPanel() {
                     }`}
                   >
                     {e.delta_credits >= 0 ? "+" : ""}
-                    {(e.delta_credits * 0.01).toFixed(2)}
+                    {e.delta_credits.toLocaleString()}
                   </td>
                 </tr>
               ))}
