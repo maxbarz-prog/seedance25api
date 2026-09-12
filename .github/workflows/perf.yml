@@ -1,0 +1,125 @@
+name: Perf
+
+# Measures what a visitor actually waits for, and where it goes.
+#
+# "The site is slow" has several possible causes with different fixes: a Lambda
+# cold start (fix: keep one warm), a slow render (fix: the page), CloudFront
+# missing (fix: caching), or DNS/TLS (fix: neither). Guessing between them
+# wastes a deploy each time, so this separates them: curl's own timing
+# breakdown per request, then the function's own REPORT lines, which carry
+# Init Duration for every cold start.
+#
+# FREE — a few requests and a log query.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Stage to measure"
+        type: choice
+        options: ["dev", "prod"]
+        default: "dev"
+      paths:
+        description: "Space-separated paths to time"
+        type: string
+        default: "/ /pricing /help /api/health /api/me"
+      repeats:
+        description: "Requests per path (first one may be cold)"
+        type: string
+        default: "5"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      STAGE: ${{ inputs.stage }}
+      PATHS: ${{ inputs.paths }}
+      REPEATS: ${{ inputs.repeats }}
+    steps:
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Time the requests
+        run: |
+          set -uo pipefail
+          host="remerged.ai"
+          [ "$STAGE" = "dev" ] && host="dev.remerged.ai"
+          echo "host: $host"
+          echo
+          # dns = name lookup, tls = handshake complete, ttfb = first byte.
+          # ttfb minus tls is the part the stack is responsible for.
+          printf '  %-14s %8s %8s %8s %8s %6s %s\n' path dns tls ttfb total code size
+          for p in $PATHS; do
+            for i in $(seq 1 "$REPEATS"); do
+              out=$(curl -sS -o /tmp/body -w '%{time_namelookup} %{time_appconnect} %{time_starttransfer} %{time_total} %{http_code} %{size_download}' \
+                --max-time 30 "https://$host$p" 2>/dev/null || echo "- - - - 000 0")
+              set -- $out
+              printf '  %-14s %8.3f %8.3f %8.3f %8.3f %6s %s\n' "$p" "$1" "$2" "$3" "$4" "$5" "$6" 2>/dev/null \
+                || printf '  %-14s  failed\n' "$p"
+            done
+          done
+
+      - name: What the server function reports
+        run: |
+          set -uo pipefail
+          # The server function is the one OpenNext runs the app in; the warmer,
+          # image optimizer and revalidator are separate and not what a visitor
+          # waits for.
+          fn=$(aws lambda list-functions \
+            --query "Functions[?contains(FunctionName, 'remerged-$STAGE') && contains(FunctionName, 'Server')].FunctionName" \
+            --output text | tr '\t' '\n' | head -1)
+          if [ -z "$fn" ]; then
+            echo "No server function found for stage $STAGE."
+            exit 0
+          fi
+          echo "function: $fn"
+          aws lambda get-function-configuration --function-name "$fn" \
+            --query '{memory:MemorySize,timeout:Timeout,runtime:Runtime,arch:Architectures[0],
+                      snapstart:SnapStart.ApplyOn,concurrency:ReservedConcurrentExecutions,
+                      size:CodeSize}' --output json | sed 's/^/  /' || true
+
+          lg=$(aws lambda get-function-configuration --function-name "$fn" \
+            --query 'LoggingConfig.LogGroup' --output text 2>/dev/null)
+          [ -n "$lg" ] && [ "$lg" != "None" ] || lg="/aws/lambda/$fn"
+          echo "  log group: $lg"
+
+          # REPORT lines carry Duration and, on a cold start, Init Duration.
+          # The ratio of the two is the whole question.
+          since=$(( ($(date +%s) - 3600) * 1000 ))
+          aws logs filter-log-events --log-group-name "$lg" --start-time "$since" \
+            --filter-pattern "REPORT" --query 'events[].message' --output text 2>&1 \
+            | tr '\t' '\n' | grep -o 'Duration: [0-9.]* ms\|Init Duration: [0-9.]* ms\|Max Memory Used: [0-9]* MB' \
+            | sort | uniq -c | sort -rn | head -40 | sed 's/^/    /' || true
+
+          echo
+          echo "  cold starts in the last hour (Init Duration):"
+          aws logs filter-log-events --log-group-name "$lg" --start-time "$since" \
+            --filter-pattern "\"Init Duration\"" --query 'events[].message' --output text 2>&1 \
+            | tr '\t' '\n' | grep -o 'Init Duration: [0-9.]* ms' | sed 's/^/    /' | tail -20 || true
+
+          echo
+          echo "  slowest invocations in the last hour:"
+          aws logs filter-log-events --log-group-name "$lg" --start-time "$since" \
+            --filter-pattern "REPORT" --query 'events[].message' --output text 2>&1 \
+            | tr '\t' '\n' | grep -o '\tDuration: [0-9.]* ms' \
+            | awk '{print $2}' | sort -rn | head -5 | sed 's/^/    /' || true
+
+      - name: Is CloudFront caching anything
+        run: |
+          set -uo pipefail
+          host="remerged.ai"
+          [ "$STAGE" = "dev" ] && host="dev.remerged.ai"
+          for p in / /pricing /_next/static; do
+            echo "  $p"
+            curl -sSI --max-time 20 "https://$host$p" 2>/dev/null \
+              | grep -i '^x-cache\|^cache-control\|^age\|^x-amz-cf-pop\|^server\|^HTTP' \
+              | sed 's/^/    /' || true
+          done
