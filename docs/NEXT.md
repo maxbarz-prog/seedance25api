@@ -401,13 +401,8 @@ were never rendered.
    - After an extension, check the Lambda log via `logs.yml` for
      "ffmpeg unavailable" or "tail trim failed"; neither should appear.
    - Compare the ModelArk and fal invoices against the measured table below.
-2. **Domain move to remerged.ai.** Site, DNS and Clerk are DONE. One console
-   step left, and it is the only thing blocking the prod cutover:
-   - **Stripe**: add a webhook endpoint for
-     `https://remerged.ai/api/billing/webhook` and put its signing secret into
-     `/remerged/prod/STRIPE_WEBHOOK_SECRET`. It has to be done by hand — a
-     secret key cannot create an endpoint, and the signing secret must reach
-     SSM without passing through a chat transcript.
+2. **Domain move to remerged.ai.** DONE — site, DNS, Clerk, Stripe and mail.
+   Nothing here blocks the prod cutover any more.
 
    Done on 2026-09-12:
    - **Site + help** on `remerged.ai` / `dev.remerged.ai`, DNS at Cloudflare
@@ -423,21 +418,36 @@ were never rendered.
      `proxied: false`, waits for them to resolve, and only then PATCHes the
      domain. `dns.yml` is deleted — it wrote the same records into Route 53,
      which cannot serve this domain.
-
-   Mail is deliberately still on `remerged.click`: the SES identity, DKIM and
-   MX records all sit in its Route 53 zone, and `MAIL_DOMAIN` in
-   `web/lib/config.ts` keeps `SUPPORT_EMAIL` pointing at an address SES
-   actually accepts. Moving it is a separate job — outbound (`EMAIL_FROM`)
-   can move on its own, and the receipt rule takes an array of recipients so
-   both addresses can work at once.
+   - **Stripe webhook** `we_1UEfTk2Nd3VZM6rLnc726z12` for
+     `https://remerged.ai/api/billing/webhook`, with its signing secret in
+     `/remerged/prod/STRIPE_WEBHOOK_SECRET`.
+     `.github/workflows/stripe-webhook.yml` created it from the API — the
+     signing secret is returned once, at creation, so nothing had to be read
+     out of the dashboard or pasted anywhere. It derives the event list by
+     grepping the webhook route, and disabled the old `remerged.click`
+     endpoint by exact URL. The account also serves two unrelated products,
+     so never disable endpoints by "not ours".
+   - **Mail** on `remerged.ai`: SES identity verified, three DKIM CNAMEs, an
+     MX at `inbound-smtp.us-east-1.amazonaws.com`, SPF, and DMARC at
+     `p=none`, all in the Cloudflare zone.
+     `.github/workflows/mail-domain.yml` did it and can do it again;
+     `check` mode reports without touching anything. The receipt rule accepts
+     `support@remerged.ai` **and** `support@remerged.click`, so the old
+     address keeps working indefinitely, and `infra/bootstrap.sh` moves
+     `EMAIL_FROM` to the primary domain only once SES reports it verified.
+     What is left is one browser step nobody else can do: adding
+     `support@remerged.ai` to Gmail as "Send mail as" over SES SMTP
+     (`email-smtp.us-east-1.amazonaws.com:587`, username in
+     `/remerged/mail/SMTP_USERNAME`, password in `/remerged/mail/SMTP_PASSWORD`).
+     Gmail's confirmation code arrives through the forwarder.
 
 3. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
-   production keys, live Stripe key, webhook `we_1UDNRZ2Nd3VZM6rLW1KGdxoR`
-   for `https://remerged.click/api/billing/webhook` with its secret,
+   production keys, live Stripe key, webhook `we_1UEfTk2Nd3VZM6rLnc726z12`
+   for `https://remerged.ai/api/billing/webhook` with its secret,
    `MOCK_BILLING=0`, `PROVIDER_MODE=live`, and the `COST_*` values. Cut a
    `prod-YYYY-MM-DD` tag on the platform branch to deploy. The apex domain
    does not resolve until that first prod deploy, which is also when
-   https://remerged.click/terms and /privacy go live.
+   https://remerged.ai/terms and /privacy go live.
 4. **After the first real generations**, reconcile `COST_*` in SSM against
    the invoices and redeploy (the deploy bakes SSM values into the Lambda).
 

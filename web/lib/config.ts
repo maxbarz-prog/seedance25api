@@ -7,11 +7,12 @@ export const SITE_TAGLINE = "AI video, priced at cost";
 // point at. DNS for it lives at Cloudflare (see sst.config.ts).
 export const SITE_DOMAIN = "remerged.ai";
 
-// Where support mail is received. NOT the same as SITE_DOMAIN yet — the SES
-// identity, DKIM records and MX record still sit on remerged.click, and
-// moving them is a separate job from the domain switch. Anything that has to
-// match what SES accepts uses this; anything a member reads uses SITE_DOMAIN.
-export const MAIL_DOMAIN = "remerged.click";
+// Where support mail is received. Its SES identity, DKIM and MX are created by
+// .github/workflows/mail-domain.yml; the receipt rule in sst.config.ts also
+// still accepts support@remerged.click, so the old address keeps working
+// indefinitely and nothing addressed to it is ever bounced. Only change this
+// to a domain SES has actually verified.
+export const MAIL_DOMAIN = "remerged.ai";
 
 export const CREDIT_USD = 0.01; // 1 credit = 1 cent
 

@@ -12,10 +12,11 @@
 // records live at Cloudflare, and SST writes them through
 // sst.cloudflare.dns() using the CLOUDFLARE_API_TOKEN repository secret.
 //
-// remerged.click stays registered in Route 53 and still holds the mail zone
-// (see the SES block below). It is not redirected to remerged.ai: with no
-// users, no inbound links and no rankings there is nothing to preserve, and
-// a redirect spanning two DNS providers is real complexity for no gain.
+// remerged.click stays registered in Route 53 and keeps receiving mail (see
+// the SES block below), but nothing else. It is not redirected to
+// remerged.ai: with no users, no inbound links and no rankings there is
+// nothing to preserve, and a redirect spanning two DNS providers is real
+// complexity for no gain.
 
 export default $config({
   app(input) {
@@ -162,16 +163,22 @@ export default $config({
     // global, so exactly one stage owns them (MAIL_STAGE, default dev until
     // prod exists).
     //
-    // Still on remerged.click, deliberately. Moving mail to remerged.ai means
-    // a second SES identity, DKIM records and an MX record in Cloudflare, and
-    // it is worth doing separately from the domain switch: outbound (what
-    // members see) can move on its own, and the receipt rule can accept both
-    // addresses at once so the old one never stops working. The zone below is
-    // the Route 53 one for remerged.click, which is untouched by any of this.
+    // Two domains receive, and will keep doing so: remerged.ai is where
+    // support@ is published, remerged.click is what the SES identity and MX
+    // were first built on and what anything already sent is addressed to.
+    // Accepting both costs one extra entry in the rule and means no message
+    // is ever bounced by a cutover.
+    //
+    // Their DNS lives in different places, so each gets its records from a
+    // different direction: remerged.click from the Route 53 zone below and
+    // infra/bootstrap.sh, remerged.ai from .github/workflows/mail-domain.yml,
+    // which writes into Cloudflare and waits for SES to verify. Nothing here
+    // creates the remerged.ai records — run that workflow first.
     if ($app.stage === (process.env.MAIL_STAGE || "dev")) {
-      const mailDomain = "remerged.click";
+      const mailDomain = "remerged.ai";
+      const legacyMailDomain = "remerged.click";
       const account = aws.getCallerIdentityOutput();
-      const zone = aws.route53.getZoneOutput({ name: mailDomain });
+      const zone = aws.route53.getZoneOutput({ name: legacyMailDomain });
       const inbound = new sst.aws.Bucket("Inbound", {
         transform: {
           // Let SES write received messages into inbound/ (appended to the
@@ -219,15 +226,16 @@ export default $config({
       new aws.ses.ReceiptRule("SupportRule", {
         ruleSetName: ruleSet.ruleSetName,
         name: "support",
-        recipients: [`support@${mailDomain}`],
+        recipients: [`support@${mailDomain}`, `support@${legacyMailDomain}`],
         enabled: true,
         scanEnabled: true,
         s3Actions: [{ bucketName: inbound.name, objectKeyPrefix: "inbound/", position: 1 }],
         lambdaActions: [{ functionArn: forwarder.arn, invocationType: "Event", position: 2 }],
       });
+      // remerged.ai's MX is written by the workflow; this is the other one.
       new aws.route53.Record("MailMx", {
         zoneId: zone.zoneId,
-        name: mailDomain,
+        name: legacyMailDomain,
         type: "MX",
         ttl: 300,
         records: ["10 inbound-smtp.us-east-1.amazonaws.com"],

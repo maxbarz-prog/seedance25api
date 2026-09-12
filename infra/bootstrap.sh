@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # Idempotent per-stage bootstrap, run by the deploy workflow before `sst deploy`.
 # Creates what a stage needs that isn't in code: random secrets (only if
-# absent), the SES sending identity for the domain with DKIM records in
-# Route 53, and the EMAIL_FROM parameter. Safe to re-run every deploy.
+# absent), the SES sending identity for the legacy mail domain with DKIM
+# records in Route 53, and the EMAIL_FROM parameter. Safe to re-run every
+# deploy.
+#
+# remerged.ai is the primary domain, but its zone is at Cloudflare, which
+# nothing here can write to. Its SES identity and DNS come from
+# .github/workflows/mail-domain.yml instead. This script only reads that
+# identity, to decide where outbound mail says it is from.
 set -euo pipefail
 
 STAGE="${1:?stage}"
-DOMAIN="remerged.click"
+DOMAIN="remerged.ai"
+LEGACY_DOMAIN="remerged.click"
 REGION="us-east-1"
 PREFIX="/remerged/$STAGE"
 
@@ -30,21 +37,36 @@ ensure_param() {
   fi
 }
 
+# For values this script owns rather than merely seeds: write when the live
+# value differs, leave it alone when it does not.
+set_param() {
+  local name="$1" value="$2" current
+  current=$(aws ssm get-parameter --name "$PREFIX/$name" --region "$REGION" \
+    --query Parameter.Value --output text 2>/dev/null || true)
+  if [ "$current" != "$value" ]; then
+    aws ssm put-parameter --name "$PREFIX/$name" --value "$value" \
+      --type String --overwrite --region "$REGION" >/dev/null
+    echo "set $PREFIX/$name = $value"
+  fi
+}
+
 ensure_secret SESSION_SECRET
 ensure_secret CRON_SECRET
 
-# SES domain identity with Easy DKIM; DKIM CNAMEs upserted into the hosted zone.
-if ! aws sesv2 get-email-identity --email-identity "$DOMAIN" --region "$REGION" >/dev/null 2>&1; then
-  aws sesv2 create-email-identity --email-identity "$DOMAIN" --region "$REGION" >/dev/null
-  echo "created SES identity $DOMAIN"
+# SES domain identity with Easy DKIM for the legacy domain; its DKIM CNAMEs go
+# into its Route 53 hosted zone. It keeps sending and receiving: mail already
+# addressed to support@remerged.click must not start bouncing.
+if ! aws sesv2 get-email-identity --email-identity "$LEGACY_DOMAIN" --region "$REGION" >/dev/null 2>&1; then
+  aws sesv2 create-email-identity --email-identity "$LEGACY_DOMAIN" --region "$REGION" >/dev/null
+  echo "created SES identity $LEGACY_DOMAIN"
 fi
-TOKENS=$(aws sesv2 get-email-identity --email-identity "$DOMAIN" --region "$REGION" \
+TOKENS=$(aws sesv2 get-email-identity --email-identity "$LEGACY_DOMAIN" --region "$REGION" \
   --query 'DkimAttributes.Tokens' --output text)
-ZONE_ID=$(aws route53 list-hosted-zones --query "HostedZones[?Name=='$DOMAIN.'].Id" --output text)
+ZONE_ID=$(aws route53 list-hosted-zones --query "HostedZones[?Name=='$LEGACY_DOMAIN.'].Id" --output text)
 if [ -n "$TOKENS" ] && [ -n "$ZONE_ID" ]; then
   CHANGES="["
   for t in $TOKENS; do
-    CHANGES+="{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$t._domainkey.$DOMAIN\",\"Type\":\"CNAME\",\"TTL\":1800,\"ResourceRecords\":[{\"Value\":\"$t.dkim.amazonses.com\"}]}},"
+    CHANGES+="{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$t._domainkey.$LEGACY_DOMAIN\",\"Type\":\"CNAME\",\"TTL\":1800,\"ResourceRecords\":[{\"Value\":\"$t.dkim.amazonses.com\"}]}},"
   done
   CHANGES="${CHANGES%,}]"
   aws route53 change-resource-record-sets --hosted-zone-id "$ZONE_ID" \
@@ -52,7 +74,17 @@ if [ -n "$TOKENS" ] && [ -n "$ZONE_ID" ]; then
   echo "DKIM records upserted"
 fi
 
-ensure_param EMAIL_FROM "no-reply@$DOMAIN"
+# Outbound mail follows the primary domain — a member on remerged.ai should
+# not get password resets from some other domain — but only once SES can
+# actually sign for it. Sending from an unverified domain is a hard failure,
+# so until mail-domain.yml has verified remerged.ai this stays on the legacy
+# one and moves by itself on the next deploy afterwards.
+FROM_DOMAIN="$LEGACY_DOMAIN"
+if [ "$(aws sesv2 get-email-identity --email-identity "$DOMAIN" --region "$REGION" \
+  --query 'DkimAttributes.Status' --output text 2>/dev/null)" = "SUCCESS" ]; then
+  FROM_DOMAIN="$DOMAIN"
+fi
+set_param EMAIL_FROM "no-reply@$FROM_DOMAIN"
 
 # SMTP credentials so the owner can "Send mail as" support@ from Gmail via
 # SES. Created once; username/password stored under /remerged/mail/*.

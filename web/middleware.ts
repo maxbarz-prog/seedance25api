@@ -8,14 +8,14 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
 // enforced in the API handlers via currentUser(), not here.
 
 // help.<domain> is an alias on the same CloudFront distribution, so the app
-// sees those requests directly. It exists because "help.remerged.click" is
+// sees those requests directly. It exists because "help.remerged.ai" is
 // what people type and share — but the articles live at /help on the main
 // site, so the alias redirects there rather than serving a second copy at a
 // second URL. One canonical address per article, no duplicate content, and
 // every link inside the help centre works on either host without rewriting.
 //
 // The target host is the alias with "help." removed, which is exactly right
-// for both help.remerged.click and help.dev.remerged.click, and needs no
+// for both help.remerged.ai and help.dev.remerged.ai, and needs no
 // configuration to keep in step with the stage.
 function helpAliasRedirect(req: NextRequest): NextResponse | null {
   const host = (req.headers.get("host") ?? "").split(":")[0].toLowerCase();
@@ -25,7 +25,7 @@ function helpAliasRedirect(req: NextRequest): NextResponse | null {
   target.host = host.slice("help.".length);
   target.port = "";
   // "/" means the help home; anything else keeps its path under /help, so a
-  // shared link like help.remerged.click/creating still lands correctly.
+  // shared link like help.remerged.ai/creating still lands correctly.
   if (!target.pathname.startsWith("/help")) {
     target.pathname = target.pathname === "/" ? "/help" : `/help${target.pathname}`;
   }
