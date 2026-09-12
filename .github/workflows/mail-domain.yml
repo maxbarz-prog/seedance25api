@@ -377,11 +377,13 @@ jobs:
             # Asynchronous invocation, so the log lags the S3 write.
             sleep 25
             echo "    log (errors shown, not hidden):"
-            aws logs filter-log-events --log-group-name "/aws/lambda/$fn" \
+            # || true on each: the runner's shell has -e, and a missing log
+            # group is a finding to print, not a reason to stop printing.
+            { aws logs filter-log-events --log-group-name "/aws/lambda/$fn" \
               --start-time "$(( started * 1000 ))" \
-              --query 'events[].message' --output text 2>&1 | sed 's/^/      /'
+              --query 'events[].message' --output text 2>&1 || true; } | sed 's/^/      /'
             echo "    may SES invoke it:"
-            aws lambda get-policy --function-name "$fn" --query Policy --output text 2>&1 \
+            { aws lambda get-policy --function-name "$fn" --query Policy --output text 2>&1 || true; } \
               | (jq -c '[.Statement[]|{Sid,Principal,Action,Condition}]' 2>/dev/null || cat) | sed 's/^/      /'
             for m in Invocations Errors; do
               v=$(aws cloudwatch get-metric-statistics --namespace AWS/Lambda --metric-name "$m" \
