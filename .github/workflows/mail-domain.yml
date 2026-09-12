@@ -1,0 +1,248 @@
+name: Mail domain
+
+# Stands up mail for a domain whose DNS lives at Cloudflare: the SES sending
+# identity, its three DKIM CNAMEs, the MX record that points inbound mail at
+# SES, and SPF/DMARC at the apex.
+#
+# This is a workflow rather than part of sst.config.ts on purpose. Verification
+# is a wait: SES only marks the identity verified once the DKIM CNAMEs resolve,
+# and nothing should accept mail for the domain before that. A deploy that
+# polls for minutes is a job wearing a deployment's clothes. So: run this,
+# watch it go green, and only then change the receipt rule and MAIL_DOMAIN.
+#
+# infra/bootstrap.sh does the same job for remerged.click, whose zone is in
+# Route 53. That path is left alone — remerged.click keeps receiving mail.
+#
+# FREE — no provider spend. SES identities, DKIM and DNS records cost nothing;
+# receiving is billed per message ($0.10 per 1,000).
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/mail-domain.yml"
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: "The domain that should send and receive mail"
+        type: string
+        default: "remerged.ai"
+      mode:
+        description: "check = report only. setup = create the identity and write the records."
+        type: choice
+        options: ["check", "setup"]
+        default: "check"
+      replace_mx:
+        description: "setup only: delete MX records pointing somewhere other than SES. Leave off unless check says they are in the way."
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  mail:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DOMAIN: ${{ inputs.domain }}
+      MODE: ${{ inputs.mode }}
+      REGION: us-east-1
+    steps:
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: The SES identity
+        run: |
+          set -euo pipefail
+          if aws sesv2 get-email-identity --email-identity "$DOMAIN" >/dev/null 2>&1; then
+            echo "identity exists: $DOMAIN"
+          elif [ "$MODE" = "setup" ]; then
+            aws sesv2 create-email-identity --email-identity "$DOMAIN" >/dev/null
+            echo "created identity: $DOMAIN  (Easy DKIM, RSA_2048)"
+          else
+            echo "no SES identity for $DOMAIN yet — setup would create one."
+            echo "NO_IDENTITY=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          id=$(aws sesv2 get-email-identity --email-identity "$DOMAIN")
+          printf '%s' "$id" | jq -r '
+            "  dkim status:   \(.DkimAttributes.Status)",
+            "  signing:       \(.DkimAttributes.SigningEnabled)",
+            "  for sending:   \(.VerifiedForSendingStatus)"'
+          printf '%s' "$id" | jq -r '.DkimAttributes.Tokens[]?' > /tmp/tokens.txt
+          echo "  dkim tokens:   $(wc -l < /tmp/tokens.txt)"
+
+      - name: What Cloudflare holds now
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          api="https://api.cloudflare.com/client/v4"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          zone=$(curl -sS -H "$auth" "$api/zones?name=$DOMAIN" | jq -r '.result[0].id // empty')
+          if [ -z "$zone" ]; then
+            echo "No Cloudflare zone for $DOMAIN with this token."
+            exit 1
+          fi
+          echo "::add-mask::$zone"
+          echo "CF_ZONE=$zone" >> "$GITHUB_ENV"
+
+          echo "  MX at the apex:"
+          curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=MX&name=$DOMAIN" \
+            | jq -r '.result[] | "    \(.priority) \(.content)"' || true
+          echo "  TXT at the apex:"
+          curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=TXT&name=$DOMAIN" \
+            | jq -r '.result[] | "    \(.content)"' || true
+          echo "  _dmarc:"
+          curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=TXT&name=_dmarc.$DOMAIN" \
+            | jq -r '.result[] | "    \(.content)"' || true
+          echo "  DKIM CNAMEs SES wants:"
+          if [ -s /tmp/tokens.txt ]; then
+            while read -r t; do
+              [ -n "$t" ] || continue
+              got=$(curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=CNAME&name=$t._domainkey.$DOMAIN" \
+                | jq -r '.result[0].content // empty')
+              echo "    $t._domainkey -> ${got:-(missing)}"
+            done < /tmp/tokens.txt
+          else
+            echo "    (none known yet)"
+          fi
+
+      - name: Write the records
+        if: inputs.mode == 'setup'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          REPLACE_MX: ${{ inputs.replace_mx }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          api="https://api.cloudflare.com/client/v4"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          zone="$CF_ZONE"
+          inbound="inbound-smtp.$REGION.amazonaws.com"
+
+          # One helper for every record: PUT over the existing one if there is
+          # one, POST if there is not, and fail loudly either way.
+          upsert() { # type name body
+            local type="$1" name="$2" body="$3" existing r
+            existing=$(curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=$type&name=$name" \
+              | jq -r '.result[0].id // empty')
+            if [ -n "$existing" ]; then
+              r=$(curl -sS -X PUT -H "$auth" -H "Content-Type: application/json" \
+                --data "$body" "$api/zones/$zone/dns_records/$existing")
+              echo "  updated  $type $name"
+            else
+              r=$(curl -sS -X POST -H "$auth" -H "Content-Type: application/json" \
+                --data "$body" "$api/zones/$zone/dns_records")
+              echo "  created  $type $name"
+            fi
+            if [ "$(printf '%s' "$r" | jq -r '.success')" != "true" ]; then
+              printf '%s' "$r" | jq -r '.errors[]?| "    \(.code): \(.message)"'
+              exit 1
+            fi
+          }
+
+          # DKIM. proxied is false and not negotiable: Cloudflare's proxy
+          # answers CNAMEs with its own addresses, which would break signing.
+          while read -r t; do
+            [ -n "$t" ] || continue
+            upsert CNAME "$t._domainkey.$DOMAIN" "$(jq -nc \
+              --arg n "$t._domainkey.$DOMAIN" --arg c "$t.dkim.amazonses.com" \
+              '{type:"CNAME", name:$n, content:$c, ttl:1, proxied:false}')"
+          done < /tmp/tokens.txt
+
+          # MX. More than one MX host means mail goes somewhere other than SES
+          # for some of its attempts, so refuse to add ours alongside a
+          # stranger's unless told to clear them out. Cloudflare Email Routing
+          # is the usual culprit: it installs its own MX on the zone.
+          others=$(curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=MX&name=$DOMAIN" \
+            | jq -r --arg c "$inbound" '.result[] | select(.content != $c) | "\(.id)\t\(.priority) \(.content)"')
+          if [ -n "$others" ]; then
+            if [ "$REPLACE_MX" = "true" ]; then
+              while IFS=$'\t' read -r id label; do
+                [ -n "$id" ] || continue
+                curl -sS -X DELETE -H "$auth" "$api/zones/$zone/dns_records/$id" >/dev/null
+                echo "  deleted  MX $label"
+              done <<< "$others"
+            else
+              echo "  MX records already point elsewhere:"
+              printf '%s\n' "$others" | cut -f2 | sed 's/^/    /'
+              echo "  Re-run with replace_mx if SES should be the only destination."
+              exit 1
+            fi
+          fi
+          upsert MX "$DOMAIN" "$(jq -nc --arg n "$DOMAIN" --arg c "$inbound" \
+            '{type:"MX", name:$n, content:$c, priority:10, ttl:300}')"
+
+          # SPF. Exactly one TXT record may start v=spf1; a second one makes
+          # SPF fail outright, so only write when there is nothing to break.
+          spf=$(curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=TXT&name=$DOMAIN" \
+            | jq -r '.result[] | select(.content | test("v=spf1")) | .content')
+          if [ -z "$spf" ]; then
+            upsert TXT "$DOMAIN" "$(jq -nc --arg n "$DOMAIN" \
+              '{type:"TXT", name:$n, content:"v=spf1 include:amazonses.com ~all", ttl:300}')"
+          elif printf '%s' "$spf" | grep -q "amazonses.com"; then
+            echo "  kept     TXT SPF (already allows SES)"
+          else
+            echo "  WARNING  an SPF record exists without SES in it: $spf"
+            echo "           add 'include:amazonses.com' to it by hand."
+          fi
+
+          # DMARC at p=none: reporting only, so it can never bounce mail, and
+          # it satisfies the bulk-sender rules Gmail and Yahoo enforce.
+          dmarc=$(curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=TXT&name=_dmarc.$DOMAIN" \
+            | jq -r '.result[0].content // empty')
+          if [ -z "$dmarc" ]; then
+            upsert TXT "_dmarc.$DOMAIN" "$(jq -nc --arg n "_dmarc.$DOMAIN" --arg c \
+              "v=DMARC1; p=none; rua=mailto:support@$DOMAIN" \
+              '{type:"TXT", name:$n, content:$c, ttl:300}')"
+          else
+            echo "  kept     TXT _dmarc ($dmarc)"
+          fi
+
+      - name: Wait for SES to verify it
+        if: inputs.mode == 'setup'
+        run: |
+          set -uo pipefail
+          deadline=$(( $(date +%s) + 900 ))
+          while :; do
+            s=$(aws sesv2 get-email-identity --email-identity "$DOMAIN" \
+              --query 'DkimAttributes.Status' --output text)
+            case "$s" in
+              SUCCESS) echo "DKIM verified."; break ;;
+              FAILED)  echo "SES gave up on the DKIM records. Check they resolve, then re-run."; exit 1 ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "Still $s after 15 minutes. The records are written; SES rechecks on its own."
+              echo "Re-run in check mode later rather than treating this as a failure."
+              exit 1
+            fi
+            echo "  dkim: $s — waiting"
+            sleep 20
+          done
+          echo "MX now resolves to:"
+          dig +short MX "$DOMAIN" @1.1.1.1 | sed 's/^/  /'
+
+      - name: What is left to do by hand
+        if: inputs.mode == 'setup'
+        run: |
+          set -euo pipefail
+          echo "Inbound: deploy so the receipt rule accepts support@$DOMAIN."
+          echo
+          echo "Outbound from Gmail (Settings -> Accounts -> Send mail as):"
+          echo "  address   support@$DOMAIN"
+          echo "  smtp host $(aws ssm get-parameter --name /remerged/mail/SMTP_HOST --query Parameter.Value --output text)"
+          echo "  port      587, TLS"
+          echo "  username  $(aws ssm get-parameter --name /remerged/mail/SMTP_USERNAME --query Parameter.Value --output text)"
+          echo "  password  read /remerged/mail/SMTP_PASSWORD in the SSM console — it is not printed here."
+          echo
+          echo "Gmail mails a confirmation code to support@$DOMAIN. The forwarder"
+          echo "delivers it, so watch the inbox it forwards to."
