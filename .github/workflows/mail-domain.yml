@@ -504,7 +504,9 @@ jobs:
                 --query LogResult --output text /tmp/out2.json 2>/dev/null \
                 | base64 -d 2>/dev/null | sed 's/^/      /' || true
               echo "      If that says ok, the forwarder works and the problem"
-              echo "      is SES not invoking it."
+              echo "      is SES not invoking it. If it says MessageRejected, the"
+              echo "      account is in the SES sandbox and the destination is not"
+              echo "      a verified identity."
               exit 1
             fi
 
@@ -543,9 +545,6 @@ jobs:
           echo "  the rule exactly as SES holds it:"
           aws ses describe-active-receipt-rule-set --output json \
             | jq -c '.Rules[]' | sed 's/^/    /' || true
-          echo
-          echo "If the log shows an error sending, the account is probably still in"
-          echo "the SES sandbox and the forward destination is not a verified identity."
 
       - name: What is left to do by hand
         if: inputs.mode == 'setup'

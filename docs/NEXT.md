@@ -451,7 +451,15 @@ were never rendered.
        identities failed the check in region US-EAST-1: maxbarz@gmail.com
 
    Verifying that one address (`mail-domain.yml` asks SES to send the link)
-   unblocks the support forward, and nothing else.
+   unblocks the support forward, and nothing else. That is **done** —
+   `maxbarz@gmail.com` is a verified identity, and `test` mode confirms the
+   whole path on the dev stage: received, scanned, stored in `inbound-429d649`,
+   forwarder invoked by SES, delivered. Two things made that hard to see and
+   are worth knowing: SST gives its functions an explicit log group whose name
+   does not match the function's (`…-xdnovmrw` for `…-znadtmmx`), so
+   `/aws/lambda/<function>` does not exist and looks like a function that has
+   never run; and Lambda's `Invocations` metric lags minutes, so it reads
+   `None` right after a call that returned 200.
 
    What SES actually carries to members is narrower than it looks, because
    **Clerk sends its own mail** — sign-in codes, verification and password
