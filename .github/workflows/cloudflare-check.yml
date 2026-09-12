@@ -76,6 +76,19 @@ jobs:
           fi
           zone_id=$(printf '%s' "$z" | jq -r '.result[0].id')
           echo "::add-mask::$zone_id"
+          # The deploy needs an account id, and a zone-scoped token cannot
+          # read account information — so it comes off the zone record. If
+          # this is empty the deploy fails with "The Cloudflare Account ID was
+          # not able to be determined from this token."
+          acct=$(printf '%s' "$z" | jq -r '.result[0].account.id // empty')
+          if [ -z "$acct" ]; then
+            echo "FAIL: the zone record carries no account id, so the deploy"
+            echo "      cannot resolve one. Recreate the token including"
+            echo "      Account -> Account Settings -> Read."
+            exit 1
+          fi
+          echo "::add-mask::$acct"
+          echo "  account id: resolved from the zone record (masked)"
           printf '%s' "$z" | jq -r '.result[0] | "  name: \(.name)\n  status: \(.status)\n  plan: \(.plan.name)"'
           echo "  nameservers:"
           printf '%s' "$z" | jq -r '.result[0].name_servers[]? | "    \(.)"'

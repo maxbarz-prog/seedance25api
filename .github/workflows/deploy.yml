@@ -71,16 +71,45 @@ jobs:
       # deploy uses it and it must never reach the Lambda environment. Verify
       # it first with .github/workflows/cloudflare-check.yml if a deploy
       # starts failing on DNS.
-      - name: Check the Cloudflare token is present
+      - name: Check the Cloudflare token, and find the account id
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ZONE: remerged.ai
         run: |
+          set -euo pipefail
           if [ -z "${CLOUDFLARE_API_TOKEN:-}" ]; then
             echo "CLOUDFLARE_API_TOKEN is not set. Add it under"
             echo "Settings -> Secrets and variables -> Actions."
             exit 1
           fi
-          echo "Cloudflare token present."
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+
+          # The Cloudflare provider wants an account id and tries to discover
+          # it from the token. A token scoped to one zone — which is what it
+          # should be — cannot read account information, so discovery fails
+          # and the deploy dies before touching anything.
+          #
+          # The fix is to supply the id rather than widen the token: the zone
+          # record carries its own account id, so the same zone-scoped token
+          # can fetch it. Least privilege intact, and nothing to keep in step
+          # by hand.
+          z=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/zones?name=$ZONE")
+          if [ "$(printf '%s' "$z" | jq -r '.success')" != "true" ]; then
+            echo "Cloudflare rejected the token. Run the Cloudflare token check workflow."
+            printf '%s' "$z" | jq -r '.errors[]?| "  \(.code): \(.message)"'
+            exit 1
+          fi
+          acct=$(printf '%s' "$z" | jq -r '.result[0].account.id // empty')
+          if [ -z "$acct" ]; then
+            echo "Could not find zone $ZONE with this token — is it scoped to that zone?"
+            exit 1
+          fi
+          # Not a secret (it is in every dashboard URL) but there is no reason
+          # to print it either.
+          echo "::add-mask::$acct"
+          echo "CLOUDFLARE_DEFAULT_ACCOUNT_ID=$acct" >> "$GITHUB_ENV"
+          echo "Cloudflare token valid; account id resolved from the $ZONE zone."
 
       - name: Install dependencies
         run: |
@@ -91,5 +120,6 @@ jobs:
         env:
           # How the Cloudflare provider authenticates when SST writes the
           # domain's DNS and certificate-validation records.
+          # CLOUDFLARE_DEFAULT_ACCOUNT_ID is set by the step above.
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: npx sst deploy --stage "$STAGE"
