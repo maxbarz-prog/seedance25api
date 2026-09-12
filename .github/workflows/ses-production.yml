@@ -47,6 +47,8 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/checkout@v4
+
       - name: Assume deploy role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -92,41 +94,31 @@ jobs:
             exit 0
           fi
 
-          # Written to be checkable against the code rather than to sound
-          # impressive: a reviewer rejects a vague use case, and an inaccurate
-          # one is worse than a rejection.
-          cat > /tmp/usecase.txt <<'TXT'
-          Remerged (https://remerged.ai) is an at-cost AI video generation
-          service. SES carries transactional mail only, to people who created an
-          account on the site.
+          # PutAccountDetails only works while the account has no details set.
+          # Once a request has been reviewed — denied, in this account's case —
+          # the API returns ConflictException and the only route is the console
+          # or the case itself. Say that instead of failing on a raw API error.
+          review=$(aws sesv2 get-account --query 'Details.ReviewDetails.Status' --output text 2>/dev/null)
+          case_id=$(aws sesv2 get-account --query 'Details.ReviewDetails.CaseId' --output text 2>/dev/null)
+          if [ -n "$review" ] && [ "$review" != "None" ]; then
+            echo "A request already exists on this account: $review (case $case_id)."
+            echo
+            echo "The API cannot replace it — PutAccountDetails returns"
+            echo "ConflictException once details are set. Do it in the console:"
+            echo "  https://console.aws.amazon.com/ses/home?region=us-east-1#/account"
+            echo "  -> Request production access, or reply on case $case_id."
+            echo
+            echo "Paste infra/ses-use-case.txt as the use case, and set the"
+            echo "website to https://remerged.ai — the denied request still has"
+            echo "$(aws sesv2 get-account --query 'Details.WebsiteURL' --output text) on file."
+            exit 1
+          fi
 
-          What we send:
-          1. "Your video is ready" — one message when a rendering job the member
-             started has finished, linking to that job. This is the only SES
-             message a member normally receives.
-          2. Password resets, for accounts using the built-in email-and-password
-             login. Sign-in, email verification and reset mail for accounts using
-             our auth provider (Clerk) are sent by Clerk, not SES.
-
-          Who we send to: only addresses belonging to accounts registered on the
-          site. No marketing, newsletters, digests or announcements. No purchased,
-          rented, scraped or imported lists, and no mail to addresses that did not
-          register themselves.
-
-          Volume: very low. The service has not launched and has no members yet.
-          Each message corresponds to one video a member generated, so we expect
-          well under 100 messages a day at launch.
-
-          Bounces and complaints: the account-level suppression list is enabled,
-          so SES drops sends to addresses that have hard-bounced or complained.
-          Bounce and complaint rates are watched in CloudWatch. Every send is
-          triggered by an action the member took, and deleting the account (a
-          self-service option in the product) stops all mail immediately.
-
-          Inbound: we also receive support@remerged.ai through SES email
-          receiving, which stores each message in S3 and forwards it to the
-          operator's mailbox.
-          TXT
+          # The text lives in infra/ses-use-case.txt so the same words go to AWS
+          # whether the request is made from here or pasted into the console,
+          # and so it can be reviewed against the code. A reviewer rejects a
+          # vague use case, and an inaccurate one is worse than a rejection.
+          cp infra/ses-use-case.txt /tmp/usecase.txt
           echo "Submitting this use case:"
           sed 's/^/  /' /tmp/usecase.txt
 

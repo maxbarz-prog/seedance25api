@@ -1,0 +1,39 @@
+Remerged (https://remerged.ai) is an at-cost AI video generation service.
+SES carries transactional mail only, to people who created an account on the
+site.
+
+What we send:
+1. "Your video is ready" — one message when a rendering job the member
+   started has finished, linking to that job. This is the only SES message a
+   member normally receives.
+2. Password resets, for accounts using the built-in email-and-password login.
+   Sign-in, email verification and reset mail for accounts using our auth
+   provider (Clerk) are sent by Clerk, not SES.
+
+Who we send to: only addresses belonging to accounts registered on the site.
+No marketing, newsletters, digests or announcements. No purchased, rented,
+scraped or imported lists, and no mail to addresses that did not register
+themselves.
+
+Volume: very low. The service has not launched and has no members yet. Each
+message corresponds to one video a member generated, so we expect well under
+100 messages a day at launch.
+
+Bounces and complaints: the account-level suppression list is enabled for
+both BOUNCE and COMPLAINT, so SES drops sends to addresses that have
+hard-bounced or complained. Bounce and complaint rates are watched in
+CloudWatch. Every send is triggered by an action the member took, and
+deleting the account — a self-service option in the product — stops all mail
+immediately.
+
+Authentication: remerged.ai is a verified domain identity with Easy DKIM
+(three CNAMEs), SPF (v=spf1 include:amazonses.com ~all) and DMARC
+(v=DMARC1; p=none) published in DNS.
+
+Inbound: we also receive support@remerged.ai through SES email receiving,
+which stores each message in S3 and forwards it to the operator's mailbox.
+
+Note on the earlier request: case 178878528300157 was denied when this
+account's site was remerged.click, before the service had a working domain,
+verified DKIM/SPF/DMARC or a support address. The domain is now remerged.ai
+and all of the above is in place.
