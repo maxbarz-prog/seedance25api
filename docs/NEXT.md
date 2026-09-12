@@ -442,14 +442,29 @@ were never rendered.
      `/remerged/mail/SMTP_USERNAME`, password in `/remerged/mail/SMTP_PASSWORD`).
      Gmail's confirmation code arrives through the forwarder.
 
-3. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
+3. **SES production access.** The account is in the **sandbox**, which sends
+   only to addresses SES has verified. Everything else about mail works —
+   `support@remerged.ai` is received, scanned, stored and the forwarder runs —
+   and the forward's own `SendEmail` is refused:
+
+       MessageRejected: Email address is not verified. The following
+       identities failed the check in region US-EAST-1: maxbarz@gmail.com
+
+   Verifying that one address (`mail-domain.yml` asks SES to send the link)
+   unblocks the support forward, and nothing else. Members cannot receive
+   password resets, receipts or job notifications until the account leaves the
+   sandbox, so **this blocks launch, not the cutover**. Requesting it is
+   `sesv2 put-account-details --production-access-enabled` with the site URL
+   and a use-case description, or the console; AWS reviews it, usually within
+   a day. Check with `aws sesv2 get-account --query ProductionAccessEnabled`.
+4. **Prod cutover.** `/remerged/prod/` is complete: provider keys, Clerk
    production keys, live Stripe key, webhook `we_1UEfTk2Nd3VZM6rLnc726z12`
    for `https://remerged.ai/api/billing/webhook` with its secret,
    `MOCK_BILLING=0`, `PROVIDER_MODE=live`, and the `COST_*` values. Cut a
    `prod-YYYY-MM-DD` tag on the platform branch to deploy. The apex domain
    does not resolve until that first prod deploy, which is also when
    https://remerged.ai/terms and /privacy go live.
-4. **After the first real generations**, reconcile `COST_*` in SSM against
+5. **After the first real generations**, reconcile `COST_*` in SSM against
    the invoices and redeploy (the deploy bakes SSM values into the Lambda).
 
 ## Housekeeping
