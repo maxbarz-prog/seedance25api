@@ -1,0 +1,141 @@
+name: Clerk hardening
+
+# Turns on the anti-abuse settings that live in the Clerk INSTANCE rather than
+# in our code: block disposable-email sign-ups, block email-subaddress aliases
+# (jane+1@, jane+2@ … from one inbox), and — where the Backend API exposes it —
+# bot sign-up protection. These are the front door in front of the free-tier
+# daily budget in the app (web/lib/money.ts): the budget is the back-stop, this
+# is what stops the farm arriving in the first place.
+#
+# Done here rather than by hand in the dashboard for the same reason the Stripe
+# webhook is (stripe-webhook.yml): the secret travels SSM -> runner and never a
+# clipboard, the change is auditable, and it can be re-applied to a fresh
+# instance without anyone remembering which checkboxes.
+#
+# DELIBERATELY NOT TOUCHED: password policy. "Reject compromised passwords" is
+# left to the owner's discretion and this workflow never sets it.
+#
+# FREE. Reads one SSM parameter and calls the Clerk Backend API. `show` is
+# read-only; `apply` needs the word typed.
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/clerk-hardening.yml"]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Which stage's Clerk instance (its secret key in SSM)"
+        type: choice
+        options: ["dev", "prod"]
+        default: dev
+      mode:
+        description: "show = print current settings. apply = turn the protections on."
+        type: choice
+        options: ["show", "apply"]
+        default: show
+      confirm:
+        description: 'For apply: type "apply" to confirm.'
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  clerk:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'apply'
+        run: |
+          if [ "${{ inputs.confirm }}" != "apply" ]; then
+            echo 'Not confirmed — type "apply" in the confirm box.'
+            exit 1
+          fi
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load the Clerk key
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          v=$(aws ssm get-parameter --name "/remerged/$STAGE/CLERK_SECRET_KEY" --with-decryption \
+            --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "CLERK_SECRET_KEY=$v" >> "$GITHUB_ENV"
+          case "$v" in
+            sk_live_*) echo "  key: LIVE instance" ;;
+            sk_test_*) echo "  key: development instance" ;;
+            *) echo "Unrecognised Clerk key format."; exit 1 ;;
+          esac
+
+      - name: What Clerk has now
+        run: |
+          set -euo pipefail
+          # Settings, not secrets — safe to print. The restrictions object holds
+          # the two flags this workflow sets; the instance object is where a
+          # bot/CAPTCHA setting would live if the Backend API exposes one.
+          rr=$(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/instance/restrictions)
+          if printf '%s' "$rr" | jq -e '.errors' >/dev/null 2>&1; then
+            echo "Clerk rejected the restrictions request:"; printf '%s' "$rr" | jq -r '.errors[]? | "  \(.message)"'; exit 1
+          fi
+          echo "  restrictions:"; printf '%s' "$rr" | jq '.' | sed 's/^/    /'
+
+          inst=$(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/instance || true)
+          printf '%s' "$inst" > /tmp/instance.json
+          # Whether a CAPTCHA/bot field is present at all — decides if this
+          # workflow can flip it or the owner must, in the dashboard.
+          keys=$(printf '%s' "$inst" | jq -r 'try (keys[]) | select(test("captcha|bot"; "i"))' 2>/dev/null || true)
+          if [ -n "$keys" ]; then
+            echo "  bot/captcha fields on the instance: $keys"
+          else
+            echo "  no bot/captcha field on the instance object — that toggle is dashboard-only."
+          fi
+
+      - name: Turn the protections on
+        if: inputs.mode == 'apply'
+        run: |
+          set -euo pipefail
+          echo "Blocking disposable emails and email subaddresses…"
+          r=$(curl -sS -X PATCH -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"block_disposable_email_domains": true, "block_email_subaddresses": true}' \
+            https://api.clerk.com/v1/instance/restrictions)
+          if printf '%s' "$r" | jq -e '.errors' >/dev/null 2>&1; then
+            echo "Clerk rejected the change:"; printf '%s' "$r" | jq -r '.errors[]? | "  \(.message)"'; exit 1
+          fi
+          echo "  now:"; printf '%s' "$r" | jq '{block_disposable_email_domains, block_email_subaddresses}' | sed 's/^/    /'
+
+          # Bot protection, only if the instance object actually carries the
+          # field — no blind guessing at production config. Clerk's default is
+          # "smart" CAPTCHA on the hosted pages; setting it to a non-off value
+          # is what the dashboard toggle does.
+          field=$(jq -r 'try (keys[]) | select(test("captcha_enabled|bot"; "i"))' /tmp/instance.json 2>/dev/null | head -1 || true)
+          if [ -n "$field" ]; then
+            echo "Enabling bot protection via '$field'…"
+            b=$(curl -sS -X PATCH -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{\"$field\": true}" https://api.clerk.com/v1/instance)
+            if printf '%s' "$b" | jq -e '.errors' >/dev/null 2>&1; then
+              echo "  Clerk would not set it via the API:"; printf '%s' "$b" | jq -r '.errors[]? | "    \(.message)"'
+              echo "  -> flip 'Bot sign-up protection' in the dashboard (one toggle)."
+            else
+              echo "  bot protection set."
+            fi
+          else
+            echo "Bot sign-up protection is not exposed on the Backend API for this instance."
+            echo "  -> Clerk dashboard - Configure - Attack protection - Bot sign-up protection (one toggle)."
+          fi
+
+      - name: Done
+        if: inputs.mode == 'apply'
+        run: echo "Disposable-email and subaddress blocking are on for the ${{ inputs.stage }} instance."
