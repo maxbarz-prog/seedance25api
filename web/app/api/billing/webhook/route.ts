@@ -4,6 +4,8 @@ import Stripe from "stripe";
 import {
   applyMembership,
   applyTopup,
+  attachDiscount,
+  clawbackTopup,
   stripeClient,
   stripeEnabled,
   syncSubscription,
@@ -11,8 +13,14 @@ import {
 import { setStripeIds, userById, userByStripeCustomer } from "@/lib/db";
 import { grantPeriodCredits } from "@/lib/grants";
 import { effectivePlan } from "@/lib/plan";
-import { attachDiscount } from "@/lib/billing";
-import { consumeReward, revokeReferral, rewardsFor, vestReferral } from "@/lib/referrals";
+import {
+  consumeReward,
+  restoreReward,
+  revokeReferral,
+  rewardsFor,
+  unredeemInvite,
+  vestReferral,
+} from "@/lib/referrals";
 
 // Stripe webhook. Credits and membership activate ONLY here (or via the dev
 // mock), i.e. only after funds actually clear. Signature-verified; top-up
@@ -55,6 +63,24 @@ export async function POST(req: NextRequest) {
         if (customerId) await setStripeIds(userId, customerId, subId);
         // Pull the authoritative period end straight away.
         if (subId) await syncSubscription(await stripeClient().subscriptions.retrieve(subId));
+        // The first invoice is paid by now. invoice.paid vests this too, but
+        // it can arrive BEFORE this event — and then it cannot find the member
+        // by customer id, because it is this event that records it. Vesting
+        // is idempotent, so both may try.
+        if (s.payment_status === "paid") await vestReferral(userId);
+      }
+      break;
+    }
+    // Opened with a discount, never paid. The code or reward it was holding
+    // goes back to the member, who can try again.
+    case "checkout.session.expired": {
+      const s = event.data.object as Stripe.Checkout.Session;
+      const userId = s.metadata?.userId;
+      if (!userId) break;
+      if (s.metadata?.discount === "invite" && s.metadata.invite) {
+        await unredeemInvite(s.metadata.invite, userId);
+      } else if (s.metadata?.discount === "referral") {
+        await restoreReward(userId);
       }
       break;
     }
@@ -103,6 +129,10 @@ export async function POST(req: NextRequest) {
     case "payment_intent.succeeded": {
       const pi = event.data.object as Stripe.PaymentIntent;
       if (pi.metadata?.kind !== "topup") break;
+      // A hosted-checkout top-up is granted by checkout.session.completed
+      // under the session id; granting it here as well, under the intent id,
+      // would be the same money twice.
+      if (pi.metadata.via === "checkout") break;
       const userId = pi.metadata.userId;
       const usd = Number(pi.metadata.usd);
       if (!userId || !Number.isFinite(usd) || usd <= 0) break;
@@ -110,9 +140,13 @@ export async function POST(req: NextRequest) {
       await applyTopup(userId, usd, pi.id);
       break;
     }
-    // Money came back. Withdraw the referrer's reward if it has not been spent
-    // on an invoice yet — the whole reason rewards are discounts rather than
-    // credits, which would already be gone by now.
+    // Money came back.
+    //
+    // A refunded or disputed TOP-UP takes its credits back out of the balance.
+    // A refunded or disputed FIRST SUBSCRIPTION PAYMENT withdraws the referral
+    // reward it earned, if that has not been spent on an invoice yet — the
+    // whole reason rewards are discounts rather than credits, which would
+    // already be gone by now. A refund of some later month is neither.
     case "charge.refunded":
     case "charge.dispute.created": {
       // A Charge carries the customer; a Dispute does not, so resolve it
@@ -127,13 +161,47 @@ export async function POST(req: NextRequest) {
         const chargeId = typeof ref === "string" ? ref : ref?.id;
         if (chargeId) charge = await stripeClient().charges.retrieve(chargeId);
       }
+      if (!charge) break;
+      const disputed = event.type === "charge.dispute.created";
+
+      if (charge.metadata?.kind === "topup") {
+        const userId = charge.metadata.userId;
+        // Only a full reversal, so a partial goodwill refund from the
+        // dashboard does not put a member into the red. Partial ones are
+        // logged for a human to settle by hand.
+        const whole = disputed || charge.amount_refunded >= charge.amount;
+        if (userId && whole && (await userById(userId))) {
+          await clawbackTopup(userId, charge.amount / 100, charge.id);
+        } else if (userId) {
+          console.warn(
+            `partial refund on top-up ${charge.id} for ${userId}: ${charge.amount_refunded}/${charge.amount} — credits not adjusted`
+          );
+        }
+        break;
+      }
+
       const chargeCustomer =
-        typeof charge?.customer === "string" ? charge.customer : charge?.customer?.id ?? null;
+        typeof charge.customer === "string" ? charge.customer : charge.customer?.id ?? null;
       if (!chargeCustomer) break;
       const member = await userByStripeCustomer(chargeCustomer);
-      if (member) {
-        await revokeReferral(member.id, event.type === "charge.refunded" ? "refunded" : "disputed");
+      if (!member) break;
+      // Which invoice this paid for says whether it is the one a referral
+      // vested on. A charge no longer names its invoice directly; the invoice
+      // payment that links them does. A dispute revokes regardless: a member
+      // who charges back is not one whose referrals we honour.
+      let first = disputed;
+      const piRef = charge.payment_intent;
+      const paymentIntent = typeof piRef === "string" ? piRef : piRef?.id;
+      if (!first && paymentIntent) {
+        const payments = await stripeClient().invoicePayments.list({
+          payment: { type: "payment_intent", payment_intent: paymentIntent },
+          expand: ["data.invoice"],
+          limit: 1,
+        });
+        const inv = payments.data[0]?.invoice;
+        first = typeof inv === "object" && !inv.deleted && inv.billing_reason === "subscription_create";
       }
+      if (first) await revokeReferral(member.id, disputed ? "disputed" : "refunded");
       break;
     }
     default:

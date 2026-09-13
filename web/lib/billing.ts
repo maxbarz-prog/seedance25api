@@ -59,6 +59,13 @@ export async function createTopupCheckout(
       ? { customer: user.stripe_customer_id }
       : { customer_email: user.email }),
     metadata: { userId: user.id, kind: "topup", usd: String(usd) },
+    // The same facts on the PaymentIntent, and so on its Charge, which is
+    // what a refund event carries: without this a refunded top-up cannot be
+    // told from a refunded subscription. `via` keeps payment_intent.succeeded
+    // from granting these credits a second time on top of the session event.
+    payment_intent_data: {
+      metadata: { userId: user.id, kind: "topup", usd: String(usd), via: "checkout" },
+    },
     success_url: `${origin}/account?topup=success`,
     cancel_url: `${origin}/account?topup=cancelled`,
   });
@@ -125,11 +132,11 @@ export async function createMembershipCheckout(
   planId: PlanId,
   interval: BillingInterval,
   origin: string,
-  discount?: DiscountKind
+  discount?: { kind: DiscountKind; invite?: string }
 ): Promise<{ url: string }> {
   const plan = PLANS[planId];
   if (!stripeEnabled()) {
-    const d = discount ? `&discount=${discount}` : "";
+    const d = discount ? `&discount=${discount.kind}` : "";
     return { url: `/account?mock=subscribe&plan=${planId}&interval=${interval}${d}` };
   }
   const s = await stripeClient().checkout.sessions.create({
@@ -150,8 +157,21 @@ export async function createMembershipCheckout(
     ...(user.stripe_customer_id
       ? { customer: user.stripe_customer_id }
       : { customer_email: user.email }),
-    ...(discount ? { discounts: [{ coupon: await ensureCoupon(discount) }] } : {}),
-    metadata: { userId: user.id, kind: "membership", plan: planId, interval, ...(discount ? { discount } : {}) },
+    ...(discount ? { discounts: [{ coupon: await ensureCoupon(discount.kind) }] } : {}),
+    // The discount rides along so that an expired session can hand back what
+    // it was holding — the invite code, or the referral reward.
+    metadata: {
+      userId: user.id,
+      kind: "membership",
+      plan: planId,
+      interval,
+      ...(discount ? { discount: discount.kind } : {}),
+      ...(discount?.invite ? { invite: discount.invite } : {}),
+    },
+    // An hour, not Stripe's default day. A discounted session holds a code
+    // or a reward hostage until it is paid or expires, so the shorter the
+    // better; and nobody takes a day over a checkout page.
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
     subscription_data: { metadata: { userId: user.id, plan: planId, interval } },
     success_url: `${origin}/account?membership=success`,
     cancel_url: `${origin}/account?membership=cancelled`,
@@ -187,23 +207,35 @@ async function defaultPaymentMethod(customerId: string): Promise<string | null> 
   return cards.data[0]?.id ?? null;
 }
 
-export async function chargeSavedCard(user: User, usd: number): Promise<ChargeResult> {
+//
+// `attempt` is a nonce the browser made for this one click. It becomes the
+// Stripe idempotency key, so a retried request — a flaky connection, a double
+// tap, a Lambda that died after Stripe answered — charges the card once, and
+// the second answer is the first one replayed.
+export async function chargeSavedCard(
+  user: User,
+  usd: number,
+  attempt?: string
+): Promise<ChargeResult> {
   if (!stripeEnabled() || !user.stripe_customer_id) return { outcome: "needs_card" };
   const paymentMethod = await defaultPaymentMethod(user.stripe_customer_id);
   if (!paymentMethod) return { outcome: "needs_card" };
   try {
-    const intent = await stripeClient().paymentIntents.create({
-      amount: Math.round(usd * 100),
-      currency: "usd",
-      customer: user.stripe_customer_id,
-      payment_method: paymentMethod,
-      // off_session says the member is not here to answer a challenge, so the
-      // bank either accepts it or tells us it needs them.
-      off_session: true,
-      confirm: true,
-      description: `Remerged credits, $${usd.toFixed(2)}`,
-      metadata: { userId: user.id, kind: "topup", usd: String(usd) },
-    });
+    const intent = await stripeClient().paymentIntents.create(
+      {
+        amount: Math.round(usd * 100),
+        currency: "usd",
+        customer: user.stripe_customer_id,
+        payment_method: paymentMethod,
+        // off_session says the member is not here to answer a challenge, so
+        // the bank either accepts it or tells us it needs them.
+        off_session: true,
+        confirm: true,
+        description: `Remerged credits, $${usd.toFixed(2)}`,
+        metadata: { userId: user.id, kind: "topup", usd: String(usd) },
+      },
+      attempt ? { idempotencyKey: `topup-${user.id}-${attempt}` } : {}
+    );
     if (intent.status === "succeeded") return { outcome: "charged", paymentIntentId: intent.id };
     // requires_action and friends: the member has to be present.
     return { outcome: "needs_auth" };
@@ -264,6 +296,18 @@ export async function applyTopup(
     externalId,
   });
   return entry !== null;
+}
+
+// A top-up refunded from the Stripe dashboard takes its credits back out.
+// Otherwise refunding someone $10 leaves them holding the 1,000 credits it
+// bought — a refund that costs us twice. The balance may go negative, which
+// is right: it blocks generating until it is topped up again. Idempotent on
+// the charge, so a replayed event cannot take them twice.
+export async function clawbackTopup(userId: string, usd: number, chargeId: string) {
+  return addLedger(userId, -usdToCredits(usd), "clawback", {
+    memo: `Top-up refunded $${usd.toFixed(2)}`,
+    externalId: `clawback#${chargeId}`,
+  });
 }
 
 // Used by the dev mock and by the initial checkout completion; renewals and

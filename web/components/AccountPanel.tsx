@@ -144,7 +144,10 @@ export default function AccountPanel() {
       plansRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
-    const data = await post("/api/billing/topup", { usd }, `top-${usd}`);
+    // One id per click. If the request has to be retried, Stripe sees the
+    // same id and charges the card once.
+    const attempt = crypto.randomUUID();
+    const data = await post("/api/billing/topup", { usd, attempt }, `top-${usd}`);
     if (!data) return;
     // Charged on the card already on file: nobody leaves the page.
     if (data.charged) {

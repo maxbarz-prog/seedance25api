@@ -346,6 +346,11 @@ export class DynamoStore implements DataStore {
     // treats a missing attribute as zero, so rows written before tiers need
     // no backfill.
     const granted = e.granted_delta ?? 0;
+    // A spend that must not overdraw carries its own condition, evaluated by
+    // DynamoDB against the balance at the moment of the write — not the one
+    // the caller read a few milliseconds earlier. Two concurrent charges
+    // that both fit individually but not together: the second one fails.
+    const guard = opts.requireFunds && e.delta_credits < 0;
     const applyBalance = {
       Update: {
         TableName: USERS,
@@ -353,9 +358,12 @@ export class DynamoStore implements DataStore {
         UpdateExpression: granted
           ? "ADD balance_credits :d, granted_credits :g"
           : "ADD balance_credits :d",
-        ExpressionAttributeValues: granted
-          ? { ":d": e.delta_credits, ":g": granted }
-          : { ":d": e.delta_credits },
+        ...(guard ? { ConditionExpression: "balance_credits >= :need" } : {}),
+        ExpressionAttributeValues: {
+          ":d": e.delta_credits,
+          ...(granted ? { ":g": granted } : {}),
+          ...(guard ? { ":need": -e.delta_credits } : {}),
+        },
       },
     };
     try {
@@ -382,7 +390,9 @@ export class DynamoStore implements DataStore {
         })
       );
     } catch (err: unknown) {
-      if (opts.externalId && String(err).includes("TransactionCanceled")) return null;
+      // Either guard tripping cancels the whole transaction: a replayed
+      // external id, or a spend the balance does not cover.
+      if ((opts.externalId || guard) && String(err).includes("TransactionCanceled")) return null;
       throw err;
     }
     return e;
@@ -543,6 +553,22 @@ export class DynamoStore implements DataStore {
     await this.doc.send(
       new PutCommand({ TableName: LEDGER, Item: { pk: SYSTEM_PK, sk: key, v: value } })
     );
+  }
+
+  async setSystemIfAbsent(key: string, value: string): Promise<boolean> {
+    try {
+      await this.doc.send(
+        new PutCommand({
+          TableName: LEDGER,
+          Item: { pk: SYSTEM_PK, sk: key, v: value },
+          ConditionExpression: "attribute_not_exists(pk)",
+        })
+      );
+      return true;
+    } catch (err) {
+      if (String(err).includes("ConditionalCheckFailed")) return false;
+      throw err;
+    }
   }
 
   async listSystem(prefix: string): Promise<{ key: string; value: string }[]> {

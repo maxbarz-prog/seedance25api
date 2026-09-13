@@ -142,17 +142,26 @@ export async function deleteObject(key: string | null | undefined): Promise<void
 
 // Presigned PUT for input uploads (images, reference video/audio) straight
 // from the browser.
+// The size is signed into the URL: S3 rejects a PUT whose Content-Length
+// differs from the one signed, so the limit is enforced by the bucket rather
+// than trusted to the browser. Returns null for a type we do not take or a
+// file over its limit, and the caller says which.
+export function uploadLimitBytes(contentType: string): number | null {
+  return UPLOAD_LIMITS[contentType]?.maxBytes ?? null;
+}
+
 export async function presignUpload(
   userId: string,
-  contentType: string
+  contentType: string,
+  bytes: number
 ): Promise<{ key: string; url: string; maxBytes: number } | null> {
   if (!BUCKET) return null;
   const limit = UPLOAD_LIMITS[contentType];
-  if (!limit) return null;
+  if (!limit || bytes <= 0 || bytes > limit.maxBytes) return null;
   const key = `uploads/${userId}/${crypto.randomUUID()}.${limit.ext}`;
   const url = await getSignedUrl(
     s3(),
-    new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType }),
+    new PutObjectCommand({ Bucket: BUCKET, Key: key, ContentType: contentType, ContentLength: bytes }),
     { expiresIn: 600 }
   );
   return { key, url, maxBytes: limit.maxBytes };

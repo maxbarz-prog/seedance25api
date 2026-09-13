@@ -177,6 +177,11 @@ export interface AddLedgerOpts {
   // permanent halves stay distinguishable — which is what decides how much
   // may be forfeited at a renewal. See lib/grants.ts.
   grantedDelta?: number;
+  // A spend that must not overdraw. The store checks the balance and applies
+  // the movement in ONE atomic step, and returns null instead of an entry when
+  // the funds are not there. Anything less — read the balance, then charge —
+  // lets two requests that both saw enough credit both go through.
+  requireFunds?: boolean;
 }
 
 import { MoneyIssue } from "./reconcile";
@@ -233,6 +238,10 @@ export interface DataStore {
   // user or a job — currently the money-safety halt (lib/money.ts).
   getSystem(key: string): Promise<string | undefined>;
   setSystem(key: string, value: string | null): Promise<void>;
+  // Write only if the key is not there; true when this call was the one that
+  // wrote it. The one-shot claims (an invite, a referral vesting) hang on it:
+  // two requests racing for the same claim get one true and one false.
+  setSystemIfAbsent(key: string, value: string): Promise<boolean>;
   // Every key under a prefix, for the few cases that need the set rather than
   // one entry — listing the invite codes an admin has issued, for instance.
   listSystem(prefix: string): Promise<{ key: string; value: string }[]>;

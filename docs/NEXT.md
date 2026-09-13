@@ -506,6 +506,70 @@ were never rendered.
 5. **After the first real generations**, reconcile `COST_*` in SSM against
    the invoices and redeploy (the deploy bakes SSM values into the Lambda).
 
+## Review pass: money paths, races, uploads (2026-09-12)
+
+A read of every path that moves credits or money, looking for the shape of
+the thumbnail bug (something correct that costs far more than it should),
+double spends, and webhook ordering. What changed and why, so nobody undoes
+it for looking redundant:
+
+- **Credits are charged atomically.** `addLedger(..., { requireFunds })`
+  makes the balance check part of the write: a DynamoDB condition
+  `balance_credits >= :need` on the same transaction, a single
+  better-sqlite3 transaction locally. `chargeCredits` returns null when the
+  funds are not there. `/api/jobs` and `/extend` charge BEFORE creating the
+  job row, with a pre-generated id — before, two requests that each saw
+  enough balance both went through, and a queued row briefly existed unpaid
+  where the cron could pick it up. The balance read that precedes it is only
+  for the friendly 402.
+- **Invite and referral claims are insert-if-absent** (`setSystemIfAbsent`
+  on the system KV: `invite-used#CODE`, `vested#<refereeId>`). Two
+  checkouts racing for one invite get one winner; the two webhooks that can
+  both vest a referral (`checkout.session.completed` and the first
+  `invoice.paid`, which Stripe does not order) pay out once. Vesting is
+  attempted from both events because `invoice.paid` can land before the
+  customer id is on the member row, in which case it cannot find them.
+- **An abandoned checkout hands the claim back.** Claims are still spent
+  when the checkout is opened (a code redeemable after the hosted page
+  exists could open any number of discounted sessions), but membership
+  sessions now expire after ONE HOUR and `checkout.session.expired` restores
+  the invite or the reward from the session metadata. This is a new webhook
+  event: **run `stripe-webhook.yml` with mode=sync for both stages** after
+  deploying, or Stripe will never send it.
+- **Refund handling is scoped.** A refunded/disputed TOP-UP claws its credits
+  back (`clawback` ledger entry, idempotent on the charge id; the balance may
+  go negative, which blocks generating). Only a full refund does this — a
+  partial goodwill refund is logged for a human. A refunded FIRST
+  subscription payment revokes the referral it vested; a refund of a later
+  month touches nothing; a dispute revokes regardless. Charges no longer
+  name their invoice in this API version, so the link goes through
+  `invoicePayments.list({ payment: { payment_intent } })`. Hosted-checkout
+  top-ups now set `payment_intent_data.metadata` (with `via: "checkout"`)
+  so the charge can be recognised — and so `payment_intent.succeeded` knows
+  to leave those to the session event rather than granting them twice.
+- **Saved-card top-ups carry a Stripe idempotency key** — a UUID the browser
+  makes per click (`attempt`), so a retried request cannot charge twice.
+  Deactivated accounts can no longer top up.
+- **Upload size is signed into the presigned PUT** (`ContentLength`): S3
+  refuses a body that does not match, so the per-type limit no longer depends
+  on the browser. The bucket now expires `uploads/` after 2 days, `tmp/`
+  after 1, and aborts stale multipart uploads — none of those were counted
+  against quota or deleted with the member's videos, so they only grew.
+- **Only new accounts can be referred** (7 days from creation), so an
+  existing subscriber cannot cancel, click a friend's link and resubscribe to
+  hand them $3 a month.
+- Middleware's public-path regex is anchored at a path boundary (`/helpers`
+  no longer skips Clerk).
+
+Known and deliberately left:
+- The reward counters (`rewards#<userId>`) are read-modify-write. Two
+  webhooks for the SAME referrer in the same instant could lose or double one
+  $3 reward. Bounded, rare, and per-reward rows would triple the code for it.
+- `withdrawReward` takes one pending reward, not the specific referee's:
+  economically identical, just not attributable.
+- Storage quota counts finished videos only; uploads are bounded by the
+  expiry above rather than by quota.
+
 ## Housekeeping
 
 Test accounts named `e2e+<timestamp>@remerged.click` exist in the Clerk

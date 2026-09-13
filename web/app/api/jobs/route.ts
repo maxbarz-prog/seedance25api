@@ -214,8 +214,36 @@ export async function POST(req: NextRequest) {
 
   const ids: string[] = [];
   for (let i = 0; i < b.variations; i++) {
+    const id = randomUUID();
+    // Charged BEFORE the row exists, under the store's own balance guard.
+    // The check above was for a helpful error; this is the one that counts.
+    // Two requests that each saw enough credit for themselves cannot both
+    // get through here, and a job is never queued unpaid — the cron would
+    // otherwise pick it up and spend provider money on it.
+    // Spends the expiring half of the balance first — see lib/grants.ts.
+    const charged = await chargeCredits(user.id, q.credits, {
+      jobId: id,
+      memo:
+        `Video ${b.durationS}s (${OUTPUT_MODES[outputMode].label})` +
+        (b.variations > 1 ? ` · variation ${i + 1}/${b.variations}` : ""),
+    });
+    if (!charged) {
+      // Balance moved between the check and the charge. Earlier variations
+      // in this batch are already paid for and queued; they stand.
+      if (ids.length) break;
+      return NextResponse.json(
+        {
+          error: "insufficient_credits",
+          message: "Not enough credits for this request.",
+          needed: total,
+          balance: await balance(user.id),
+          canBuyCredits: canBuyCredits(user),
+        },
+        { status: 402 }
+      );
+    }
     const job = await createJob({
-      id: randomUUID(),
+      id,
       user_id: user.id,
       prompt: b.prompt,
       model,
@@ -236,13 +264,6 @@ export async function POST(req: NextRequest) {
       camera_fixed: b.cameraFixed ? 1 : 0,
       size_bytes: null,
       error: null,
-    });
-    // Spends the expiring half of the balance first — see lib/grants.ts.
-    await chargeCredits(user.id, q.credits, {
-      jobId: job.id,
-      memo:
-        `Video ${b.durationS}s (${OUTPUT_MODES[outputMode].label})` +
-        (b.variations > 1 ? ` · variation ${i + 1}/${b.variations}` : ""),
     });
     ids.push(job.id);
   }

@@ -139,10 +139,13 @@ export default function Composer({
           );
           continue;
         }
+        // The size goes with the request: it is signed into the upload URL,
+        // so the limit is the bucket's to enforce, and too-large is answered
+        // here before a byte moves.
         const res = await fetch("/api/uploads", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contentType: file.type }),
+          body: JSON.stringify({ contentType: file.type, bytes: file.size }),
         });
         if (res.status === 401) {
           router.push("/sign-up");
@@ -151,10 +154,6 @@ export default function Composer({
         const p = await res.json();
         if (!res.ok) {
           setError(p.error || "Upload failed.");
-          continue;
-        }
-        if (file.size > p.maxBytes) {
-          setError(`That file is too large (limit ${Math.round(p.maxBytes / 1e6)} MB).`);
           continue;
         }
         const put = await fetch(p.url, { method: "PUT", headers: { "Content-Type": file.type }, body: file });

@@ -125,6 +125,11 @@ export async function sweepPeriodGrants(): Promise<{
 // be left with 50 bought and nothing granted — not 50 of each. Otherwise the
 // next renewal would forfeit credits they actually paid for. The split is
 // recorded on the entry so a refund can put back exactly what was taken.
+//
+// Returns null when the balance does not cover it. The check is the store's,
+// made in the same atomic step as the debit, so two requests racing on one
+// balance cannot both be told yes. Callers treat null as "not enough
+// credits", never as "try again".
 export async function chargeCredits(
   userId: string,
   credits: number,
@@ -135,6 +140,7 @@ export async function chargeCredits(
   return addLedger(userId, -credits, "charge", {
     ...opts,
     grantedDelta: -Math.min(credits, granted),
+    requireFunds: true,
   });
 }
 

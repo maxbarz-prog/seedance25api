@@ -122,8 +122,27 @@ export async function POST(
     );
   }
 
+  const jobId = randomUUID();
+  // Charged before the row exists, under the store's balance guard: the
+  // check above is advisory, this is atomic. See app/api/jobs/route.ts.
+  const charged = await chargeCredits(user.id, q.credits, {
+    jobId,
+    memo: `Extend video +${b.durationS}s`,
+  });
+  if (!charged) {
+    return NextResponse.json(
+      {
+        error: "insufficient_credits",
+        message: "Not enough credits.",
+        needed: q.credits,
+        balance: await balance(user.id),
+        canBuyCredits: canBuyCredits(user),
+      },
+      { status: 402 }
+    );
+  }
   const job = await createJob({
-    id: randomUUID(),
+    id: jobId,
     user_id: user.id,
     prompt: b.prompt?.trim() || source.prompt,
     model,
@@ -143,10 +162,6 @@ export async function POST(
     camera_fixed: source.camera_fixed ?? 0,
     size_bytes: null,
     error: null,
-  });
-  await chargeCredits(user.id, q.credits, {
-    jobId: job.id,
-    memo: `Extend video +${b.durationS}s`,
   });
   await advanceJob(job.id);
   return NextResponse.json({ id: job.id }, { status: 201 });

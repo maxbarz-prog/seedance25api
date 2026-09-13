@@ -3,7 +3,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { createMembershipCheckout, DiscountKind } from "@/lib/billing";
-import { checkInvite, consumeReward, redeemInvite, rewardsFor } from "@/lib/referrals";
+import {
+  checkInvite,
+  consumeReward,
+  redeemInvite,
+  restoreReward,
+  rewardsFor,
+  unredeemInvite,
+} from "@/lib/referrals";
 
 const Body = z.object({
   plan: z.enum(PAID_PLAN_IDS as [string, ...string[]]),
@@ -26,8 +33,9 @@ export async function POST(req: NextRequest) {
   // An invite beats a referral reward: it is worth more, it was given for a
   // reason, and it cannot be saved for later.
   let discount: DiscountKind | undefined;
-  if (parsed.data.invite) {
-    const check = await checkInvite(parsed.data.invite);
+  const invite = parsed.data.invite?.toUpperCase();
+  if (invite) {
+    const check = await checkInvite(invite);
     if (!check.ok) {
       const why = {
         unknown: "That invite code does not exist.",
@@ -49,14 +57,28 @@ export async function POST(req: NextRequest) {
     discount = "referral";
   }
 
-  const { url } = await createMembershipCheckout(user, plan, interval, req.nextUrl.origin, discount);
+  // Claimed BEFORE the checkout exists, then spent on it. The claim is
+  // atomic, so two requests with one code cannot both open a discounted
+  // session; and a code or reward is never left attached to a checkout that
+  // was never created. If the session expires unpaid, the webhook hands the
+  // claim back (checkout.session.expired).
+  if (discount === "invite" && invite && !(await redeemInvite(invite, user.id))) {
+    return NextResponse.json({ error: "That invite code has already been used." }, { status: 400 });
+  }
+  if (discount === "referral" && !(await consumeReward(user.id))) discount = undefined;
 
-  // Spent at checkout, not on payment. A code still redeemable after the
-  // hosted page has been opened could fund an unlimited number of discounted
-  // sessions; an abandoned checkout costs the member a code, which is a far
-  // smaller problem than that.
-  if (discount === "invite" && parsed.data.invite) await redeemInvite(parsed.data.invite, user.id);
-  if (discount === "referral") await consumeReward(user.id);
-
-  return NextResponse.json({ url });
+  try {
+    const { url } = await createMembershipCheckout(
+      user,
+      plan,
+      interval,
+      req.nextUrl.origin,
+      discount ? { kind: discount, invite: discount === "invite" ? invite : undefined } : undefined
+    );
+    return NextResponse.json({ url });
+  } catch (err) {
+    if (discount === "invite" && invite) await unredeemInvite(invite, user.id);
+    if (discount === "referral") await restoreReward(user.id);
+    throw err;
+  }
 }

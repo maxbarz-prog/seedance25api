@@ -247,13 +247,27 @@ export class SqliteStore implements DataStore {
       granted_delta: opts.grantedDelta ? Math.round(opts.grantedDelta) : null,
       created_at: Date.now(),
     };
+    const insert = this.db().prepare(
+      `INSERT INTO ledger (id, user_id, delta_credits, kind, job_id, memo, external_id, granted_delta, created_at)
+       VALUES (@id, @user_id, @delta_credits, @kind, @job_id, @memo, @external_id, @granted_delta, @created_at)`
+    );
     try {
-      this.db()
-        .prepare(
-          `INSERT INTO ledger (id, user_id, delta_credits, kind, job_id, memo, external_id, granted_delta, created_at)
-           VALUES (@id, @user_id, @delta_credits, @kind, @job_id, @memo, @external_id, @granted_delta, @created_at)`
-        )
-        .run(e);
+      if (opts.requireFunds && e.delta_credits < 0) {
+        // The check and the insert in one transaction, and better-sqlite3
+        // runs it synchronously on the single connection, so nothing can be
+        // spent between the two.
+        const ok = this.db().transaction(() => {
+          const { bal } = this.db()
+            .prepare(`SELECT COALESCE(SUM(delta_credits), 0) AS bal FROM ledger WHERE user_id = ?`)
+            .get(userId) as { bal: number };
+          if (bal < -e.delta_credits) return false;
+          insert.run(e);
+          return true;
+        })();
+        if (!ok) return null;
+      } else {
+        insert.run(e);
+      }
     } catch (err: unknown) {
       if (String(err).includes("UNIQUE constraint failed: ledger.external_id")) return null;
       throw err;
@@ -357,6 +371,13 @@ export class SqliteStore implements DataStore {
     this.db()
       .prepare(`INSERT INTO system (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v`)
       .run(key, value);
+  }
+
+  async setSystemIfAbsent(key: string, value: string): Promise<boolean> {
+    const r = this.db()
+      .prepare(`INSERT OR IGNORE INTO system (k, v) VALUES (?, ?)`)
+      .run(key, value);
+    return r.changes === 1;
   }
 
   async listSystem(prefix: string): Promise<{ key: string; value: string }[]> {

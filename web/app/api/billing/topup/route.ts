@@ -3,13 +3,26 @@ import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { applyTopup, chargeSavedCard, createTopupCheckout } from "@/lib/billing";
 import { MIN_TOPUP_USD } from "@/lib/config";
-import { canBuyCredits } from "@/lib/plan";
+import { canBuyCredits, isDeactivated } from "@/lib/plan";
 
-const Body = z.object({ usd: z.number().min(MIN_TOPUP_USD).max(1000) });
+const Body = z.object({
+  usd: z.number().min(MIN_TOPUP_USD).max(1000),
+  // Made by the browser for this one click; the same value on a retry means
+  // the same charge, not a second one.
+  attempt: z.string().uuid().optional(),
+});
 
 export async function POST(req: NextRequest) {
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  // Deactivated means nothing is billed — that is the promise on the account
+  // page, and it covers the card on file too.
+  if (isDeactivated(user)) {
+    return NextResponse.json(
+      { error: "deactivated", message: "Reactivate your account before buying credits." },
+      { status: 403 }
+    );
+  }
   // Top-ups need a plan that allows them: Free has no card on file, and its
   // allocation is the whole offer.
   if (!canBuyCredits(user)) {
@@ -34,7 +47,7 @@ export async function POST(req: NextRequest) {
   // a URL for someone to re-enter a card they have already given us is the
   // friction this removes; Stripe only needs to be involved again when the
   // card is gone or the bank wants the member present.
-  const charge = await chargeSavedCard(user, usd);
+  const charge = await chargeSavedCard(user, usd, parsed.data.attempt);
   if (charge.outcome === "charged") {
     // Granted here rather than waiting for payment_intent.succeeded so the
     // balance has moved by the time the page re-reads it. The webhook applies

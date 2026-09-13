@@ -1,7 +1,7 @@
 import { createHmac, randomBytes } from "crypto";
 import { cookies } from "next/headers";
 import { PlanId, REFERRAL_REWARD_USD } from "./config";
-import { getSystem, listSystem, setSystem } from "./db";
+import { getSystem, listSystem, setSystem, setSystemIfAbsent, userById } from "./db";
 
 // Invites and referrals.
 //
@@ -70,6 +70,8 @@ export interface Rewards {
 }
 
 const inviteKey = (code: string) => `invite#${code.toUpperCase()}`;
+const inviteClaimKey = (code: string) => `invite-used#${code.toUpperCase()}`;
+const vestKey = (refereeId: string) => `vested#${refereeId}`;
 const refcodeKey = (code: string) => `refcode#${code.toUpperCase()}`;
 const referralKey = (refereeId: string) => `referral#${refereeId}`;
 const rewardsKey = (userId: string) => `rewards#${userId}`;
@@ -147,16 +149,32 @@ export async function checkInvite(code: string): Promise<InviteCheck> {
   return { ok: true, invite };
 }
 
-// Marked used at checkout rather than on payment. A code that has been spent
-// at Stripe's hosted page is gone whether or not the card clears — otherwise
-// one code could open an unlimited number of discounted checkouts.
+// Marked used when the checkout is OPENED, not when it is paid: a code still
+// redeemable after the hosted page exists could open any number of discounted
+// sessions. The claim is a single insert-if-absent, so two checkouts racing
+// for one code get exactly one winner; the invite record is then updated for
+// the listing. An abandoned checkout hands the code back — see unredeemInvite.
 export async function redeemInvite(code: string, userId: string): Promise<boolean> {
   const check = await checkInvite(code);
   if (!check.ok) return false;
+  if (!(await setSystemIfAbsent(inviteClaimKey(code), userId))) return false;
   await setSystem(
     inviteKey(code),
     JSON.stringify({ ...check.invite, redeemedBy: userId, redeemedAt: Date.now() })
   );
+  return true;
+}
+
+// The checkout that spent this code expired unpaid. Only the member who
+// claimed it can hand it back, and only while it is still theirs.
+export async function unredeemInvite(code: string, userId: string): Promise<boolean> {
+  const invite = await inviteByCode(code);
+  if (!invite || invite.redeemedBy !== userId) return false;
+  const { redeemedBy, redeemedAt, ...rest } = invite;
+  void redeemedBy;
+  void redeemedAt;
+  await setSystem(inviteKey(code), JSON.stringify(rest));
+  await setSystem(inviteClaimKey(code), null);
   return true;
 }
 
@@ -204,9 +222,15 @@ export async function referralFor(refereeId: string): Promise<Referral | null> {
 
 // The referee's first invoice has been PAID. Only now has the referrer earned
 // anything.
+//
+// Two webhooks can say so at once (checkout completion and the first
+// invoice, which Stripe does not order), so the vesting itself is an
+// insert-if-absent: whichever arrives second finds the marker and pays out
+// nothing.
 export async function vestReferral(refereeId: string): Promise<Referral | null> {
   const referral = await referralFor(refereeId);
   if (!referral || referral.vestedAt || referral.revokedAt) return null;
+  if (!(await setSystemIfAbsent(vestKey(refereeId), String(Date.now())))) return null;
   const vested = { ...referral, vestedAt: Date.now() };
   await setSystem(referralKey(refereeId), JSON.stringify(vested));
   await earnReward(referral.referrerId);
@@ -260,6 +284,15 @@ export async function consumeReward(userId: string): Promise<boolean> {
   return true;
 }
 
+// The checkout a reward was spent on expired unpaid: the reward goes back in
+// the queue.
+export async function restoreReward(userId: string): Promise<Rewards> {
+  const r = await rewardsFor(userId);
+  const next = { pending: r.pending + 1, applied: Math.max(0, r.applied - 1) };
+  await writeRewards(userId, next);
+  return next;
+}
+
 // ── claiming a link ────────────────────────────────────────────────────────
 
 // Turn the cookie /r/<code> left behind into a referral, the first time the
@@ -267,11 +300,22 @@ export async function consumeReward(userId: string): Promise<boolean> {
 // signup — their account page and their first checkout — because account rows
 // are created lazily on first authenticated use, so there is no single
 // "user created" moment to hook.
+//
+// Only a NEW account can be referred. An established member who clicks a
+// friend's link later is not a referral, and without this an existing
+// subscriber could cancel, "get referred", and resubscribe to hand a friend
+// $3 a month.
+const REFERRAL_CLAIM_WINDOW_MS = 7 * 86_400_000;
+
 export async function claimReferralCookie(userId: string): Promise<Referral | null> {
   const jar = await cookies();
   const code = jar.get("remerged_ref")?.value;
   if (!code) return null;
-  const result = await recordReferral(userId, code);
+  const user = await userById(userId);
+  const isNew = !!user && Date.now() - user.created_at < REFERRAL_CLAIM_WINDOW_MS;
+  const result = isNew
+    ? await recordReferral(userId, code)
+    : ({ ok: false, reason: "already-referred" } as const);
   // Cleared either way: a code that cannot be claimed should not keep being
   // retried on every page load.
   try {

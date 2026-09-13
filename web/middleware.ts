@@ -48,7 +48,10 @@ let clerk: ((req: NextRequest, event: NextFetchEvent) => unknown) | null = null;
 // fetches the member's data from /api/me in the browser, so the document itself
 // carries nothing private and belongs in the CDN. Protection lives in the API
 // handlers, which Clerk does still see.
-const PUBLIC = /^\/(?:$|pricing|help|terms|privacy|refunds|account|library|jobs)/;
+//
+// Anchored at a path boundary: /helpers or /accounts-export would otherwise
+// match too, and skip Clerk on a page that was never meant to be public.
+const PUBLIC = /^\/(?:$|(?:pricing|help|terms|privacy|refunds|account|library|jobs)(?:\/|$))/;
 
 export default function middleware(req: NextRequest, event: NextFetchEvent) {
   // Runs for every path, including public ones: help.<domain>/anything has to

@@ -72,6 +72,26 @@ export default $config({
         allowHeaders: ["*"],
       },
     });
+    // Inputs and scratch files are short-lived by nature: an upload is read by
+    // the pipeline within minutes of the job being created, and the trimmed
+    // extend context is deleted when the job settles. Neither is counted
+    // against a member's quota or deleted with their videos, so without an
+    // expiry they would accumulate forever — including anything uploaded and
+    // never attached to a job. Members' videos and posters are untouched.
+    new aws.s3.BucketLifecycleConfigurationV2("MediaExpiry", {
+      bucket: media.name,
+      rules: [
+        { id: "uploads", status: "Enabled", filter: { prefix: "uploads/" }, expiration: { days: 2 } },
+        { id: "tmp", status: "Enabled", filter: { prefix: "tmp/" }, expiration: { days: 1 } },
+        // Half-finished multipart uploads are invisible and billed.
+        {
+          id: "abandoned-multipart",
+          status: "Enabled",
+          filter: { prefix: "" },
+          abortIncompleteMultipartUpload: { daysAfterInitiation: 1 },
+        },
+      ],
+    });
 
     // `help.<domain>` is an alias on the same distribution rather than a
     // second site: the help centre is pages in this app, reading live prices
