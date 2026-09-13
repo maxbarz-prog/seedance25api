@@ -30,14 +30,23 @@ on:
         type: string
         default: "remerged.ai"
       mode:
-        description: "check = report only. setup = create the identity and write the records. test = send one message to support@ and follow it through."
+        description: "check = report only. setup = create the identity and write the records. test = send one message to support@ and follow it through. dmarc = repoint the DMARC reports."
         type: choice
-        options: ["check", "setup", "test"]
+        options: ["check", "setup", "test", "dmarc"]
         default: "check"
       replace_mx:
         description: "setup only: delete MX records pointing somewhere other than SES. Leave off unless check says they are in the way."
         type: boolean
         default: false
+      dmarc_rua:
+        description: "dmarc only: where aggregate reports go, e.g. the address a digest service issued you. Bare address, no mailto:."
+        type: string
+        default: ""
+      dmarc_policy:
+        description: "dmarc only: what receivers should do with mail that fails. Stay on none until the reports show every legitimate sender passing."
+        type: choice
+        options: ["none", "quarantine", "reject"]
+        default: "none"
 
 permissions:
   id-token: write
@@ -283,6 +292,73 @@ jobs:
           else
             echo "  kept     TXT _dmarc ($dmarc)"
           fi
+
+      - name: Point the DMARC reports somewhere
+        if: inputs.mode == 'dmarc'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RUA: ${{ inputs.dmarc_rua }}
+          POLICY: ${{ inputs.dmarc_policy }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          if [ -z "$RUA" ]; then
+            echo "dmarc_rua is empty. Digest services issue a unique address at signup;"
+            echo "paste that address (without 'mailto:') and re-run."
+            exit 1
+          fi
+          case "$RUA" in
+            mailto:*) echo "Drop the 'mailto:' prefix — the record adds it."; exit 1 ;;
+            *@*.*) : ;;
+            *) echo "That does not look like an email address: $RUA"; exit 1 ;;
+          esac
+
+          # A report address on ANOTHER domain only works if that domain says
+          # it will accept reports for ours: DMARC requires a TXT record at
+          # <our-domain>._report._dmarc.<their-domain>. Every digest service
+          # publishes a wildcard for this, so it normally just works — but when
+          # it does not, nothing errors anywhere and the reports simply never
+          # arrive. Worth the ten seconds to look.
+          reporter="${RUA#*@}"
+          if [ "$reporter" != "$DOMAIN" ]; then
+            ok=$(dig +short TXT "$DOMAIN._report._dmarc.$reporter" 2>/dev/null | tr -d '"' || true)
+            if printf '%s' "$ok" | grep -qi "v=DMARC1"; then
+              echo "  $reporter authorises reports for $DOMAIN."
+            elif [ -z "$ok" ]; then
+              echo "  WARNING  $reporter publishes no _report._dmarc authorisation for $DOMAIN."
+              echo "           Writing the record anyway, but if no digest arrives within"
+              echo "           48 hours this is why — check the service's setup page."
+            fi
+          fi
+
+          api="https://api.cloudflare.com/client/v4"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          zone="$CF_ZONE"
+          record="v=DMARC1; p=$POLICY; rua=mailto:$RUA"
+
+          existing=$(curl -sS -H "$auth" "$api/zones/$zone/dns_records?type=TXT&name=_dmarc.$DOMAIN" \
+            | jq -r '.result[0].id // empty')
+          body=$(jq -nc --arg n "_dmarc.$DOMAIN" --arg c "$record" \
+            '{type:"TXT", name:$n, content:$c, ttl:300}')
+          if [ -n "$existing" ]; then
+            r=$(curl -sS -X PUT -H "$auth" -H "Content-Type: application/json" \
+              --data "$body" "$api/zones/$zone/dns_records/$existing")
+          else
+            r=$(curl -sS -X POST -H "$auth" -H "Content-Type: application/json" \
+              --data "$body" "$api/zones/$zone/dns_records")
+          fi
+          if [ "$(printf '%s' "$r" | jq -r '.success')" != "true" ]; then
+            printf '%s' "$r" | jq -r '.errors[]?| "    \(.code): \(.message)"'
+            exit 1
+          fi
+          echo "  _dmarc.$DOMAIN is now: $record"
+          if [ "$POLICY" != "none" ]; then
+            echo
+            echo "  p=$POLICY is enforcing: receivers will now act on mail that fails"
+            echo "  SPF and DKIM alignment. If a legitimate sender was missing from the"
+            echo "  reports, its mail starts disappearing from today."
+          fi
+          echo "  Reports are daily and lag ~24h, so the first digest lands tomorrow."
 
       - name: Wait for SES to verify it
         if: inputs.mode == 'setup'
