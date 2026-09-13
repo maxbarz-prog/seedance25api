@@ -144,6 +144,18 @@ export async function chargeCredits(
   });
 }
 
+// Take back whatever membership allocation is still unspent. Used when the
+// payment that granted it is disputed: the member keeps anything they bought,
+// and loses only what came with the plan they are now contesting.
+export async function forfeitGrantedCredits(userId: string, memo: string): Promise<number> {
+  const user = await userById(userId);
+  if (!user) return 0;
+  const granted = grantedBalance(user, await balance(userId));
+  if (granted <= 0) return 0;
+  await addLedger(userId, -granted, "expiry", { memo, grantedDelta: -granted });
+  return granted;
+}
+
 // Refunding a charge puts back what that charge took, on the same terms: the
 // granted part returns as granted (still expiring), the bought part as
 // bought. Without the original split a refund would silently convert

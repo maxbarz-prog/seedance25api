@@ -11,7 +11,7 @@ import {
   syncSubscription,
 } from "@/lib/billing";
 import { setStripeIds, userById, userByStripeCustomer } from "@/lib/db";
-import { grantPeriodCredits } from "@/lib/grants";
+import { forfeitGrantedCredits, grantPeriodCredits } from "@/lib/grants";
 import { effectivePlan } from "@/lib/plan";
 import {
   consumeReward,
@@ -42,13 +42,29 @@ export async function POST(req: NextRequest) {
   }
 
   switch (event.type) {
-    case "checkout.session.completed": {
+    // "Completed" means the member finished the page, not that the money is
+    // here. With a card they are the same moment; with a bank debit or any
+    // other delayed method the session completes UNPAID and the funds arrive
+    // days later as checkout.session.async_payment_succeeded — or never. So
+    // both events run the same fulfilment, and it looks at payment_status,
+    // not at which event it was. Idempotent on the session id, so a session
+    // that is paid at completion and then reported again grants once.
+    case "checkout.session.completed":
+    case "checkout.session.async_payment_succeeded": {
       const s = event.data.object as Stripe.Checkout.Session;
       const userId = s.metadata?.userId;
       if (!userId || !(await userById(userId))) break;
       const customerId = typeof s.customer === "string" ? s.customer : s.customer?.id ?? null;
+      if (s.payment_status === "unpaid") {
+        console.warn(`checkout ${s.id} for ${userId} completed unpaid — waiting for the funds`);
+        break;
+      }
       if (s.metadata?.kind === "topup") {
-        await applyTopup(userId, Number(s.metadata.usd), s.id);
+        // The amount Stripe collected, not the one we wrote into metadata
+        // when the session was opened: those should agree, and the money is
+        // the one to believe if they do not.
+        const usd = (s.amount_total ?? 0) / 100;
+        if (usd > 0) await applyTopup(userId, usd, s.id);
         if (customerId) await setStripeIds(userId, customerId, null);
       } else if (s.metadata?.kind === "membership") {
         const subId = typeof s.subscription === "string" ? s.subscription : s.subscription?.id ?? null;
@@ -66,8 +82,9 @@ export async function POST(req: NextRequest) {
         // The first invoice is paid by now. invoice.paid vests this too, but
         // it can arrive BEFORE this event — and then it cannot find the member
         // by customer id, because it is this event that records it. Vesting
-        // is idempotent, so both may try.
-        if (s.payment_status === "paid") await vestReferral(userId);
+        // is idempotent, so both may try. Only real money vests: a first month
+        // that an invite made free has not shown the referee will pay.
+        if (s.payment_status === "paid" && (s.amount_total ?? 0) > 0) await vestReferral(userId);
       }
       break;
     }
@@ -109,7 +126,9 @@ export async function POST(req: NextRequest) {
         // earned their reward. Only on the FIRST invoice of a subscription:
         // billing_reason distinguishes that from every renewal after it, and a
         // referral pays out once.
-        if (inv.billing_reason === "subscription_create") await vestReferral(member.id);
+        if (inv.billing_reason === "subscription_create" && inv.amount_paid > 0) {
+          await vestReferral(member.id);
+        }
 
         // And this member's own turn, if they have rewards waiting: one per
         // billing period, attached now so it comes off the next invoice. Never
@@ -134,10 +153,10 @@ export async function POST(req: NextRequest) {
       // would be the same money twice.
       if (pi.metadata.via === "checkout") break;
       const userId = pi.metadata.userId;
-      const usd = Number(pi.metadata.usd);
-      if (!userId || !Number.isFinite(usd) || usd <= 0) break;
-      if (!(await userById(userId))) break;
-      await applyTopup(userId, usd, pi.id);
+      if (!userId || !(await userById(userId))) break;
+      // What was actually received, in case it and the metadata ever differ.
+      const received = pi.amount_received / 100;
+      if (received > 0) await applyTopup(userId, received, pi.id);
       break;
     }
     // Money came back.
@@ -202,6 +221,17 @@ export async function POST(req: NextRequest) {
         first = typeof inv === "object" && !inv.deleted && inv.billing_reason === "subscription_create";
       }
       if (first) await revokeReferral(member.id, disputed ? "disputed" : "refunded");
+
+      // A disputed subscription payment ends the subscription now, not at the
+      // period end: the bank has taken the money back, so the month it paid
+      // for is not paid for. The unspent allocation goes with it; anything
+      // the member bought outright stays. Stripe does none of this by itself.
+      if (disputed && member.stripe_subscription_id) {
+        await stripeClient()
+          .subscriptions.cancel(member.stripe_subscription_id)
+          .catch((e) => console.error(`cancel after dispute failed for ${member.id}:`, e));
+        await forfeitGrantedCredits(member.id, "Membership payment disputed");
+      }
       break;
     }
     default:

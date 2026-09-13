@@ -172,6 +172,9 @@ export default $config({
         environment: {
           SITE_URL: $interpolate`https://${domain.name}`,
           CRON_SECRET: process.env.CRON_SECRET ?? "",
+          // So the status page can say whether a test-mode Stripe key is
+          // fine (dev) or a production incident (prod).
+          STAGE: $app.stage,
         },
       },
     });

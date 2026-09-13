@@ -339,14 +339,35 @@ export async function syncSubscription(sub: Stripe.Subscription): Promise<void> 
   const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
   const user = await userByStripeCustomer(customerId);
   if (!user) return;
-  // The plan rides on the subscription metadata we set at checkout.
-  // Anything unrecognised falls back to the cheapest paid tier rather than
-  // granting more than was paid for.
-  const plan: PlanId = (PAID_PLAN_IDS as string[]).includes(sub.metadata?.plan ?? "")
-    ? (sub.metadata!.plan as PlanId)
-    : "standard";
+  // The plan rides on the subscription metadata we set at checkout — but the
+  // PRICE is the truth. If the two disagree (a subscription edited in the
+  // Stripe dashboard, a price swapped by hand), the member gets the plan
+  // their money actually pays for, and the mismatch is logged. Anything
+  // unrecognised falls back to the cheapest paid tier rather than granting
+  // more than was paid for.
   const interval: BillingInterval =
     sub.items.data[0]?.price?.recurring?.interval === "year" ? "year" : "month";
+  const claimed = (PAID_PLAN_IDS as string[]).includes(sub.metadata?.plan ?? "")
+    ? (sub.metadata!.plan as PlanId)
+    : null;
+  const cents = sub.items.data[0]?.price?.unit_amount ?? null;
+  const priced = (PAID_PLAN_IDS as PlanId[]).find(
+    (id) => Math.round(planPriceUsd(id, interval) * 100) === cents
+  );
+  const plan: PlanId = priced ?? claimed ?? "standard";
+  if (claimed && priced && claimed !== priced) {
+    console.error(
+      `subscription ${sub.id}: metadata says ${claimed} but the price (${cents}¢/${interval}) is ${priced}'s — using ${priced}`
+    );
+  } else if (cents !== null && !priced) {
+    // A price that matches no CURRENT plan. Most likely a subscription from
+    // before a price change, so the metadata stands — repricing a plan must
+    // not silently move every existing subscriber to another tier. Logged so
+    // a price someone edited by hand in the dashboard is not invisible.
+    console.warn(
+      `subscription ${sub.id}: price ${cents}¢/${interval} matches no current plan — keeping ${plan} from metadata`
+    );
+  }
   const periodEnd = (sub.items.data[0]?.current_period_end ?? 0) * 1000;
   const active = sub.status === "active" || sub.status === "trialing" || sub.status === "past_due";
   if (active && !sub.cancel_at_period_end) {

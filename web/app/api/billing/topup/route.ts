@@ -3,10 +3,21 @@ import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { applyTopup, chargeSavedCard, createTopupCheckout } from "@/lib/billing";
 import { MIN_TOPUP_USD } from "@/lib/config";
+import { ledgerFor } from "@/lib/db";
 import { canBuyCredits, isDeactivated } from "@/lib/plan";
 
+// How much may go on the saved card, silently, in a day. Above this the
+// member is sent to the hosted page instead — same card, but Stripe's own
+// fraud checks and the bank's 3-D Secure get their say. A stolen session
+// cannot drain a card one silent request at a time; a member buying a lot
+// merely sees the card page. The ledger is the counter, so there is no
+// separate state to get out of step.
+const SAVED_CARD_DAILY_USD = 300;
+
 const Body = z.object({
-  usd: z.number().min(MIN_TOPUP_USD).max(1000),
+  // Whole dollars: what the presets offer, and what keeps cents and credits
+  // from ever disagreeing by a rounding error.
+  usd: z.number().int().min(MIN_TOPUP_USD).max(1000),
   // Made by the browser for this one click; the same value on a retry means
   // the same charge, not a second one.
   attempt: z.string().uuid().optional(),
@@ -47,7 +58,14 @@ export async function POST(req: NextRequest) {
   // a URL for someone to re-enter a card they have already given us is the
   // friction this removes; Stripe only needs to be involved again when the
   // card is gone or the bank wants the member present.
-  const charge = await chargeSavedCard(user, usd, parsed.data.attempt);
+  const dayAgo = Date.now() - 86_400_000;
+  const todayUsd = (await ledgerFor(user.id, 100))
+    .filter((e) => e.kind === "topup" && e.created_at > dayAgo)
+    .reduce((sum, e) => sum + e.delta_credits / 100, 0);
+  const charge =
+    todayUsd + usd > SAVED_CARD_DAILY_USD
+      ? ({ outcome: "needs_auth" } as const)
+      : await chargeSavedCard(user, usd, parsed.data.attempt);
   if (charge.outcome === "charged") {
     // Granted here rather than waiting for payment_intent.succeeded so the
     // balance has moved by the time the page re-reads it. The webhook applies

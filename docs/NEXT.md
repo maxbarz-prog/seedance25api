@@ -570,6 +570,44 @@ Known and deliberately left:
 - Storage quota counts finished videos only; uploads are bounded by the
   expiry above rather than by quota.
 
+## Money deep-dive (2026-09-13)
+
+The money paths run against the Stripe go-live / fulfilment / webhook /
+card-testing guidance and the OWASP business-logic rules. The full checklist
+with per-item status lives in the "Remerged Money Checklist" artifact; what
+changed in code:
+
+- **Checkout fulfilment looks at `payment_status`, not at the event.** A
+  session can complete UNPAID (bank debit, any delayed method) and the money
+  lands days later as `checkout.session.async_payment_succeeded` — a new
+  event, handled by the same case; **sync the endpoints** after deploying.
+  Top-up credits come from `amount_total` / `amount_received`, not from the
+  metadata we wrote when opening the session.
+- **Only paid money vests a referral** (`amount_paid > 0`): an invite-made
+  free first month does not earn the referrer $3.
+- **One subscription per member** is enforced in `/api/billing/subscribe`,
+  not only hidden by the page — a second checkout would bill twice and
+  overwrite the first subscription id.
+- **The price is the plan.** `syncSubscription` checks the subscription's
+  `unit_amount` against `planPriceUsd`; a price that matches a different plan
+  wins over the metadata (logged as an error); a price matching no current
+  plan keeps the metadata (a repriced plan must not downgrade everyone) and
+  warns.
+- **A disputed subscription payment cancels the subscription now** and
+  forfeits the unspent allocation; bought credits stay. A disputed or fully
+  refunded top-up claws its credits back (already).
+- **Saved-card top-ups are capped at $300/day** per member; above that the
+  same card is used through the hosted page, where Radar and 3-D Secure get
+  their say. Top-ups are whole dollars.
+- The status page now shows the **Stripe key mode vs stage** (test key on
+  prod = bad, live key on dev = bad, `rk_` restricted = good) and **whether
+  Stripe still has an enabled webhook endpoint for this host** — Stripe
+  disables endpoints after days of failures and tells only the dashboard.
+- Cron secret compared in constant time.
+
+Dashboard-side items are the owner's (Radar rules, statement descriptor,
+receipts/dunning emails, restricted key, tax) — listed in the artifact.
+
 ## Housekeeping
 
 Test accounts named `e2e+<timestamp>@remerged.click` exist in the Clerk

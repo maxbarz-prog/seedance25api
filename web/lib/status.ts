@@ -188,7 +188,30 @@ function configChecks(): Check[] {
       level: process.env.STRIPE_WEBHOOK_SECRET ? "good" : "bad",
       note: process.env.STRIPE_WEBHOOK_SECRET ? "payments can be confirmed" : "payments would never credit an account",
     },
+    stripeKeyCheck(),
   ];
+}
+
+// Which Stripe account the key talks to, judged against the stage. A test
+// key on prod means every "payment" is play money and every credit granted
+// is a gift; a live key on dev means the test pass charges real cards. Both
+// are one SSM value away and neither announces itself anywhere else.
+function stripeKeyCheck(): Check {
+  const key = process.env.STRIPE_SECRET_KEY ?? "";
+  const stage = process.env.STAGE ?? "unknown";
+  const mode = key.includes("_test_") ? "test" : key.includes("_live_") ? "live" : key ? "unknown" : "none";
+  const restricted = key.startsWith("rk_");
+  const wrong = (stage === "prod" && mode === "test") || (stage !== "prod" && mode === "live");
+  return {
+    key: "config.stripe_mode", group: "config", label: "Stripe key",
+    value: key ? `${mode}${restricted ? ", restricted" : ""}` : "none",
+    level: !key ? "bad" : wrong ? "bad" : mode === "unknown" ? "warn" : "good",
+    note: !key
+      ? "no key"
+      : wrong
+        ? `a ${mode}-mode key on the ${stage} stage`
+        : `${mode} mode on ${stage}${restricted ? "" : " — a restricted key (rk_) would limit what a leak could do"}`,
+  };
 }
 
 // ---------- our systems ----------
@@ -349,6 +372,34 @@ async function dependencyChecks(): Promise<Check[]> {
       level: good ? "good" : "bad",
       blame: blameFor(status, !good),
       note: good ? "our key authenticates and payments can be created" : r.ok ? `HTTP ${status}` : r.error,
+    });
+  }
+
+  // The endpoint Stripe posts to. Stripe disables an endpoint after days of
+  // failed deliveries and tells nobody but the dashboard — after which every
+  // payment goes through and no credit is ever granted. This asks Stripe
+  // whether ours is still enabled, and whether it is the one for this host.
+  if (stripeKey && process.env.SITE_URL) {
+    const ours = `${process.env.SITE_URL.replace(/\/$/, "")}/api/billing/webhook`;
+    const r = await timed((signal) =>
+      json("https://api.stripe.com/v1/webhook_endpoints?limit=100", { headers: { Authorization: `Bearer ${stripeKey}` } }, signal)
+    );
+    const list = r.ok && r.value.status === 200
+      ? ((r.value.body as { data?: { url: string; status: string; enabled_events: string[] }[] }).data ?? [])
+      : null;
+    const mine = list?.find((e) => e.url === ours);
+    out.push({
+      key: "dep.stripe_webhook", group: "dependency", label: "Stripe webhook", ms: r.ms,
+      value: !list ? "unknown" : !mine ? "missing" : mine.status,
+      level: !list ? "warn" : !mine ? "bad" : mine.status === "enabled" ? "good" : "bad",
+      blame: !list ? "unclear" : !mine || mine.status !== "enabled" ? "us" : undefined,
+      note: !list
+        ? "could not list endpoints"
+        : !mine
+          ? `no endpoint for ${ours} — payments would never credit an account`
+          : mine.status === "enabled"
+            ? `${mine.enabled_events.length} events to ${ours}`
+            : `endpoint is ${mine.status} — Stripe has stopped delivering; re-enable it in the dashboard`,
     });
   }
 

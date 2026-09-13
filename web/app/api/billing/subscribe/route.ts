@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { createMembershipCheckout, DiscountKind } from "@/lib/billing";
+import { effectivePlan } from "@/lib/plan";
 import {
   checkInvite,
   consumeReward,
@@ -29,6 +30,19 @@ export async function POST(req: NextRequest) {
   }
   const plan = parsed.data.plan as PlanId;
   const interval = parsed.data.interval as BillingInterval;
+
+  // One subscription per member. The page hides the plan buttons while one
+  // is running, but the page is not the guard: a second checkout would open a
+  // second Stripe subscription, bill twice, and overwrite the first one here.
+  if (PLANS[effectivePlan(user)].monthlyUsd > 0 && user.stripe_subscription_id) {
+    return NextResponse.json(
+      {
+        error: "already_subscribed",
+        message: "You already have a plan. Change or cancel it from Manage subscription.",
+      },
+      { status: 409 }
+    );
+  }
 
   // An invite beats a referral reward: it is worth more, it was given for a
   // reason, and it cannot be saved for later.
