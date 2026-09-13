@@ -608,42 +608,80 @@ changed in code:
 Dashboard-side items are the owner's (Radar rules, statement descriptor,
 receipts/dunning emails, restricted key, tax) — listed in the artifact.
 
-## Liability limits and fraud response (2026-09-13)
+## Liability limits, refunds and the delivery record (2026-09-13)
 
 Why: a cardholder has up to 120 days (Visa and Mastercard alike; Amex and
 Discover similar) after a payment to dispute it, and by then the credits it
 bought are spent on renders the provider has already billed us for. So the
 most one account can cost us is what it paid in the last four months plus $15
-a dispute. Until the business has history, that number is capped and the
+a dispute. Until the business has history, that number is bounded and the
 fraud signals are acted on automatically:
 
-- **Top-up caps by account age** (`TOPUP_CAPS_BY_ACCOUNT_AGE` in config.ts):
-  under 7 days $50 per 30 days; under 30 days $150; under 90 days $400; then
-  $1000. The member is told the limit, what is left, and when it rises
-  (HTTP 429 `topup_limit`). Subscriptions are bounded by one-per-member.
+- **Daily top-up limit by account age** (`TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE`):
+  under 7 days $30/day; under 30 days $60; under 90 days $100; then $200.
+  Shown on the account page next to the buttons (limit, what is left today,
+  when it rises, "need more?" → support). A refused top-up is a 429
+  `topup_limit` with the same sentence. **Support can set a per-member limit**
+  from the admin "One member" desk (`limit#<userId>` in the system KV; 0
+  returns them to the age table) — assessed by hand, possibly against a
+  non-reversible payment for large amounts.
 - **3-D Secure requested on every hosted checkout for accounts under 30 days
   old** (`REQUEST_3DS_UNDER_DAYS`). An authenticated payment shifts fraud
-  chargeback liability to the issuer. One bank prompt on the first purchases;
-  older accounts are left to Radar.
+  chargeback liability to the issuer. One bank prompt on the first purchases.
 - **`radar.early_fraud_warning.created` → refund, freeze, cancel.** The card
   network's fraud report arrives before the dispute; refunding then means no
-  dispute is filed, no $15 fee, nothing on the dispute rate. The refund flows
-  through `charge.refunded` and claws the credits back; the account is frozen
-  and any subscription cancelled with its unspent allocation forfeited. New
-  webhook event — **sync both stages**.
-- **Any dispute freezes the account** (`frozen#<userId>` in the system KV).
-  Frozen = no generating, extending, topping up or subscribing (403
-  `under_review`); the account page shows why and where to write. Cleared
-  from the admin money desk ("Unfreeze"), which lists them.
+  dispute is filed. The refund flows through `charge.refunded` and claws the
+  credits back; the account is frozen and any subscription cancelled with its
+  unspent allocation forfeited.
+- **Any dispute freezes the account** (`frozen#<userId>`): no generating,
+  extending, topping up or subscribing (403 `under_review`); the account page
+  says why and where to write. Cleared from the admin money desk.
+
+**Refund policy (legal.ts, help.ts, account page all say the same thing):**
+unspent BOUGHT credits refund at 90% of their value (`REFUND_UNSPENT_SHARE`);
+spent credits are never refunded as money; plan credits never. The admin
+"Refund unspent (90%)" button (`lib/refunds.ts`) does the whole thing at
+once: computes the unspent bought credits, refunds 90% of their value to the
+top-up charges newest-first (partial refunds, each charge only up to what it
+has left), removes ALL those credits in one `refund-out` ledger row, and
+marks each charge `clawback-done#` so the webhook does not claw back the
+whole charge on top. **Do not refund top-ups from the Stripe dashboard for
+this case** — a full dashboard refund claws back the entire purchase, spent
+credits included, and pushes the member negative. The dashboard is for the
+"genuinely did not receive it" case, where a full refund is the intent.
+
+**The delivery record (evidence for refunds and disputes):** every job now
+carries `created_ip`, `created_ua` (from CloudFront's viewer address at
+order time), `viewed_at` (first time the member's own job page saw it
+ready), `download_count` and `last_download_at` (from `/api/jobs/:id/download`).
+`GET /api/admin/evidence?email=` returns the pack: account, summary (ready /
+failed / ready-but-never-opened / downloads / credits bought, spent,
+refunded, clawed back), every job with those timestamps, and the ledger.
+Deleting an account writes the same pack to `evidence#<email>` first, so a
+dispute months later still has an answer. Playback itself is not observable
+(the presigned URL goes straight to S3); "opened" + "downloaded" is the
+record. Clerk keeps the sign-in log (IP, device); Stripe keeps the checkout
+IP — together with this, that is the dispute response.
 
 Numbers worth knowing: Visa's dispute monitoring programme starts at 0.9% of
 transactions AND 100 disputes a month (Mastercard 1% / 100) — irrelevant at
 this scale, but Stripe watches sustained rates around 1% and can hold
 reserves. Industry digital-goods dispute rates run roughly 0.5–1%, most of
-it "friendly fraud" (the cardholder's own purchase, disputed anyway); the
-statement descriptor and receipts are the cheap defence against that.
-Merchants have 7–21 days to respond to a dispute depending on network; the
-issuer's decision takes 60–75 days.
+it "friendly fraud"; the statement descriptor and receipts are the cheap
+defence. Merchants have 7–21 days to respond to a dispute; the issuer's
+decision takes 60–75 days.
+
+**Tax (owner decision, not code):** Australian GST registration is required
+once turnover reaches A$75,000 in a rolling 12 months; below that, nothing to
+collect or file. Above it: register, charge 10% on sales to Australian
+customers (prices shown to Australian consumers must include it), lodge a
+quarterly BAS, remit to the ATO — Stripe Tax calculates and collects but does
+NOT file or remit. Exports (customers outside Australia) are GST-free. Other
+countries' digital-services VAT (EU, UK have no threshold for foreign
+sellers) is the usual small-SaaS blind spot; the pragmatic path is Stripe
+Tax's free threshold monitoring now, registration when a jurisdiction lights
+up, or a merchant-of-record later. `automatic_tax: { enabled: true }` on both
+Checkout sessions is the code change when the time comes.
 
 ## Housekeeping
 

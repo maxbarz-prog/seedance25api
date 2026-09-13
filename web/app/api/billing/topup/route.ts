@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { applyTopup, chargeSavedCard, createTopupCheckout } from "@/lib/billing";
-import { MIN_TOPUP_USD, TOPUP_CAPS_BY_ACCOUNT_AGE } from "@/lib/config";
+import { MIN_TOPUP_USD } from "@/lib/config";
 import { ledgerFor } from "@/lib/db";
-import { accountFrozen, FROZEN_RESPONSE } from "@/lib/money";
+import { accountFrozen, dailyTopupLimit, FROZEN_RESPONSE, topupsLast24hUsd } from "@/lib/money";
 import { canBuyCredits, isDeactivated } from "@/lib/plan";
 
 // How much may go on the saved card, silently, in a day. Above this the
@@ -60,40 +60,32 @@ export async function POST(req: NextRequest) {
   // a URL for someone to re-enter a card they have already given us is the
   // friction this removes; Stripe only needs to be involved again when the
   // card is gone or the bank wants the member present.
-  // How much this account may have paid us in the last 30 days, by its age.
-  // Money we have taken is money a chargeback can take back four months
-  // later, and a new account has shown nothing yet — so the ceiling starts
-  // low and rises with every week the account is real. See config.ts.
+  // The daily limit: from the account's age, or the one support set for it.
+  // Told plainly — the amount, what is left today, when it rises, and how to
+  // ask for more — because a real customer who hits it should know exactly
+  // what to do next, and a fraudster learns nothing they could not guess.
   const ledger = await ledgerFor(user.id, 200);
-  const ageDays = (Date.now() - user.created_at) / 86_400_000;
-  const cap = TOPUP_CAPS_BY_ACCOUNT_AGE.find((c) => ageDays < c.underDays)!;
-  const monthAgo = Date.now() - 30 * 86_400_000;
-  const monthUsd = ledger
-    .filter((e) => e.kind === "topup" && e.created_at > monthAgo)
-    .reduce((sum, e) => sum + e.delta_credits / 100, 0);
-  if (monthUsd + usd > cap.usdPer30Days) {
-    const room = Math.max(0, Math.floor(cap.usdPer30Days - monthUsd));
-    const next = TOPUP_CAPS_BY_ACCOUNT_AGE[TOPUP_CAPS_BY_ACCOUNT_AGE.indexOf(cap) + 1];
+  const limit = await dailyTopupLimit(user);
+  const todayUsd = topupsLast24hUsd(ledger);
+  if (todayUsd + usd > limit.usdPerDay) {
+    const room = Math.max(0, Math.floor(limit.usdPerDay - todayUsd));
     return NextResponse.json(
       {
         error: "topup_limit",
         message:
-          `Accounts ${cap.underDays === Infinity ? "" : `under ${cap.underDays} days old `}can add up to $${cap.usdPer30Days} of credits in any 30 days` +
-          (room > 0 ? ` — you have $${room} left.` : ".") +
-          (next && cap.underDays !== Infinity
-            ? ` The limit rises to $${next.usdPer30Days} once your account is ${cap.underDays} days old.`
-            : ""),
-        limitUsd: cap.usdPer30Days,
+          `Your daily limit is $${limit.usdPerDay}` +
+          (room > 0 ? ` and you have $${room} left today.` : " and you have used it for today.") +
+          (limit.source === "age" && limit.nextUsdPerDay
+            ? ` It rises to $${limit.nextUsdPerDay} in ${limit.risesInDays} day${limit.risesInDays === 1 ? "" : "s"}.`
+            : "") +
+          " To raise it, email support@remerged.ai.",
+        limitUsd: limit.usdPerDay,
         remainingUsd: room,
       },
       { status: 429 }
     );
   }
 
-  const dayAgo = Date.now() - 86_400_000;
-  const todayUsd = ledger
-    .filter((e) => e.kind === "topup" && e.created_at > dayAgo)
-    .reduce((sum, e) => sum + e.delta_credits / 100, 0);
   const charge =
     todayUsd + usd > SAVED_CARD_DAILY_USD
       ? ({ outcome: "needs_auth" } as const)

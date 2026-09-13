@@ -20,6 +20,7 @@ import {
 } from "@/lib/config";
 import { canBuyCredits, isDeactivated, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
+import { clientIp, userAgent } from "@/lib/request";
 import { accountFrozen, currentHalt, FROZEN_RESPONSE } from "@/lib/money";
 
 // Continue an existing (ready) clip by N more seconds. The result is a new
@@ -166,6 +167,8 @@ export async function POST(
     camera_fixed: source.camera_fixed ?? 0,
     size_bytes: null,
     error: null,
+    created_ip: clientIp(req),
+    created_ua: userAgent(req),
   });
   await advanceJob(job.id);
   return NextResponse.json({ id: job.id }, { status: 201 });

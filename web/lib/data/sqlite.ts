@@ -97,6 +97,11 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE jobs ADD COLUMN provider_submitted_at INTEGER`,
       `ALTER TABLE jobs ADD COLUMN provider_started_at INTEGER`,
       `ALTER TABLE jobs ADD COLUMN provider_done_at INTEGER`,
+      `ALTER TABLE jobs ADD COLUMN created_ip TEXT`,
+      `ALTER TABLE jobs ADD COLUMN created_ua TEXT`,
+      `ALTER TABLE jobs ADD COLUMN viewed_at INTEGER`,
+      `ALTER TABLE jobs ADD COLUMN download_count INTEGER`,
+      `ALTER TABLE jobs ADD COLUMN last_download_at INTEGER`,
       `ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT`,
       `ALTER TABLE users ADD COLUMN reset_token_hash TEXT`,
       `ALTER TABLE users ADD COLUMN reset_expires_at INTEGER`,
@@ -300,11 +305,22 @@ export class SqliteStore implements DataStore {
     this.db()
       .prepare(
         `INSERT INTO jobs (id, user_id, prompt, model, duration_s, aspect, audio, mode, upscale_factor, status,
-                           quote_credits, provider_task_id, video_url, image_keys, kind, source_job_id, seed, camera_fixed, size_bytes, error, created_at, updated_at)
+                           quote_credits, provider_task_id, video_url, image_keys, kind, source_job_id, seed, camera_fixed, size_bytes, error,
+                           created_ip, created_ua, created_at, updated_at)
          VALUES (@id, @user_id, @prompt, @model, @duration_s, @aspect, @audio, @mode, @upscale_factor, @status,
-                 @quote_credits, @provider_task_id, @video_url, @image_keys, @kind, @source_job_id, @seed, @camera_fixed, @size_bytes, @error, @created_at, @updated_at)`
+                 @quote_credits, @provider_task_id, @video_url, @image_keys, @kind, @source_job_id, @seed, @camera_fixed, @size_bytes, @error,
+                 @created_ip, @created_ua, @created_at, @updated_at)`
       )
-      .run({ image_keys: null, kind: "generate", source_job_id: null, seed: null, camera_fixed: null, ...job });
+      .run({
+        image_keys: null,
+        kind: "generate",
+        source_job_id: null,
+        seed: null,
+        camera_fixed: null,
+        created_ip: null,
+        created_ua: null,
+        ...job,
+      });
     return job;
   }
 

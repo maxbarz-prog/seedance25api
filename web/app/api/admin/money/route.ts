@@ -3,7 +3,15 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
 import { moneyIssues, userById } from "@/lib/db";
 import { refundCredits } from "@/lib/grants";
-import { clearHalt, currentHalt, frozenAccounts, halt, unfreezeAccount } from "@/lib/money";
+import {
+  clearHalt,
+  currentHalt,
+  frozenAccounts,
+  halt,
+  setDailyTopupLimit,
+  unfreezeAccount,
+} from "@/lib/money";
+import { refundUnspentCredits } from "@/lib/refunds";
 import { userByEmail } from "@/lib/db";
 
 // The money desk: what the halt switch says, what we owe back, and the two
@@ -38,6 +46,12 @@ const Body = z.discriminatedUnion("action", [
   // Let a frozen account spend and pay again — after the dispute is
   // resolved, or the fraud warning turned out to be the member's own card.
   z.object({ action: z.literal("unfreeze"), email: z.string().email() }),
+  // A support-assessed daily top-up limit for one member; 0 goes back to the
+  // age table.
+  z.object({ action: z.literal("set-limit"), email: z.string().email(), usdPerDay: z.number().min(0).max(10000) }),
+  // The standard refund: unspent bought credits at REFUND_UNSPENT_SHARE, to
+  // the cards they came from. Spent credits are never in it.
+  z.object({ action: z.literal("refund-unspent"), email: z.string().email() }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -62,6 +76,18 @@ export async function POST(req: NextRequest) {
     if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
     await unfreezeAccount(target.id);
     return NextResponse.json({ ok: true });
+  }
+  if (b.action === "set-limit") {
+    const target = await userByEmail(b.email);
+    if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
+    await setDailyTopupLimit(target.id, b.usdPerDay || null);
+    return NextResponse.json({ ok: true });
+  }
+  if (b.action === "refund-unspent") {
+    const target = await userByEmail(b.email);
+    if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
+    const r = await refundUnspentCredits(target, admin.email);
+    return NextResponse.json({ ok: true, ...r });
   }
 
   // Re-read rather than trusting anything the client sent: the amount owed is

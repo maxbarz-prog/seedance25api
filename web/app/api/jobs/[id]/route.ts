@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
 import { advanceJob } from "@/lib/pipeline";
-import { deleteJob, jobById } from "@/lib/db";
+import { deleteJob, jobById, updateJob } from "@/lib/db";
 import { deleteObject } from "@/lib/storage";
 import { presentJob } from "@/lib/present";
 
@@ -15,6 +15,12 @@ export async function GET(
   const job = await advanceJob(id);
   if (!job || job.user_id !== user.id) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
+  }
+  // The first time the member's own page sees the finished video. One write,
+  // ever, per job: the delivery record's "it reached them".
+  if (job.status === "ready" && !job.viewed_at) {
+    job.viewed_at = Date.now();
+    await updateJob(id, { viewed_at: job.viewed_at }).catch(() => {});
   }
   return NextResponse.json({ job: await presentJob(job) });
 }

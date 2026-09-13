@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "@/lib/auth";
-import { jobById } from "@/lib/db";
+import { jobById, updateJob } from "@/lib/db";
 import { readUrl } from "@/lib/storage";
 
 // Download a finished video.
@@ -32,6 +32,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
       .slice(0, 60) || "video";
   const url = await readUrl(job.video_url, { filename: `remerged-${slug}.mp4` });
   if (!url) return NextResponse.json({ error: "Not found." }, { status: 404 });
+
+  // Part of the delivery record: a download is the strongest evidence there
+  // is that the video reached the member. Best effort — a failed count must
+  // never fail the download.
+  await updateJob(id, {
+    download_count: (job.download_count ?? 0) + 1,
+    last_download_at: Date.now(),
+  }).catch(() => {});
 
   const res = NextResponse.redirect(url);
   // The presign is short-lived and per-member; nothing about it may be cached

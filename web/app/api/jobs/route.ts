@@ -28,6 +28,7 @@ import { canBuyCredits, canUpscale, isDeactivated, storageQuotaBytes } from "@/l
 import { advanceJob } from "@/lib/pipeline";
 import { accountFrozen, currentHalt, FROZEN_RESPONSE } from "@/lib/money";
 import { presentJob } from "@/lib/present";
+import { clientIp, userAgent } from "@/lib/request";
 
 const Body = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_CHARS),
@@ -268,6 +269,9 @@ export async function POST(req: NextRequest) {
       camera_fixed: b.cameraFixed ? 1 : 0,
       size_bytes: null,
       error: null,
+      // The delivery record starts here: where the order came from.
+      created_ip: clientIp(req),
+      created_ua: userAgent(req),
     });
     ids.push(job.id);
   }

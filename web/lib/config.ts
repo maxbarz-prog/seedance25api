@@ -44,16 +44,23 @@ export const TOPUP_PRESETS_USD = [10, 20, 50];
 // both), and by then the credits it bought have been spent on renders we have
 // already paid the provider for. So the money we can lose on one account is
 // roughly what that account has paid us in the last four months, plus $15 a
-// dispute. These caps bound that number for accounts that have not yet shown
-// they are real, and loosen as they do. A member who hits one is not refused
-// — they are told the limit and when it rises. Subscriptions are bounded by
-// their own rule (one per member), so the caps apply to top-ups.
-export const TOPUP_CAPS_BY_ACCOUNT_AGE: { underDays: number; usdPer30Days: number }[] = [
-  { underDays: 7, usdPer30Days: 50 },
-  { underDays: 30, usdPer30Days: 150 },
-  { underDays: 90, usdPer30Days: 400 },
-  { underDays: Infinity, usdPer30Days: 1000 },
+// dispute. A DAILY limit on top-ups bounds how fast that number can grow for
+// an account that has not yet shown it is real, and loosens as it does. A
+// member who wants more writes to support and is assessed by hand — the
+// limit is then set per account (admin money desk), which overrides the age
+// table. Subscriptions are bounded by their own rule (one per member).
+export const TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE: { underDays: number; usdPerDay: number }[] = [
+  { underDays: 7, usdPerDay: 30 },
+  { underDays: 30, usdPerDay: 60 },
+  { underDays: 90, usdPerDay: 100 },
+  { underDays: Infinity, usdPerDay: 200 },
 ];
+// What comes back on a refund of UNSPENT bought credits, as a share of their
+// value. The rest covers the card fees paid both ways and the handling. Spent
+// credits are never refunded as money: the provider was paid for those
+// renders the moment they were made. A member who did not receive what they
+// paid for is a support case, not a formula.
+export const REFUND_UNSPENT_SHARE = 0.9;
 // Ask the bank to authenticate the cardholder (3-D Secure) on every hosted
 // checkout for accounts younger than this. An authenticated payment shifts
 // fraud-chargeback liability to the card issuer; the cost is one bank prompt

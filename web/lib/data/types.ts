@@ -86,6 +86,15 @@ export interface Job {
   provider_submitted_at?: number | null;
   provider_started_at?: number | null;
   provider_done_at?: number | null;
+  // The delivery record, for when a member says they never got what they
+  // paid for. Where the request came from when the job was made; when the
+  // finished video was first opened; how often and when it was downloaded.
+  // Written once per event, read only from the admin evidence endpoint.
+  created_ip?: string | null;
+  created_ua?: string | null;
+  viewed_at?: number | null;
+  download_count?: number | null;
+  last_download_at?: number | null;
   created_at: number;
   updated_at: number;
 }

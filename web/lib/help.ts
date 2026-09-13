@@ -415,7 +415,7 @@ export const HELP: HelpCategory[] = [
             "PLAN FEES are not refunded. What you get instead is the period you already paid for: cancel your plan or deactivate your account and your access runs to the end of the current billing period before the account moves to Free. Partial periods are not prorated. The exception is a charge made in error — tell us within 14 days and we will refund it in full."
           ),
           p(
-            "CREDITS YOU BOUGHT can be refunded to the original card, minus the costs already incurred on them. Two things come off: credits you have already spent, because we paid a provider to render those videos at the moment you made them, and the card processing fee on the original purchase, which our payment processor keeps even when the payment is refunded. So you get back the value of your unused bought credits, less that fee."
+            "CREDITS YOU BOUGHT and have not spent can be refunded to the original card at 90% of their value; the rest covers the card fees charged on the purchase and again on the refund. Credits you have already spent are not refunded as money, because we paid a provider to render those videos at the moment you made them. If a video you paid for never reached you, that is different: tell us which one and we will check our delivery record and put it right in full."
           ),
           note(
             "Credits that came with your plan are not refundable at all, in any amount. They were granted rather than bought, so there is no payment behind them to return. Your account page shows which half of your balance is which."

@@ -1,5 +1,12 @@
-import { CREDIT_USD, MODELS, ModelId, modeInfo, QUALITIES } from "./config";
-import { getSystem, listSystem, setSystem, Job } from "./db";
+import {
+  CREDIT_USD,
+  MODELS,
+  ModelId,
+  modeInfo,
+  QUALITIES,
+  TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE,
+} from "./config";
+import { getSystem, listSystem, setSystem, Job, LedgerEntry, User } from "./db";
 import { rates } from "./pricing";
 
 // Money safety. Two jobs:
@@ -109,6 +116,52 @@ export async function frozenAccounts(): Promise<{ userId: string; freeze: Freeze
     } catch {}
     return { userId: r.key.slice(FREEZE_PREFIX.length), freeze };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Daily top-up limits
+// ---------------------------------------------------------------------------
+//
+// From the age table in config, unless support has set one for this account
+// (`limit#<userId>`), which wins. Support raises a limit after looking at the
+// member — that is the whole review, so the code does not second-guess it.
+
+const LIMIT_PREFIX = "limit#";
+
+export interface DailyLimit {
+  usdPerDay: number;
+  source: "age" | "support";
+  // Age-based only: when the next step up arrives, in days from now.
+  risesInDays?: number;
+  nextUsdPerDay?: number;
+}
+
+export async function dailyTopupLimit(user: Pick<User, "id" | "created_at">): Promise<DailyLimit> {
+  const raw = await getSystem(LIMIT_PREFIX + user.id);
+  const custom = raw ? Number(raw) : NaN;
+  if (Number.isFinite(custom) && custom > 0) return { usdPerDay: custom, source: "support" };
+  const ageDays = (Date.now() - user.created_at) / 86_400_000;
+  const i = TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE.findIndex((t) => ageDays < t.underDays);
+  const tier = TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE[i];
+  const next = TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE[i + 1];
+  return {
+    usdPerDay: tier.usdPerDay,
+    source: "age",
+    ...(next ? { risesInDays: Math.max(1, Math.ceil(tier.underDays - ageDays)), nextUsdPerDay: next.usdPerDay } : {}),
+  };
+}
+
+export async function setDailyTopupLimit(userId: string, usdPerDay: number | null): Promise<void> {
+  await setSystem(LIMIT_PREFIX + userId, usdPerDay && usdPerDay > 0 ? String(usdPerDay) : null);
+}
+
+// What has been bought in the last 24 hours, from the ledger — the ledger is
+// the counter, so there is no second tally to drift.
+export function topupsLast24hUsd(ledger: LedgerEntry[], now = Date.now()): number {
+  const dayAgo = now - 86_400_000;
+  return ledger
+    .filter((e) => e.kind === "topup" && e.created_at > dayAgo)
+    .reduce((sum, e) => sum + e.delta_credits / 100, 0);
 }
 
 // The response every money-moving route gives a frozen account. One place,

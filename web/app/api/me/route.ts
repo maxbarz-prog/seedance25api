@@ -3,7 +3,7 @@ import { clerkEnabled, currentUser } from "@/lib/auth";
 import { balance, ledgerFor, storageUsedBytes } from "@/lib/db";
 import { PLANS } from "@/lib/config";
 import { creditRefund } from "@/lib/economics";
-import { accountFrozen } from "@/lib/money";
+import { accountFrozen, dailyTopupLimit, topupsLast24hUsd } from "@/lib/money";
 import {
   canBuyCredits,
   canUpscale,
@@ -21,11 +21,12 @@ export async function GET() {
   // free, so every allowance below comes from one decision.
   const planId = effectivePlan(user);
   const plan = PLANS[planId];
-  const [bal, used, ledger, frozen] = await Promise.all([
+  const [bal, used, ledger, frozen, limit] = await Promise.all([
     balance(user.id),
     storageUsedBytes(user.id),
-    ledgerFor(user.id, 25),
+    ledgerFor(user.id, 200),
     accountFrozen(user.id),
+    dailyTopupLimit(user),
   ]);
   return NextResponse.json({
     auth: clerkEnabled() ? "clerk" : "builtin",
@@ -59,7 +60,13 @@ export async function GET() {
       // admin clears it. Shown so the member hears it from us, not from a
       // refused button.
       frozen: !!frozen,
-      ledger,
+      // The daily top-up limit and what is left of it, so the account page can
+      // say so next to the buttons instead of after a refused click.
+      topupLimitUsd: limit.usdPerDay,
+      topupRemainingTodayUsd: Math.max(0, Math.floor(limit.usdPerDay - topupsLast24hUsd(ledger))),
+      topupLimitRisesInDays: limit.risesInDays ?? null,
+      topupNextLimitUsd: limit.nextUsdPerDay ?? null,
+      ledger: ledger.slice(0, 25),
     },
   });
 }

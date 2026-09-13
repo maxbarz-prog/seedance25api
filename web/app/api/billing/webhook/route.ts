@@ -11,7 +11,7 @@ import {
   stripeEnabled,
   syncSubscription,
 } from "@/lib/billing";
-import { setStripeIds, User, userById, userByStripeCustomer } from "@/lib/db";
+import { getSystem, setStripeIds, User, userById, userByStripeCustomer } from "@/lib/db";
 import { forfeitGrantedCredits, grantPeriodCredits } from "@/lib/grants";
 import { freezeAccount } from "@/lib/money";
 import { effectivePlan } from "@/lib/plan";
@@ -198,6 +198,11 @@ export async function POST(req: NextRequest) {
         // dashboard does not put a member into the red. Partial ones are
         // logged for a human to settle by hand.
         const whole = disputed || charge.amount_refunded >= charge.amount;
+        // A refund made from the admin desk has already taken the credits out
+        // — exactly the unspent ones, at the policy's share. Taking the whole
+        // charge again here would refund spent credits too.
+        const handled = !disputed && !!(await getSystem(`clawback-done#${charge.id}`));
+        if (handled) break;
         if (userId && whole && (await userById(userId))) {
           await clawbackTopup(userId, charge.amount / 100, charge.id);
         } else if (userId) {

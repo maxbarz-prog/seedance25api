@@ -143,6 +143,8 @@ export default function AdminPage() {
   const [denied, setDenied] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [grant, setGrant] = useState({ email: "", usd: "", memo: "" });
+  const [memberEmail, setMemberEmail] = useState("");
+  const [memberLimit, setMemberLimit] = useState("");
   const [money, setMoney] = useState<Money | null>(null);
   const [moneyBusy, setMoneyBusy] = useState(false);
 
@@ -165,9 +167,12 @@ export default function AdminPage() {
       const d = await res.json();
       setMsg(
         res.ok
-          ? d.refunded !== undefined
-            ? `Refunded ${d.refunded} job(s), ${usd(d.credits)}.`
-            : "Done."
+          ? d.refunds !== undefined
+            ? `Refunded $${Number(d.usd).toFixed(2)} for ${Number(d.credits).toLocaleString()} credits across ${d.refunds.length} charge(s)` +
+              (d.unplacedUsd > 0 ? ` — $${Number(d.unplacedUsd).toFixed(2)} could not be placed on a charge; settle by hand.` : ".")
+            : d.refunded !== undefined
+              ? `Refunded ${d.refunded} job(s), ${usd(d.credits)}.`
+              : "Done."
           : d.error || "Failed."
       );
       loadMoney();
@@ -634,6 +639,73 @@ export default function AdminPage() {
       </section>
 
       <InviteMinter />
+
+      <section className="rounded-2xl border border-line bg-surface p-5">
+        <h2 className="font-medium">One member</h2>
+        <p className="mt-1 text-sm text-muted">
+          The support desk: what we know about them, their daily limit, and the standard
+          refund. Spent credits are never refunded from here — that is a dashboard decision
+          for a member who genuinely did not receive what they paid for.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+          <input
+            type="email"
+            placeholder="user email"
+            value={memberEmail}
+            onChange={(e) => setMemberEmail(e.target.value)}
+            className="w-56 rounded-lg border border-line bg-bg px-3 py-2"
+          />
+          <a
+            href={memberEmail ? `/api/admin/evidence?email=${encodeURIComponent(memberEmail)}` : undefined}
+            target="_blank"
+            rel="noreferrer"
+            aria-disabled={!memberEmail}
+            className="rounded-lg border border-line px-4 py-2 hover:border-accent aria-disabled:opacity-50"
+          >
+            Evidence pack
+          </a>
+          <label className="flex items-center gap-2">
+            <span className="text-muted">Daily limit $</span>
+            <input
+              type="number"
+              min={0}
+              step={10}
+              placeholder="0 = by age"
+              value={memberLimit}
+              onChange={(e) => setMemberLimit(e.target.value)}
+              className="w-28 rounded-lg border border-line bg-bg px-3 py-2 tabular-nums"
+            />
+          </label>
+          <button
+            onClick={() =>
+              memberEmail &&
+              moneyAction(
+                { action: "set-limit", email: memberEmail, usdPerDay: Number(memberLimit) || 0 },
+                Number(memberLimit) > 0
+                  ? `Set ${memberEmail}'s daily top-up limit to $${Number(memberLimit)}?`
+                  : `Return ${memberEmail} to the age-based limits?`
+              )
+            }
+            disabled={moneyBusy || !memberEmail}
+            className="rounded-lg border border-line px-4 py-2 hover:border-accent disabled:opacity-50"
+          >
+            Set limit
+          </button>
+          <button
+            onClick={() =>
+              memberEmail &&
+              moneyAction(
+                { action: "refund-unspent", email: memberEmail },
+                `Refund ${memberEmail}'s unspent bought credits at 90% to their card(s), and remove those credits?`
+              )
+            }
+            disabled={moneyBusy || !memberEmail}
+            className="rounded-lg bg-accent px-4 py-2 font-medium text-accent-ink disabled:opacity-50"
+          >
+            Refund unspent (90%)
+          </button>
+        </div>
+      </section>
 
       <section className="rounded-2xl border border-line bg-surface p-5">
         <h2 className="font-medium">Adjust credits</h2>

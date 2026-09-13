@@ -5,6 +5,7 @@ import {
   PlanId,
   planPriceUsd,
   CREDIT_USD,
+  REFUND_UNSPENT_SHARE,
 } from "./config";
 import { pricingConstants, PricingConstants } from "./pricing";
 
@@ -110,25 +111,18 @@ export interface CreditRefund {
   // Bought credits still held — the only ones with money behind them.
   refundableCredits: number;
   grossUsd: number;
-  // The card fee already paid on that amount, which a refund does not recover.
-  processingUsd: number;
+  // What is kept: card fees paid on the way in and again on the way out, and
+  // the handling. A fixed share (REFUND_UNSPENT_SHARE) rather than the exact
+  // fee, so the policy page can state one number.
+  keptUsd: number;
   netUsd: number;
 }
 
-export function creditRefund(
-  balanceCredits: number,
-  grantedCredits: number,
-  c: PricingConstants = pricingConstants()
-): CreditRefund {
+export function creditRefund(balanceCredits: number, grantedCredits: number): CreditRefund {
   // Spending takes plan credits first, so whatever is left above the granted
   // portion is what was bought and never used.
   const refundableCredits = Math.max(0, balanceCredits - Math.max(0, grantedCredits));
   const grossUsd = refundableCredits * CREDIT_USD;
-  const processingUsd = grossUsd * c.processingPct;
-  return {
-    refundableCredits,
-    grossUsd,
-    processingUsd,
-    netUsd: Math.max(0, grossUsd - processingUsd),
-  };
+  const netUsd = Math.floor(grossUsd * REFUND_UNSPENT_SHARE * 100) / 100;
+  return { refundableCredits, grossUsd, keptUsd: Math.round((grossUsd - netUsd) * 100) / 100, netUsd };
 }

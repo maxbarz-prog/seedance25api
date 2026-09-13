@@ -10,6 +10,8 @@ import {
 } from "@/lib/db";
 import { cancelSubscription, stripeEnabled, stripeClient } from "@/lib/billing";
 import { deleteObject } from "@/lib/storage";
+import { ledgerFor, setSystem } from "@/lib/db";
+import { evidencePack } from "@/app/api/admin/evidence/route";
 import { effectivePlan } from "@/lib/plan";
 import { PLANS } from "@/lib/config";
 
@@ -110,6 +112,14 @@ export async function POST(req: NextRequest) {
   }
 
   const remaining = await balance(user.id);
+  // A chargeback can follow a deletion by months. Keep what would answer it —
+  // the delivery record and the ledger, no videos — under the email, since
+  // that is all a dispute will name. Nothing personal beyond what the dispute
+  // itself carries.
+  await setSystem(
+    `evidence#${user.email.toLowerCase()}`,
+    JSON.stringify({ deletedAt: Date.now(), ...evidencePack(user, jobs, await ledgerFor(user.id, 1000), null) })
+  ).catch((e) => console.error("evidence snapshot failed:", e));
   await deleteUser(user.id);
   const s = await session();
   s.destroy();

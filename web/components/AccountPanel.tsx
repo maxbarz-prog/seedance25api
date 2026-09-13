@@ -43,6 +43,10 @@ interface Me {
   deactivated: boolean;
   deactivatedAt: number | null;
   frozen: boolean;
+  topupLimitUsd: number;
+  topupRemainingTodayUsd: number;
+  topupLimitRisesInDays: number | null;
+  topupNextLimitUsd: number | null;
   ledger: LedgerEntry[];
 }
 
@@ -420,13 +424,28 @@ export default function AccountPanel() {
             <button
               key={usd}
               onClick={() => topup(usd)}
-              disabled={busy !== null}
+              disabled={busy !== null || usd > me.topupRemainingTodayUsd}
               className="rounded-xl border border-line px-5 py-2 text-sm hover:border-accent disabled:opacity-50"
             >
               +${usd}
             </button>
           ))}
         </div>
+        {me.canBuyCredits && (
+          // The daily limit, stated before it is hit. New accounts start low
+          // and rise with age; anyone who needs more asks, and is looked at.
+          <p className="mt-2 text-xs text-muted">
+            Daily limit ${me.topupLimitUsd}
+            {me.topupRemainingTodayUsd < me.topupLimitUsd &&
+              ` · $${me.topupRemainingTodayUsd} left today`}
+            {me.topupNextLimitUsd &&
+              ` · rises to $${me.topupNextLimitUsd} in ${me.topupLimitRisesInDays} day${me.topupLimitRisesInDays === 1 ? "" : "s"}`}
+            {" · "}
+            <a className="underline hover:text-ink" href="mailto:support@remerged.ai?subject=Raise%20my%20daily%20limit">
+              need more?
+            </a>
+          </p>
+        )}
         {!me.canBuyCredits && (
           <p className="mt-2 text-xs text-muted">
             Top-ups need{" "}
@@ -621,7 +640,7 @@ export default function AccountPanel() {
                         <span className="font-medium">
                           ${me.creditRefundUsd.toFixed(2)}
                         </span>{" "}
-                        after card fees — ask for that{" "}
+                        (90% of their value) — ask for that{" "}
                         <Link href="/help/plans-billing-credits/refunds" className="underline">
                           before deleting
                         </Link>
