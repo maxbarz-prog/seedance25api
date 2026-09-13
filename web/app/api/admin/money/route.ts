@@ -3,7 +3,8 @@ import { z } from "zod";
 import { requireAdmin } from "@/lib/auth";
 import { moneyIssues, userById } from "@/lib/db";
 import { refundCredits } from "@/lib/grants";
-import { clearHalt, currentHalt, halt } from "@/lib/money";
+import { clearHalt, currentHalt, frozenAccounts, halt, unfreezeAccount } from "@/lib/money";
+import { userByEmail } from "@/lib/db";
 
 // The money desk: what the halt switch says, what we owe back, and the two
 // actions that change either. Admin only.
@@ -11,17 +12,19 @@ import { clearHalt, currentHalt, halt } from "@/lib/money";
 export async function GET() {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  const [stop, issues] = await Promise.all([currentHalt(), moneyIssues()]);
+  const [stop, issues, frozen] = await Promise.all([currentHalt(), moneyIssues(), frozenAccounts()]);
   const emails = new Map<string, string>();
-  for (const i of issues) {
-    if (emails.has(i.userId)) continue;
-    const u = await userById(i.userId);
-    emails.set(i.userId, u?.email ?? i.userId);
+  for (const id of [...issues.map((i) => i.userId), ...frozen.map((f) => f.userId)]) {
+    if (emails.has(id)) continue;
+    const u = await userById(id);
+    emails.set(id, u?.email ?? id);
   }
   return NextResponse.json({
     halt: stop,
     issues: issues.map((i) => ({ ...i, email: emails.get(i.userId) })),
     owedCredits: issues.reduce((a, i) => a + i.credits, 0),
+    // Accounts stopped by a dispute or a fraud warning, waiting for a human.
+    frozen: frozen.map((f) => ({ ...f, email: emails.get(f.userId) })),
   });
 }
 
@@ -32,6 +35,9 @@ const Body = z.discriminatedUnion("action", [
   // the job id as its external id, so a second click writes nothing.
   z.object({ action: z.literal("refund-all") }),
   z.object({ action: z.literal("refund"), jobId: z.string().min(1) }),
+  // Let a frozen account spend and pay again — after the dispute is
+  // resolved, or the fraud warning turned out to be the member's own card.
+  z.object({ action: z.literal("unfreeze"), email: z.string().email() }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -49,6 +55,12 @@ export async function POST(req: NextRequest) {
   }
   if (b.action === "resume") {
     await clearHalt();
+    return NextResponse.json({ ok: true });
+  }
+  if (b.action === "unfreeze") {
+    const target = await userByEmail(b.email);
+    if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
+    await unfreezeAccount(target.id);
     return NextResponse.json({ ok: true });
   }
 

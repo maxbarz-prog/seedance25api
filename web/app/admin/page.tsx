@@ -133,6 +133,7 @@ interface Money {
   halt: { reason: string; detail: string; at: number; jobId?: string; by?: string } | null;
   issues: MoneyIssue[];
   owedCredits: number;
+  frozen: { userId: string; email?: string; freeze: { reason: string; detail?: string; at: number } }[];
 }
 
 export default function AdminPage() {
@@ -358,6 +359,63 @@ export default function AdminPage() {
             </table>
           </div>
         )}
+
+        {/* Accounts stopped by a dispute or a card-network fraud warning. They
+            stay stopped until someone here decides otherwise: the freeze is
+            the evidence-preserving state, and the member has been told to
+            write in. */}
+        <div className="mt-5 border-t border-line pt-4">
+          <p className="text-sm text-muted">
+            {money === null
+              ? ""
+              : money.frozen.length === 0
+                ? "Frozen accounts: none."
+                : `${money.frozen.length} account(s) frozen after a dispute or fraud warning.`}
+          </p>
+          {!!money?.frozen.length && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-line text-left text-muted">
+                    <th className="py-2 font-normal">Member</th>
+                    <th className="py-2 font-normal">Why</th>
+                    <th className="py-2 font-normal">Since</th>
+                    <th className="py-2 font-normal"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {money.frozen.map((f) => (
+                    <tr key={f.userId} className="border-b border-line last:border-0">
+                      <td className="py-2">{f.email ?? f.userId}</td>
+                      <td className="py-2 text-muted">
+                        {f.freeze.reason}
+                        {f.freeze.detail ? ` — ${f.freeze.detail}` : ""}
+                      </td>
+                      <td className="py-2 tabular-nums text-muted">
+                        {f.freeze.at ? new Date(f.freeze.at).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="py-2 text-right">
+                        <button
+                          onClick={() =>
+                            f.email &&
+                            moneyAction(
+                              { action: "unfreeze", email: f.email },
+                              `Let ${f.email} generate and pay again?`
+                            )
+                          }
+                          disabled={moneyBusy || !f.email}
+                          className="rounded-full border border-line px-3 py-1 text-xs hover:border-accent disabled:opacity-50"
+                        >
+                          Unfreeze
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </section>
 
       <section className="rounded-2xl border border-line bg-surface p-5">

@@ -6,12 +6,14 @@ import {
   applyTopup,
   attachDiscount,
   clawbackTopup,
+  refundCharge,
   stripeClient,
   stripeEnabled,
   syncSubscription,
 } from "@/lib/billing";
-import { setStripeIds, userById, userByStripeCustomer } from "@/lib/db";
+import { setStripeIds, User, userById, userByStripeCustomer } from "@/lib/db";
 import { forfeitGrantedCredits, grantPeriodCredits } from "@/lib/grants";
+import { freezeAccount } from "@/lib/money";
 import { effectivePlan } from "@/lib/plan";
 import {
   consumeReward,
@@ -182,6 +184,13 @@ export async function POST(req: NextRequest) {
       }
       if (!charge) break;
       const disputed = event.type === "charge.dispute.created";
+      const member = await memberForCharge(charge);
+
+      // Any dispute freezes the account: whatever the bank decides, this
+      // member does not spend more of our money until a human has looked.
+      if (disputed && member) {
+        await freezeAccount(member.id, "disputed", `charge ${charge.id}, $${(charge.amount / 100).toFixed(2)}`);
+      }
 
       if (charge.metadata?.kind === "topup") {
         const userId = charge.metadata.userId;
@@ -199,10 +208,6 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      const chargeCustomer =
-        typeof charge.customer === "string" ? charge.customer : charge.customer?.id ?? null;
-      if (!chargeCustomer) break;
-      const member = await userByStripeCustomer(chargeCustomer);
       if (!member) break;
       // Which invoice this paid for says whether it is the one a referral
       // vested on. A charge no longer names its invoice directly; the invoice
@@ -234,9 +239,42 @@ export async function POST(req: NextRequest) {
       }
       break;
     }
+    // The card network has told Stripe the cardholder reported this charge
+    // as fraud — this arrives before the dispute does, sometimes weeks
+    // before. Refunding now means the dispute is never filed: no $15 fee,
+    // nothing against our dispute rate, and the refund itself flows through
+    // charge.refunded above to take the credits back. The account is frozen
+    // and any subscription ended, because a stolen card is not a customer.
+    case "radar.early_fraud_warning.created": {
+      const efw = event.data.object as Stripe.Radar.EarlyFraudWarning;
+      if (!efw.actionable) break;
+      const chargeId = typeof efw.charge === "string" ? efw.charge : efw.charge.id;
+      const charge = await stripeClient().charges.retrieve(chargeId);
+      const member = await memberForCharge(charge);
+      await refundCharge(chargeId, `efw-${efw.id}`);
+      if (member) {
+        await freezeAccount(member.id, "fraud warning", `charge ${chargeId}, ${efw.fraud_type}`);
+        if (member.stripe_subscription_id) {
+          await stripeClient()
+            .subscriptions.cancel(member.stripe_subscription_id)
+            .catch((e) => console.error(`cancel after fraud warning failed for ${member.id}:`, e));
+          await forfeitGrantedCredits(member.id, "Membership payment reported as fraud");
+        }
+      }
+      break;
+    }
     default:
       break;
   }
 
   return NextResponse.json({ received: true });
+}
+
+// Whose charge this is: the metadata we set says so for top-ups; the customer
+// id does for everything else.
+async function memberForCharge(charge: Stripe.Charge): Promise<User | undefined> {
+  const byMeta = charge.metadata?.userId ? await userById(charge.metadata.userId) : undefined;
+  if (byMeta) return byMeta;
+  const customer = typeof charge.customer === "string" ? charge.customer : charge.customer?.id;
+  return customer ? userByStripeCustomer(customer) : undefined;
 }

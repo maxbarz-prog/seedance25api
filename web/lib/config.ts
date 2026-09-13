@@ -38,6 +38,28 @@ export const INVITE_EXPIRY_DAYS = 30;
 export const MIN_TOPUP_USD = 10;
 export const TOPUP_PRESETS_USD = [10, 20, 50];
 
+// Liability limits, for while the business is new.
+//
+// A chargeback can arrive up to 120 days after a payment (Visa and Mastercard
+// both), and by then the credits it bought have been spent on renders we have
+// already paid the provider for. So the money we can lose on one account is
+// roughly what that account has paid us in the last four months, plus $15 a
+// dispute. These caps bound that number for accounts that have not yet shown
+// they are real, and loosen as they do. A member who hits one is not refused
+// — they are told the limit and when it rises. Subscriptions are bounded by
+// their own rule (one per member), so the caps apply to top-ups.
+export const TOPUP_CAPS_BY_ACCOUNT_AGE: { underDays: number; usdPer30Days: number }[] = [
+  { underDays: 7, usdPer30Days: 50 },
+  { underDays: 30, usdPer30Days: 150 },
+  { underDays: 90, usdPer30Days: 400 },
+  { underDays: Infinity, usdPer30Days: 1000 },
+];
+// Ask the bank to authenticate the cardholder (3-D Secure) on every hosted
+// checkout for accounts younger than this. An authenticated payment shifts
+// fraud-chargeback liability to the card issuer; the cost is one bank prompt
+// on the first purchases, which is where the fraud risk lives anyway.
+export const REQUEST_3DS_UNDER_DAYS = 30;
+
 // Membership tiers. Credit allocations match Runway's wherever the margin
 // allows it, so a member can compare like for like — the difference is that
 // generation here is billed at cost, so the same credits go several times

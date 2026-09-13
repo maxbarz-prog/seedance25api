@@ -20,7 +20,7 @@ import {
 } from "@/lib/config";
 import { canBuyCredits, isDeactivated, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
-import { currentHalt } from "@/lib/money";
+import { accountFrozen, currentHalt, FROZEN_RESPONSE } from "@/lib/money";
 
 // Continue an existing (ready) clip by N more seconds. The result is a new
 // job that carries the source clip forward; the source is untouched.
@@ -69,6 +69,10 @@ export async function POST(
       { status: 503 }
     );
   }
+  // A disputed or fraud-flagged payment freezes the account until a human
+  // has looked: no more renders on money that may be taken back.
+  if (await accountFrozen(user.id)) return NextResponse.json(FROZEN_RESPONSE, { status: 403 });
+
 
   const parsed = Body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {

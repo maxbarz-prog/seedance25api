@@ -4,6 +4,7 @@ import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { createMembershipCheckout, DiscountKind } from "@/lib/billing";
 import { effectivePlan } from "@/lib/plan";
+import { accountFrozen, FROZEN_RESPONSE } from "@/lib/money";
 import {
   checkInvite,
   consumeReward,
@@ -30,6 +31,7 @@ export async function POST(req: NextRequest) {
   }
   const plan = parsed.data.plan as PlanId;
   const interval = parsed.data.interval as BillingInterval;
+  if (await accountFrozen(user.id)) return NextResponse.json(FROZEN_RESPONSE, { status: 403 });
 
   // One subscription per member. The page hides the plan buttons while one
   // is running, but the page is not the guard: a second checkout would open a

@@ -26,7 +26,7 @@ import {
 } from "@/lib/config";
 import { canBuyCredits, canUpscale, isDeactivated, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
-import { currentHalt } from "@/lib/money";
+import { accountFrozen, currentHalt, FROZEN_RESPONSE } from "@/lib/money";
 import { presentJob } from "@/lib/present";
 
 const Body = z.object({
@@ -97,6 +97,10 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid generation settings." }, { status: 400 });
   }
+  // A disputed or fraud-flagged payment freezes the account until a human
+  // has looked: no more renders on money that may be taken back.
+  if (await accountFrozen(user.id)) return NextResponse.json(FROZEN_RESPONSE, { status: 403 });
+
   const b = parsed.data;
   const model = b.model as keyof typeof MODELS;
   if (b.durationS > MODELS[model].maxDurationS) {

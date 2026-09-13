@@ -1,5 +1,5 @@
 import { CREDIT_USD, MODELS, ModelId, modeInfo, QUALITIES } from "./config";
-import { getSystem, setSystem, Job } from "./db";
+import { getSystem, listSystem, setSystem, Job } from "./db";
 import { rates } from "./pricing";
 
 // Money safety. Two jobs:
@@ -62,6 +62,62 @@ export async function clearHalt(): Promise<void> {
   await setSystem(HALT_KEY, null);
   cached = { at: Date.now(), value: null };
 }
+
+// ---------------------------------------------------------------------------
+// Frozen accounts
+// ---------------------------------------------------------------------------
+//
+// An account whose payment has been disputed, or flagged by the card network
+// as fraud, stops spending and stops paying until a human has looked. Not
+// deactivation — the member could undo that themselves — and not deletion:
+// the record is the evidence if the dispute is fought. Cleared from the
+// admin money desk.
+
+export interface Freeze {
+  reason: string;
+  at: number;
+  detail?: string;
+}
+
+const FREEZE_PREFIX = "frozen#";
+
+export async function accountFrozen(userId: string): Promise<Freeze | null> {
+  const raw = await getSystem(FREEZE_PREFIX + userId);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as Freeze;
+  } catch {
+    return { reason: "unknown", at: 0 };
+  }
+}
+
+export async function freezeAccount(userId: string, reason: string, detail?: string): Promise<void> {
+  await setSystem(FREEZE_PREFIX + userId, JSON.stringify({ reason, detail, at: Date.now() } satisfies Freeze));
+  console.error(`ACCOUNT FROZEN ${userId}: ${reason}${detail ? ` — ${detail}` : ""}`);
+}
+
+export async function unfreezeAccount(userId: string): Promise<void> {
+  await setSystem(FREEZE_PREFIX + userId, null);
+}
+
+export async function frozenAccounts(): Promise<{ userId: string; freeze: Freeze }[]> {
+  const rows = await listSystem(FREEZE_PREFIX);
+  return rows.map((r) => {
+    let freeze: Freeze = { reason: "unknown", at: 0 };
+    try {
+      freeze = JSON.parse(r.value) as Freeze;
+    } catch {}
+    return { userId: r.key.slice(FREEZE_PREFIX.length), freeze };
+  });
+}
+
+// The response every money-moving route gives a frozen account. One place,
+// so the wording and the status agree everywhere.
+export const FROZEN_RESPONSE = {
+  error: "under_review",
+  message:
+    "A payment on this account is under review, so generating and purchases are paused. Email support@remerged.ai and we will sort it out.",
+} as const;
 
 // ---------------------------------------------------------------------------
 // Per-generation margin check

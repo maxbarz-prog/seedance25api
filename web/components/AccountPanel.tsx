@@ -42,6 +42,7 @@ interface Me {
   cancelAtPeriodEnd: boolean;
   deactivated: boolean;
   deactivatedAt: number | null;
+  frozen: boolean;
   ledger: LedgerEntry[];
 }
 
@@ -243,6 +244,17 @@ export default function AccountPanel() {
         <p className="rounded-xl border border-accent/40 bg-accent/10 px-4 py-3 text-sm">
           {notice}
         </p>
+      )}
+
+      {me.frozen && (
+        <section className="rounded-2xl border border-bad bg-bad/10 p-5">
+          <h2 className="font-medium">A payment on this account is under review</h2>
+          <p className="mt-1 text-sm text-muted">
+            Generating and purchases are paused while we look into it. Your videos are untouched.
+            Email <a className="underline" href="mailto:support@remerged.ai">support@remerged.ai</a>{" "}
+            and we will sort it out.
+          </p>
+        </section>
       )}
 
       {me.deactivated && (

@@ -7,6 +7,7 @@ import {
   PlanId,
   planPriceUsd,
   REFERRAL_REWARD_USD,
+  REQUEST_3DS_UNDER_DAYS,
 } from "./config";
 import {
   addLedger,
@@ -34,6 +35,16 @@ export function stripeClient(): Stripe {
   return new Stripe(process.env.STRIPE_SECRET_KEY!);
 }
 
+// Ask the bank to authenticate the cardholder on a new account's checkouts.
+// An authenticated (3-D Secure) payment moves fraud-chargeback liability to
+// the issuer, which is the single most effective thing a merchant can do
+// about stolen-card fraud, and it costs one bank prompt on the first purchase.
+// Established accounts are left to Radar's judgement so they are not nagged.
+function cardOptions(user: User): Stripe.Checkout.SessionCreateParams["payment_method_options"] {
+  const fresh = Date.now() - user.created_at < REQUEST_3DS_UNDER_DAYS * 86_400_000;
+  return fresh ? { card: { request_three_d_secure: "any" } } : undefined;
+}
+
 export async function createTopupCheckout(
   user: User,
   usd: number,
@@ -45,6 +56,7 @@ export async function createTopupCheckout(
   }
   const s = await stripeClient().checkout.sessions.create({
     mode: "payment",
+    payment_method_options: cardOptions(user),
     line_items: [
       {
         price_data: {
@@ -141,6 +153,7 @@ export async function createMembershipCheckout(
   }
   const s = await stripeClient().checkout.sessions.create({
     mode: "subscription",
+    payment_method_options: cardOptions(user),
     line_items: [
       {
         price_data: {
@@ -296,6 +309,25 @@ export async function applyTopup(
     externalId,
   });
   return entry !== null;
+}
+
+// Give the money back before the cardholder's bank takes it. Used on an early
+// fraud warning: a refund that lands before the dispute is filed means no
+// dispute, no $15 fee, and nothing counted against our dispute rate.
+// Idempotent on the warning that prompted it.
+export async function refundCharge(chargeId: string, idempotencyKey: string): Promise<boolean> {
+  try {
+    await stripeClient().refunds.create(
+      { charge: chargeId, reason: "fraudulent" },
+      { idempotencyKey }
+    );
+    return true;
+  } catch (err) {
+    // Already refunded, or already disputed — either way there is nothing
+    // left to give back.
+    console.warn(`refund of ${chargeId} failed:`, (err as { code?: string }).code ?? err);
+    return false;
+  }
 }
 
 // A top-up refunded from the Stripe dashboard takes its credits back out.

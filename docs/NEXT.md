@@ -608,6 +608,43 @@ changed in code:
 Dashboard-side items are the owner's (Radar rules, statement descriptor,
 receipts/dunning emails, restricted key, tax) — listed in the artifact.
 
+## Liability limits and fraud response (2026-09-13)
+
+Why: a cardholder has up to 120 days (Visa and Mastercard alike; Amex and
+Discover similar) after a payment to dispute it, and by then the credits it
+bought are spent on renders the provider has already billed us for. So the
+most one account can cost us is what it paid in the last four months plus $15
+a dispute. Until the business has history, that number is capped and the
+fraud signals are acted on automatically:
+
+- **Top-up caps by account age** (`TOPUP_CAPS_BY_ACCOUNT_AGE` in config.ts):
+  under 7 days $50 per 30 days; under 30 days $150; under 90 days $400; then
+  $1000. The member is told the limit, what is left, and when it rises
+  (HTTP 429 `topup_limit`). Subscriptions are bounded by one-per-member.
+- **3-D Secure requested on every hosted checkout for accounts under 30 days
+  old** (`REQUEST_3DS_UNDER_DAYS`). An authenticated payment shifts fraud
+  chargeback liability to the issuer. One bank prompt on the first purchases;
+  older accounts are left to Radar.
+- **`radar.early_fraud_warning.created` → refund, freeze, cancel.** The card
+  network's fraud report arrives before the dispute; refunding then means no
+  dispute is filed, no $15 fee, nothing on the dispute rate. The refund flows
+  through `charge.refunded` and claws the credits back; the account is frozen
+  and any subscription cancelled with its unspent allocation forfeited. New
+  webhook event — **sync both stages**.
+- **Any dispute freezes the account** (`frozen#<userId>` in the system KV).
+  Frozen = no generating, extending, topping up or subscribing (403
+  `under_review`); the account page shows why and where to write. Cleared
+  from the admin money desk ("Unfreeze"), which lists them.
+
+Numbers worth knowing: Visa's dispute monitoring programme starts at 0.9% of
+transactions AND 100 disputes a month (Mastercard 1% / 100) — irrelevant at
+this scale, but Stripe watches sustained rates around 1% and can hold
+reserves. Industry digital-goods dispute rates run roughly 0.5–1%, most of
+it "friendly fraud" (the cardholder's own purchase, disputed anyway); the
+statement descriptor and receipts are the cheap defence against that.
+Merchants have 7–21 days to respond to a dispute depending on network; the
+issuer's decision takes 60–75 days.
+
 ## Housekeeping
 
 Test accounts named `e2e+<timestamp>@remerged.click` exist in the Clerk

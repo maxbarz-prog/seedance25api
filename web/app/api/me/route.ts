@@ -3,6 +3,7 @@ import { clerkEnabled, currentUser } from "@/lib/auth";
 import { balance, ledgerFor, storageUsedBytes } from "@/lib/db";
 import { PLANS } from "@/lib/config";
 import { creditRefund } from "@/lib/economics";
+import { accountFrozen } from "@/lib/money";
 import {
   canBuyCredits,
   canUpscale,
@@ -20,10 +21,11 @@ export async function GET() {
   // free, so every allowance below comes from one decision.
   const planId = effectivePlan(user);
   const plan = PLANS[planId];
-  const [bal, used, ledger] = await Promise.all([
+  const [bal, used, ledger, frozen] = await Promise.all([
     balance(user.id),
     storageUsedBytes(user.id),
     ledgerFor(user.id, 25),
+    accountFrozen(user.id),
   ]);
   return NextResponse.json({
     auth: clerkEnabled() ? "clerk" : "builtin",
@@ -53,6 +55,10 @@ export async function GET() {
       cancelAtPeriodEnd: !!user.cancel_at_period_end,
       deactivated: isDeactivated(user),
       deactivatedAt: user.deactivated_at ?? null,
+      // A payment under review: generating and purchases are paused until an
+      // admin clears it. Shown so the member hears it from us, not from a
+      // refused button.
+      frozen: !!frozen,
       ledger,
     },
   });
