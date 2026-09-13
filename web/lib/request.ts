@@ -17,3 +17,10 @@ export function clientIp(req: NextRequest): string | null {
 export function userAgent(req: NextRequest): string | null {
   return req.headers.get("user-agent")?.slice(0, 200) ?? null;
 }
+
+// The site's own origin, for links we hand to Stripe and put in email. From
+// configuration, not from the request: a Host header is whatever the client
+// sent, and a redirect or reset link built from it is an open door.
+export function siteOrigin(req: NextRequest): string {
+  return (process.env.SITE_URL || req.nextUrl.origin).replace(/\/$/, "");
+}

@@ -61,6 +61,19 @@ export const TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE: { underDays: number; usdPerDay: 
 // renders the moment they were made. A member who did not receive what they
 // paid for is a support case, not a formula.
 export const REFUND_UNSPENT_SHARE = 0.9;
+// The free tier's whole-site budget, per UTC day, in credits. Free accounts
+// are the one thing an attacker can mint without paying (125 credits each),
+// so the total they can spend across ALL free accounts in a day is capped
+// here — a thousand fake sign-ups then cost at most this, not a thousand
+// allocations. Paid members are never affected. 2,000 credits is roughly 16
+// free members using their whole allocation on the same day.
+export const FREE_TIER_DAILY_BUDGET_CREDITS = 2000;
+// Content-policy strikes: moderation rejections from the provider in one
+// day before the account is frozen for a human to look at. The provider's
+// rules are also OUR account's rules with them — repeat offenders risk the
+// key everyone else generates with.
+export const CONTENT_STRIKES_PER_DAY = 3;
+
 // Ask the bank to authenticate the cardholder (3-D Secure) on every hosted
 // checkout for accounts younger than this. An authenticated payment shifts
 // fraud-chargeback liability to the card issuer; the cost is one bank prompt

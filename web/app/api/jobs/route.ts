@@ -24,9 +24,16 @@ import {
   supportsQuality,
   OUTPUT_MODE_IDS,
 } from "@/lib/config";
-import { canBuyCredits, canUpscale, isDeactivated, storageQuotaBytes } from "@/lib/plan";
+import { canBuyCredits, canUpscale, effectivePlan, isDeactivated, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
-import { accountFrozen, currentHalt, FROZEN_RESPONSE } from "@/lib/money";
+import {
+  accountFrozen,
+  currentHalt,
+  freeTierBudgetLeft,
+  freeTierSpentToday,
+  FROZEN_RESPONSE,
+  recordFreeTierSpend,
+} from "@/lib/money";
 import { presentJob } from "@/lib/present";
 import { clientIp, userAgent } from "@/lib/request";
 
@@ -207,6 +214,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // The free tier shares one daily budget across every free account, so a
+  // wave of fake sign-ups cannot turn 125 credits each into a provider bill.
+  // A real free member who hits it is told plainly, and a plan is the way
+  // past — never a paid member's problem.
+  const onFree = effectivePlan(user) === "free";
+  if (onFree && freeTierBudgetLeft(await freeTierSpentToday()) < total) {
+    return NextResponse.json(
+      {
+        error: "free_budget",
+        message:
+          "The free tier has used its shared daily budget. Try again tomorrow, or join a plan to generate now.",
+      },
+      { status: 429 }
+    );
+  }
+
   const quotaBytes = storageQuotaBytes(user);
   const projectedBytes =
     (await storageUsedBytes(user.id)) + b.durationS * 500_000 * b.variations;
@@ -273,6 +296,7 @@ export async function POST(req: NextRequest) {
       created_ip: clientIp(req),
       created_ua: userAgent(req),
     });
+    if (onFree) await recordFreeTierSpend(q.credits);
     ids.push(job.id);
   }
 

@@ -1,4 +1,5 @@
 import { PAID_PLAN_IDS, PlanId, BillingInterval, PLANS } from "@/lib/config";
+import { siteOrigin } from "@/lib/request";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest) {
       user,
       plan,
       interval,
-      req.nextUrl.origin,
+      siteOrigin(req),
       discount ? { kind: discount, invite: discount === "invite" ? invite : undefined } : undefined
     );
     return NextResponse.json({ url });

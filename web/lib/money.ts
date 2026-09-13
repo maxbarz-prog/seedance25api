@@ -5,8 +5,10 @@ import {
   modeInfo,
   QUALITIES,
   TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE,
+  FREE_TIER_DAILY_BUDGET_CREDITS,
+  CONTENT_STRIKES_PER_DAY,
 } from "./config";
-import { getSystem, listSystem, setSystem, Job, LedgerEntry, User } from "./db";
+import { addSystemCounter, getSystem, listSystem, setSystem, Job, LedgerEntry, User } from "./db";
 import { rates } from "./pricing";
 
 // Money safety. Two jobs:
@@ -162,6 +164,38 @@ export function topupsLast24hUsd(ledger: LedgerEntry[], now = Date.now()): numbe
   return ledger
     .filter((e) => e.kind === "topup" && e.created_at > dayAgo)
     .reduce((sum, e) => sum + e.delta_credits / 100, 0);
+}
+
+// ---------------------------------------------------------------------------
+// The free tier's daily budget, and content strikes
+// ---------------------------------------------------------------------------
+
+const dayKey = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
+
+// How many credits free accounts, all of them together, have spent today.
+export async function freeTierSpentToday(): Promise<number> {
+  return Number((await getSystem(`free-spend#${dayKey()}`)) ?? 0);
+}
+
+export function freeTierBudgetLeft(spent: number): number {
+  return Math.max(0, FREE_TIER_DAILY_BUDGET_CREDITS - spent);
+}
+
+// Called after a free account's charge goes through. Atomic, so a burst of
+// sign-ups all spending at once still adds up to the right number.
+export async function recordFreeTierSpend(credits: number): Promise<number> {
+  return addSystemCounter(`free-spend#${dayKey()}`, credits);
+}
+
+// A moderation rejection against this member. The third in a day freezes
+// the account: the provider bans keys, not users, so a member who keeps
+// sending prohibited prompts is a risk to every other member's service.
+export async function recordContentStrike(userId: string, detail: string): Promise<number> {
+  const strikes = await addSystemCounter(`strikes#${userId}#${dayKey()}`, 1);
+  if (strikes >= CONTENT_STRIKES_PER_DAY && !(await accountFrozen(userId))) {
+    await freezeAccount(userId, "content policy", `${strikes} moderation rejections today; last: ${detail.slice(0, 120)}`);
+  }
+  return strikes;
 }
 
 // The response every money-moving route gives a frozen account. One place,

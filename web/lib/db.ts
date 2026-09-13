@@ -66,5 +66,7 @@ export const getSystem: DataStore["getSystem"] = (...a) => store().getSystem(...
 export const setSystem: DataStore["setSystem"] = (...a) => store().setSystem(...a);
 export const setSystemIfAbsent: DataStore["setSystemIfAbsent"] = (...a) =>
   store().setSystemIfAbsent(...a);
+export const addSystemCounter: DataStore["addSystemCounter"] = (...a) =>
+  store().addSystemCounter(...a);
 export const listSystem: DataStore["listSystem"] = (...a) => store().listSystem(...a);
 export const moneyIssues: DataStore["moneyIssues"] = () => store().moneyIssues();

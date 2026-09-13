@@ -38,7 +38,12 @@ export async function currentUser(): Promise<User | null> {
   if (clerkEnabled()) {
     const { currentUser: clerkUser } = await import("@clerk/nextjs/server");
     const cu = await clerkUser();
-    const email = cu?.primaryEmailAddress?.emailAddress ?? cu?.emailAddresses?.[0]?.emailAddress;
+    // The PRIMARY address, and only once Clerk has verified it. The account
+    // row is keyed by email and admin rights are granted by email, so an
+    // address someone merely typed must never become an identity here.
+    const primary = cu?.primaryEmailAddress;
+    const email =
+      primary && primary.verification?.status === "verified" ? primary.emailAddress : undefined;
     if (!cu || !email) return null;
     const existing = await userByEmail(email);
     if (existing) return existing;

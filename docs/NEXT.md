@@ -683,6 +683,67 @@ Tax's free threshold monitoring now, registration when a jurisdiction lights
 up, or a merchant-of-record later. `automatic_tax: { enabled: true }` on both
 Checkout sessions is the code change when the time comes.
 
+## Attack surface review (2026-09-13)
+
+How sites like this actually get hurt, checked against the code. The
+serious ones were not injection or XSS — React and the SDKs cover those —
+but the money-shaped ones: things an attacker can mint without paying, and
+doors that were open because nobody had closed them.
+
+Fixed:
+- **The built-in auth routes were live with Clerk on.** `/api/auth/signup`
+  created an account and granted 125 free credits per call, with no bot
+  check, no email verification and no rate limit; `/api/auth/forgot` sent a
+  reset email to any known address on request (an SES reputation attack);
+  `/api/auth/login` was a password oracle for nothing. The built-in session
+  was never honoured while Clerk is on, so the credits could not be spent —
+  but the rows, the mail and the noise were real. All five return 404 when
+  Clerk is configured.
+- **Free-tier daily budget** (`FREE_TIER_DAILY_BUDGET_CREDITS`, 2,000/day
+  site-wide, atomic counter `free-spend#<day>`): the one thing a bot farm
+  can mint is free accounts, 125 credits each. The total all free accounts
+  can spend in a day is now capped, so a thousand sign-ups cost at most the
+  budget. Paid members are never affected; a real free member gets a 429
+  `free_budget` that says "tomorrow, or join".
+- **Content strikes** (`CONTENT_STRIKES_PER_DAY`, 3): the provider bans API
+  KEYS, so a member who keeps sending prohibited prompts is a risk to
+  everyone else's service. Moderation and infringement rejections count;
+  the real-person rule does not (uploading your own photo is innocent). The
+  third in a day freezes the account.
+- **Admin identity is the Clerk PRIMARY address, verified only** — no
+  fallback to `emailAddresses[0]`, which could be an address merely typed.
+- **Links we hand to Stripe and put in email come from `SITE_URL`, not the
+  Host header** (`siteOrigin()` in lib/request.ts).
+- **Security headers** on every response (next.config.ts): HSTS with
+  preload, nosniff, `X-Frame-Options: DENY` + `frame-ancestors 'none'`
+  (click-jacking), Referrer-Policy, Permissions-Policy. No full CSP: Clerk
+  and Stripe inject scripts and frames and the allow-list would be a
+  maintenance burden for little gain.
+- **AWS Budget** (sst.config.ts, owned by the mail stage): $200/month
+  (`AWS_BUDGET_USD`), mail to the first admin at 80% actual and 100%
+  forecast. A denial-of-wallet flood is a bill, not an outage, and this is
+  the thing that notices.
+
+Checked and fine: Next.js 15.5.25 is past the March 2025 middleware bypass
+(15.2.3) and the May 2026 batch (15.5.18); no `dangerouslySetInnerHTML`, no
+server actions, no user-supplied URLs fetched server-side (SSRF); every job
+route checks ownership; presigned URLs expire in an hour; cookies are
+SameSite=Lax so cross-site POSTs carry no session; webhook and cron secrets
+verified; `npm audit` shows only postcss (build-time, not in the served
+bundle).
+
+Owner actions (Clerk dashboard, five minutes): Attack protection → **Bot
+sign-up protection ON**; Restrictions → **block disposable emails ON**,
+**block email subaddresses ON**; User & authentication → Password →
+**reject compromised passwords ON**; consider **MFA optional** for members.
+These are the front door; the free-tier budget is the back-stop.
+
+Proposed, not built (costs money): **AWS WAF on the CloudFront
+distribution** — a rate-based rule (2,000 requests / 5 min per IP) plus the
+AWS managed Common and Known-bad-inputs rule groups, about $10–12/month.
+It stops floods before they reach Lambda. Worth turning on at prod cutover;
+one `transform.cdn` block in sst.config.ts when approved.
+
 ## Housekeeping
 
 Test accounts named `e2e+<timestamp>@remerged.click` exist in the Clerk

@@ -14,7 +14,7 @@ import {
 import { sendEmail } from "./email";
 import { EXTEND_CONTEXT_S, modeInfo, SITE_DOMAIN, SITE_NAME } from "./config";
 import { concat, durationOf, posterFromUrl, trimTail } from "./video";
-import { checkMargin, currentHalt } from "./money";
+import { checkMargin, currentHalt, recordContentStrike } from "./money";
 
 // Job pipeline: queued -> generating -> [upscaling ->] ready | failed.
 //
@@ -37,8 +37,9 @@ const GENERIC_FAILURE =
 // all four models rejecting the same portrait at submit. A member uploading
 // a photo of themselves, which is an obvious thing to do, hits it every
 // time.
-const PERMANENT_FAILURES: { match: RegExp; message: string }[] = [
+const PERMANENT_FAILURES: { match: RegExp; message: string; strike?: boolean }[] = [
   {
+    // Not a strike: uploading a photo of yourself is an innocent thing to do.
     match: /real person|realistic person|real human/i,
     message:
       "Our video provider will not animate photographs of real people. Try an illustration or a drawing as the starting image, or describe the person in the prompt instead of uploading a photo. You have not been charged.",
@@ -47,13 +48,19 @@ const PERMANENT_FAILURES: { match: RegExp; message: string }[] = [
     match: /moderation|sensitive|policy violation|prohibited|not allowed/i,
     message:
       "This prompt or image was rejected by automated content moderation. Adjust it and start a new generation. You have not been charged.",
+    strike: true,
   },
   {
     match: /copyright|infring/i,
     message:
       "This prompt or image was rejected as possibly infringing. Adjust it and start a new generation. You have not been charged.",
+    strike: true,
   },
 ];
+
+function isStrike(internalError?: string): boolean {
+  return !!internalError && PERMANENT_FAILURES.some((f) => f.strike && f.match.test(internalError));
+}
 
 // What the member sees. A retryable fault keeps the generic wording; a
 // permanent one says what to change.
@@ -374,6 +381,13 @@ async function finalize(job: Job, providerUrl: string) {
 async function fail(job: Job, internalError?: string) {
   if (internalError) console.error(`job ${job.id} failed upstream:`, internalError);
   await cleanupContext(job);
+  // A moderation rejection counts against the member; enough of them in a
+  // day and the account is frozen for a human. Never fatal to the refund.
+  if (isStrike(internalError)) {
+    await recordContentStrike(job.user_id, internalError!).catch((e) =>
+      console.error(`strike record failed for ${job.user_id}:`, e)
+    );
+  }
   await updateJob(job.id, {
     status: "failed",
     error: userFacingFailure(internalError),

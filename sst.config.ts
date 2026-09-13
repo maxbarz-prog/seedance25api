@@ -193,7 +193,37 @@ export default $config({
     // The remerged.ai records are NOT created here — the SES identity, DKIM,
     // MX, SPF and DMARC come from .github/workflows/mail-domain.yml, which
     // writes into Cloudflare and waits for SES to verify. Run that first.
+    // A ceiling on the whole AWS bill, watched by AWS itself. Serverless
+    // scales with whatever traffic arrives, wanted or not — a "denial of
+    // wallet" is a flood that costs money rather than uptime — and the only
+    // thing that notices at 3am is a budget. Account-wide, so one stage owns
+    // it; the first admin gets the mail at 80% actual and 100% forecast.
     if ($app.stage === (process.env.MAIL_STAGE || "dev")) {
+      const budgetEmail = (process.env.ADMIN_EMAILS ?? "").split(",")[0].trim();
+      if (budgetEmail) {
+        new aws.budgets.Budget("MonthlyCost", {
+          budgetType: "COST",
+          limitAmount: process.env.AWS_BUDGET_USD || "200",
+          limitUnit: "USD",
+          timeUnit: "MONTHLY",
+          notifications: [
+            {
+              comparisonOperator: "GREATER_THAN",
+              threshold: 80,
+              thresholdType: "PERCENTAGE",
+              notificationType: "ACTUAL",
+              subscriberEmailAddresses: [budgetEmail],
+            },
+            {
+              comparisonOperator: "GREATER_THAN",
+              threshold: 100,
+              thresholdType: "PERCENTAGE",
+              notificationType: "FORECASTED",
+              subscriberEmailAddresses: [budgetEmail],
+            },
+          ],
+        });
+      }
       const mailDomain = "remerged.ai";
       const account = aws.getCallerIdentityOutput();
       // A plain S3 bucket, not sst.aws.Bucket, because this one needs a bucket

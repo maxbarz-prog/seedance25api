@@ -18,10 +18,17 @@ import {
   OUTPUT_MODE_IDS,
   resolveMode,
 } from "@/lib/config";
-import { canBuyCredits, isDeactivated, storageQuotaBytes } from "@/lib/plan";
+import { canBuyCredits, effectivePlan, isDeactivated, storageQuotaBytes } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import { clientIp, userAgent } from "@/lib/request";
-import { accountFrozen, currentHalt, FROZEN_RESPONSE } from "@/lib/money";
+import {
+  accountFrozen,
+  currentHalt,
+  freeTierBudgetLeft,
+  freeTierSpentToday,
+  FROZEN_RESPONSE,
+  recordFreeTierSpend,
+} from "@/lib/money";
 
 // Continue an existing (ready) clip by N more seconds. The result is a new
 // job that carries the source clip forward; the source is untouched.
@@ -115,6 +122,17 @@ export async function POST(
       { status: 402 }
     );
   }
+  const onFree = effectivePlan(user) === "free";
+  if (onFree && freeTierBudgetLeft(await freeTierSpentToday()) < q.credits) {
+    return NextResponse.json(
+      {
+        error: "free_budget",
+        message:
+          "The free tier has used its shared daily budget. Try again tomorrow, or join a plan to generate now.",
+      },
+      { status: 429 }
+    );
+  }
   // The delivered file is the source plus the new seconds, so size the quota
   // check against the whole thing rather than only what was added.
   if (
@@ -170,6 +188,7 @@ export async function POST(
     created_ip: clientIp(req),
     created_ua: userAgent(req),
   });
+  if (onFree) await recordFreeTierSpend(q.credits);
   await advanceJob(job.id);
   return NextResponse.json({ id: job.id }, { status: 201 });
 }

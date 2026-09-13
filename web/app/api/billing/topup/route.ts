@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { siteOrigin } from "@/lib/request";
 import { z } from "zod";
 import { currentUser } from "@/lib/auth";
 import { applyTopup, chargeSavedCard, createTopupCheckout } from "@/lib/billing";
@@ -99,7 +100,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ charged: true, usd });
   }
 
-  const { url } = await createTopupCheckout(user, usd, req.nextUrl.origin);
+  const { url } = await createTopupCheckout(user, usd, siteOrigin(req));
   return NextResponse.json({
     url,
     // Why they are being sent to Stripe, so the button can say something true.

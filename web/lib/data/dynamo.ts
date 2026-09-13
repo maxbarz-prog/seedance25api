@@ -571,6 +571,19 @@ export class DynamoStore implements DataStore {
     }
   }
 
+  async addSystemCounter(key: string, delta: number): Promise<number> {
+    const r = await this.doc.send(
+      new UpdateCommand({
+        TableName: LEDGER,
+        Key: { pk: SYSTEM_PK, sk: key },
+        UpdateExpression: "ADD n :d",
+        ExpressionAttributeValues: { ":d": delta },
+        ReturnValues: "UPDATED_NEW",
+      })
+    );
+    return Number((r.Attributes as { n?: number } | undefined)?.n ?? 0);
+  }
+
   async listSystem(prefix: string): Promise<{ key: string; value: string }[]> {
     const out: { key: string; value: string }[] = [];
     let start: Record<string, unknown> | undefined;

@@ -396,6 +396,17 @@ export class SqliteStore implements DataStore {
     return r.changes === 1;
   }
 
+  async addSystemCounter(key: string, delta: number): Promise<number> {
+    const r = this.db()
+      .prepare(
+        `INSERT INTO system (k, v) VALUES (?, ?)
+         ON CONFLICT(k) DO UPDATE SET v = CAST(CAST(v AS REAL) + excluded.v AS TEXT)
+         RETURNING CAST(v AS REAL) AS n`
+      )
+      .get(key, String(delta)) as { n: number };
+    return r.n;
+  }
+
   async listSystem(prefix: string): Promise<{ key: string; value: string }[]> {
     const rows = this.db()
       .prepare(`SELECT k, v FROM system WHERE k LIKE ? ESCAPE '\\' ORDER BY k`)

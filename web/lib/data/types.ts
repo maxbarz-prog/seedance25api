@@ -251,6 +251,10 @@ export interface DataStore {
   // wrote it. The one-shot claims (an invite, a referral vesting) hang on it:
   // two requests racing for the same claim get one true and one false.
   setSystemIfAbsent(key: string, value: string): Promise<boolean>;
+  // Atomic add on a numeric system key; returns the new total. For the
+  // running tallies that gate spend (the free tier's daily budget, content
+  // strikes) — a read-modify-write there would let a burst slip past.
+  addSystemCounter(key: string, delta: number): Promise<number>;
   // Every key under a prefix, for the few cases that need the set rather than
   // one entry — listing the invite codes an admin has issued, for instance.
   listSystem(prefix: string): Promise<{ key: string; value: string }[]>;
