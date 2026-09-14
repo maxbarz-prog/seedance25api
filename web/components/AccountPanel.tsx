@@ -92,10 +92,36 @@ export default function AccountPanel() {
       .then((d) => {
         setMe(d.user);
         if (d.auth) setAuthMode(d.auth);
+        // The header holds its own copy, cached for the page load. Without
+        // this it keeps saying "Upgrade" to somebody who has just paid, until
+        // something incidental — a tab focus, a window resize — happens to
+        // refresh it.
+        window.dispatchEvent(new Event(BALANCE_EVENT));
       })
       .catch(() => {});
   }, []);
   useEffect(refresh, [refresh]);
+
+  // Coming back to the tab re-reads, for the same reason.
+  useEffect(() => {
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [refresh]);
+
+  // While a payment is settling, ask again until it has. Capped: if the
+  // webhook has not arrived in twenty seconds it is not a timing problem, and
+  // polling forever would only hide that.
+  const settling = params.get("membership") === "success" && !!me && !me.membershipActive;
+  useEffect(() => {
+    if (!settling) return;
+    let tries = 0;
+    const id = window.setInterval(() => {
+      if (++tries > 13) return window.clearInterval(id);
+      refresh();
+    }, 1500);
+    return () => window.clearInterval(id);
+  }, [settling, refresh]);
 
   async function post(url: string, body: unknown, key: string) {
     setBusy(key);
@@ -229,7 +255,12 @@ export default function AccountPanel() {
     );
   }
 
-  const joinNudge = params.get("join") === "1" && !me.membershipActive;
+  // Back from Stripe, but the webhook that applies the plan is racing this
+  // page and usually loses. Until it lands the account still reads as Free,
+  // and telling someone who has just paid to pick a plan is the worst
+  // possible moment to be wrong.
+  const confirming = params.get("membership") === "success" && !me.membershipActive;
+  const joinNudge = params.get("join") === "1" && !me.membershipActive && !confirming;
   const topupNudge = params.get("topup") === "1" && me.canBuyCredits;
   const usedGb = me.storageUsedBytes / 1e9;
   const quotaGb = me.storageQuotaBytes / 1e9;
@@ -320,12 +351,16 @@ export default function AccountPanel() {
         ) : (
           <>
             <p className="mt-2 text-sm text-muted">
-              {pickedPlan
+              {confirming
+                ? "Confirming your payment — this usually takes a few seconds."
+                : pickedPlan
                 ? `You picked ${PLANS[pickedPlan].label}. Confirm it below, or choose another.`
                 : joinNudge
                 ? "One step before your video: pick a plan."
                 : `You are on the ${me.planLabel} plan: ${PLANS[me.plan].credits.toLocaleString()} credits, ${PLANS[me.plan].storageGb} GB storage, upscaling included. Credit top-ups need a paid plan.`}
             </p>
+            {!confirming && (
+              <>
             <div className="mt-4 grid gap-3 sm:grid-cols-3">
               {PAID_PLAN_IDS.map((id) => {
                 const p = PLANS[id];
@@ -389,6 +424,8 @@ export default function AccountPanel() {
                 {interval === "year" ? "Billed yearly" : "Billed monthly"} · cancel any time
               </span>
             </div>
+              </>
+            )}
           </>
         )}
       </section>
