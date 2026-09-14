@@ -136,6 +136,7 @@ interface Money {
   frozen: { userId: string; email?: string; freeze: { reason: string; detail?: string; at: number } }[];
   strikesEnabled: boolean;
   topupLimitsEnabled: boolean;
+  freeCreditsEnabled: boolean;
 }
 
 export default function AdminPage() {
@@ -364,6 +365,36 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* The signup giveaway: one cheapest video, 8 credits. Off means new
+            accounts still work but start at zero. */}
+        {money && (
+          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+            <span className="text-sm text-muted">
+              Free credits on signup:{" "}
+              <strong className={money.freeCreditsEnabled ? "text-ink" : "text-bad"}>
+                {money.freeCreditsEnabled ? "on" : "off"}
+              </strong>
+              {money.freeCreditsEnabled
+                ? " — a new account gets one 4s 480p video (8 credits)."
+                : " — new accounts start at zero and must pick a plan."}
+            </span>
+            <button
+              onClick={() =>
+                moneyAction(
+                  { action: "free-credits", enabled: !money.freeCreditsEnabled },
+                  money.freeCreditsEnabled
+                    ? "Stop giving new accounts their free video?"
+                    : "Start giving new accounts a free video again?"
+                )
+              }
+              disabled={moneyBusy}
+              className="rounded-full border border-line px-4 py-1.5 text-sm hover:border-accent disabled:opacity-50"
+            >
+              {money.freeCreditsEnabled ? "Turn off" : "Turn on"}
+            </button>
           </div>
         )}
 

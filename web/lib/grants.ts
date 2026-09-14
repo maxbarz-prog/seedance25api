@@ -1,4 +1,4 @@
-import { PLANS, PlanId } from "./config";
+import { FREE_GRANTS_PER_IP_PER_DAY, PLANS, PlanId } from "./config";
 import {
   addLedger,
   allUsers,
@@ -66,8 +66,54 @@ export async function grantPeriodCredits(userId: string, planId: PlanId) {
 }
 
 // The free allocation, handed over once when the account is created.
+//
+// Two things can stop it. The switch on the money desk, if the giveaway is
+// ever being farmed faster than it converts; and a per-address cap, which is
+// a speed bump rather than a wall — anyone determined has another address and
+// another network. What actually makes farming pointless is the size of the
+// grant: one cheapest video, eight credits, $0.08.
+//
+// Either way the account is still created and still works. It simply starts
+// at zero, and the plans are one click away.
 export async function grantSignupCredits(userId: string) {
+  const { freeCreditsEnabled } = await import("./money");
+  if (!(await freeCreditsEnabled())) {
+    console.log(`signup grant skipped for ${userId}: free credits are switched off`);
+    return;
+  }
+  if (!(await claimSignupGrantForAddress())) {
+    console.warn(`signup grant skipped for ${userId}: address is over its daily share`);
+    return;
+  }
   await grantPeriodCredits(userId, "free");
+}
+
+// Whether this request's address may still collect a signup grant today.
+// The address is hashed, never stored raw — it is an abuse counter, not a
+// record of who signed up from where. An address we cannot read (a context
+// with no request behind it) is allowed through rather than punished.
+async function claimSignupGrantForAddress(): Promise<boolean> {
+  let ip: string | null = null;
+  try {
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    ip =
+      h.get("cloudfront-viewer-address")?.replace(/:\d+$/, "") ??
+      h.get("x-forwarded-for")?.split(",")[0].trim() ??
+      null;
+  } catch {
+    return true;
+  }
+  if (!ip) return true;
+  const { createHmac } = await import("crypto");
+  const tag = createHmac("sha256", process.env.SESSION_SECRET || "dev")
+    .update(`signup-ip:${ip}`)
+    .digest("hex")
+    .slice(0, 16);
+  const day = new Date().toISOString().slice(0, 10);
+  const { addSystemCounter } = await import("./db");
+  const n = await addSystemCounter(`freeip#${tag}#${day}`, 1);
+  return n <= FREE_GRANTS_PER_IP_PER_DAY;
 }
 
 // Year and month, so a grant is idempotent within the month it belongs to.

@@ -6,9 +6,11 @@ import { refundCredits } from "@/lib/grants";
 import {
   clearHalt,
   currentHalt,
+  freeCreditsEnabled,
   frozenAccounts,
   halt,
   setDailyTopupLimit,
+  setFreeCreditsEnabled,
   setStrikesEnabled,
   setTopupLimitsEnabled,
   strikesEnabled,
@@ -24,12 +26,13 @@ import { userByEmail } from "@/lib/db";
 export async function GET() {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  const [stop, issues, frozen, strikes, limits] = await Promise.all([
+  const [stop, issues, frozen, strikes, limits, freeCredits] = await Promise.all([
     currentHalt(),
     moneyIssues(),
     frozenAccounts(),
     strikesEnabled(),
     topupLimitsEnabled(),
+    freeCreditsEnabled(),
   ]);
   const emails = new Map<string, string>();
   for (const id of [...issues.map((i) => i.userId), ...frozen.map((f) => f.userId)]) {
@@ -47,6 +50,8 @@ export async function GET() {
     strikesEnabled: strikes,
     // Whether the age-based daily top-up ceilings apply to everyone.
     topupLimitsEnabled: limits,
+    // Whether a new account still gets its free video.
+    freeCreditsEnabled: freeCredits,
   });
 }
 
@@ -72,6 +77,8 @@ const Body = z.discriminatedUnion("action", [
   // The blanket age-based top-up ceilings. A limit set for one account by
   // support is separate and unaffected.
   z.object({ action: z.literal("topup-limits"), enabled: z.boolean() }),
+  // The signup giveaway. Off means new accounts start at zero.
+  z.object({ action: z.literal("free-credits"), enabled: z.boolean() }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -95,6 +102,10 @@ export async function POST(req: NextRequest) {
     const target = await userByEmail(b.email);
     if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
     await unfreezeAccount(target.id);
+    return NextResponse.json({ ok: true });
+  }
+  if (b.action === "free-credits") {
+    await setFreeCreditsEnabled(b.enabled);
     return NextResponse.json({ ok: true });
   }
   if (b.action === "topup-limits") {

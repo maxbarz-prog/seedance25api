@@ -141,6 +141,20 @@ export interface DailyLimit {
   nextUsdPerDay?: number;
 }
 
+// Whether a new account is granted its free video at all. Off means signups
+// still work and still get an account — they simply start at zero and have to
+// pick a plan. The switch exists so the giveaway can be stopped in one click
+// if it is ever being farmed faster than it is converting.
+const FREE_CREDITS_KEY = "free-credits";
+
+export async function freeCreditsEnabled(): Promise<boolean> {
+  return (await getSystem(FREE_CREDITS_KEY)) !== "off";
+}
+
+export async function setFreeCreditsEnabled(on: boolean): Promise<void> {
+  await setSystem(FREE_CREDITS_KEY, on ? null : "off");
+}
+
 // Whether the age-based limits apply at all, as a runtime switch over the
 // default in config. A limit support set for ONE account is not part of this
 // and keeps applying either way: turning the blanket policy off should not

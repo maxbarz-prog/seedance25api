@@ -21,6 +21,8 @@ import {
   OUTPUT_MODES,
   OutputMode,
   QUALITIES,
+  FREE_MODEL,
+  FREE_QUALITY,
   QUALITY_IDS,
   Quality,
   qualitiesForModel,
@@ -80,6 +82,11 @@ export default function Composer({
   // round trip to us-east-1 to learn something the page could have asked while
   // the prompt was being typed.
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
+  // Free renders one route and one only, so the others are shown locked
+  // rather than hidden — seeing what a plan buys is the point. A signed-out
+  // visitor is not restricted here: they have not chosen anything yet, and
+  // the signup detour comes first either way.
+  const [onFree, setOnFree] = useState(false);
   const [cameraFixed, setCameraFixed] = useState(false);
   const [variations, setVariations] = useState(1);
 
@@ -187,7 +194,12 @@ export default function Composer({
 
   // Asked once while the prompt is being typed, so a click never waits on it.
   useEffect(() => {
-    fetchMe().then((d) => setSignedIn(!!d.user)).catch(() => {});
+    fetchMe()
+      .then((d) => {
+        setSignedIn(!!d.user);
+        setOnFree(d.user?.plan === "free");
+      })
+      .catch(() => {});
   }, []);
 
   // Prefetched so signup is already loaded by the time it is needed, rather
@@ -424,18 +436,28 @@ export default function Composer({
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
         <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
           {MODEL_IDS.map((id) => {
-            const ok = compatible(id);
+            const locked = onFree && id !== FREE_MODEL;
+            const ok = compatible(id) && !locked;
             return (
               <button
                 key={id}
-                onClick={() => setModel(id)}
-                disabled={!ok}
+                onClick={() =>
+                  locked
+                    ? setBlock({
+                        reason: "plan_required",
+                        message: `${MODELS[id].label} needs a paid plan. Free generates with ${MODELS[FREE_MODEL as ModelId].label} at 480p.`,
+                      })
+                    : setModel(id)
+                }
+                disabled={!compatible(id)}
                 title={
-                  ok
-                    ? undefined
-                    : needs === "image"
-                      ? `${MODELS[id].label} is text-to-video only.`
-                      : `${MODELS[id].label} needs a starting image.`
+                  locked
+                    ? `${MODELS[id].label} needs a paid plan.`
+                    : ok
+                      ? undefined
+                      : needs === "image"
+                        ? `${MODELS[id].label} is text-to-video only.`
+                        : `${MODELS[id].label} needs a starting image.`
                 }
                 className={`rounded-full px-3 py-1 ${
                   model === id
@@ -499,34 +521,64 @@ export default function Composer({
         <div className="flex items-center gap-2">
           <span className="text-muted">Quality</span>
           <div className="flex items-center gap-1 rounded-full border border-line p-1">
-            {qualities.map((qq) => (
-              <button
-                key={qq}
-                onClick={() => setQuality(qq)}
-                className={`rounded-full px-3 py-1 ${
-                  quality === qq ? "bg-accent text-accent-ink" : "text-muted"
-                }`}
-              >
-                {QUALITIES[qq].label}
-              </button>
-            ))}
+            {qualities.map((qq) => {
+              const locked = onFree && qq !== FREE_QUALITY;
+              return (
+                <button
+                  key={qq}
+                  onClick={() =>
+                    locked
+                      ? setBlock({
+                          reason: "plan_required",
+                          message: `${QUALITIES[qq].label} needs a paid plan. Free renders at ${FREE_QUALITY}.`,
+                        })
+                      : setQuality(qq)
+                  }
+                  className={`rounded-full px-3 py-1 ${
+                    quality === qq
+                      ? "bg-accent text-accent-ink"
+                      : locked
+                        ? "text-muted/40"
+                        : "text-muted"
+                  }`}
+                >
+                  {QUALITIES[qq].label}
+                  {locked && <span aria-hidden> 🔒</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <span className="text-muted">Upscale</span>
           <div className="flex items-center gap-1 rounded-full border border-line p-1">
-            {upscales.map((uu) => (
-              <button
-                key={uu}
-                onClick={() => setUpscale(uu)}
-                className={`rounded-full px-3 py-1 ${
-                  upscale === uu ? "bg-accent text-accent-ink" : "text-muted"
-                }`}
-              >
-                {uu === "none" ? "None" : UPSCALES[uu].label}
-              </button>
-            ))}
+            {upscales.map((uu) => {
+              const locked = onFree && uu !== "none";
+              return (
+                <button
+                  key={uu}
+                  onClick={() =>
+                    locked
+                      ? setBlock({
+                          reason: "plan_required",
+                          message: "Upscaling needs a paid plan.",
+                        })
+                      : setUpscale(uu)
+                  }
+                  className={`rounded-full px-3 py-1 ${
+                    upscale === uu
+                      ? "bg-accent text-accent-ink"
+                      : locked
+                        ? "text-muted/40"
+                        : "text-muted"
+                  }`}
+                >
+                  {uu === "none" ? "None" : UPSCALES[uu].label}
+                  {locked && <span aria-hidden> 🔒</span>}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@
 
 export interface Me {
   email: string;
+  plan: string;
   balanceCredits: number;
   planLabel: string;
   canBuyCredits: boolean;

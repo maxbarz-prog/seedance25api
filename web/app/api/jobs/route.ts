@@ -24,7 +24,14 @@ import {
   supportsQuality,
   OUTPUT_MODE_IDS,
 } from "@/lib/config";
-import { canBuyCredits, canUpscale, effectivePlan, isDeactivated, storageQuotaBytes } from "@/lib/plan";
+import {
+  canBuyCredits,
+  canUpscale,
+  effectivePlan,
+  freeRouteRefusal,
+  isDeactivated,
+  storageQuotaBytes,
+} from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import {
   accountFrozen,
@@ -196,6 +203,23 @@ export async function POST(req: NextRequest) {
       { status: 402 }
     );
   }
+  // What Free is allowed to render. Checked here, not merely hidden in the
+  // composer: the page is a convenience, this is the rule.
+  if (effectivePlan(user) === "free") {
+    const refusal = freeRouteRefusal({
+      model,
+      quality,
+      upscales: OUTPUT_MODES[outputMode].upscale !== "none",
+      durationS: b.durationS,
+    });
+    if (refusal) {
+      return NextResponse.json(
+        { error: "plan_required", message: refusal },
+        { status: 402 }
+      );
+    }
+  }
+
   const q = quote({ model, durationS: b.durationS, mode: outputMode, audio: b.audio });
   const total = q.credits * b.variations;
   const bal = await balance(user.id);

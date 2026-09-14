@@ -4,7 +4,17 @@ import { ffmpegAvailable } from "./video";
 import { clerkEnabled } from "./auth";
 import { stripeEnabled } from "./billing";
 import { currentHalt } from "./money";
-import { MAIL_DOMAIN, ModelId, Quality, tokensFor } from "./config";
+import {
+  FREE_MAX_DURATION_S,
+  FREE_MODEL,
+  FREE_QUALITY,
+  MAIL_DOMAIN,
+  ModelId,
+  PLANS,
+  Quality,
+  tokensFor,
+} from "./config";
+import { quote } from "./pricing";
 import { planMargins } from "./economics";
 
 // System status for the admin page.
@@ -189,7 +199,42 @@ function configChecks(): Check[] {
       note: process.env.STRIPE_WEBHOOK_SECRET ? "payments can be confirmed" : "payments would never credit an account",
     },
     stripeKeyCheck(),
+    freeGrantCheck(),
   ];
+}
+
+// The Free allocation is meant to be exactly one cheapest video and nothing
+// over. It is a hand-written number in config, while the price it is meant to
+// match comes from the provider's rates — so a rate change silently turns
+// "one video" into "not quite one video", or into change left on the table.
+// Nothing else would ever notice.
+function freeGrantCheck(): Check {
+  const granted = PLANS.free.credits;
+  let cheapest: number | null = null;
+  try {
+    cheapest = quote({
+      model: FREE_MODEL as ModelId,
+      durationS: FREE_MAX_DURATION_S,
+      mode: `${FREE_QUALITY}`,
+      audio: false,
+    }).credits;
+  } catch {
+    cheapest = null;
+  }
+  const ok = cheapest !== null && granted === cheapest;
+  return {
+    key: "config.free_grant", group: "config", label: "Free allocation",
+    value: `${granted} credits`,
+    level: cheapest === null ? "warn" : ok ? "good" : "bad",
+    note:
+      cheapest === null
+        ? "could not price the free route to check it"
+        : ok
+          ? `exactly one ${FREE_MAX_DURATION_S}s ${FREE_QUALITY} video on the cheapest model`
+          : `the cheapest video now costs ${cheapest} credits — the grant of ${granted} ${
+              granted > cheapest ? "leaves change over" : "no longer covers one video"
+            }. Update PLANS.free.credits in lib/config.ts.`,
+  };
 }
 
 // Which Stripe account the key talks to, judged against the stage. A test

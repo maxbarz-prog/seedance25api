@@ -1,6 +1,10 @@
 import {
   BillingInterval,
   DEFAULT_PLAN,
+  MODELS,
+  FREE_MAX_DURATION_S,
+  FREE_MODEL,
+  FREE_QUALITY,
   PLANS,
   PlanId,
   planPriceUsd,
@@ -95,4 +99,32 @@ export function rolloverCeiling(plan: PlanId): number {
 
 export function priceOf(plan: PlanId, interval: BillingInterval): number {
   return planPriceUsd(plan, interval);
+}
+
+// What a Free account is allowed to render, checked server-side.
+//
+// The allocation buys exactly one cheapest-route video, so those are the only
+// settings it can use. Returning the reason rather than a boolean lets the
+// API say which part was refused — "Free renders at 480p" is actionable,
+// "not allowed" is not.
+export function freeRouteRefusal(opts: {
+  model: string;
+  quality: string;
+  upscales: boolean;
+  durationS: number;
+}): string | null {
+  if (opts.model !== FREE_MODEL) {
+    const label = MODELS[FREE_MODEL as keyof typeof MODELS]?.label ?? FREE_MODEL;
+    return `The Free plan generates with ${label}. Pick a plan to use the other models.`;
+  }
+  if (opts.quality !== FREE_QUALITY) {
+    return `The Free plan renders at ${FREE_QUALITY}. Pick a plan for higher quality.`;
+  }
+  if (opts.upscales) {
+    return "Upscaling needs a paid plan.";
+  }
+  if (opts.durationS > FREE_MAX_DURATION_S) {
+    return `The Free plan makes ${FREE_MAX_DURATION_S}-second videos. Pick a plan for longer ones.`;
+  }
+  return null;
 }

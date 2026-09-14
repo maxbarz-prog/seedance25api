@@ -18,7 +18,13 @@ import {
   OUTPUT_MODE_IDS,
   resolveMode,
 } from "@/lib/config";
-import { canBuyCredits, effectivePlan, isDeactivated, storageQuotaBytes } from "@/lib/plan";
+import {
+  canBuyCredits,
+  effectivePlan,
+  freeRouteRefusal,
+  isDeactivated,
+  storageQuotaBytes,
+} from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import { clientIp, userAgent } from "@/lib/request";
 import {
@@ -123,6 +129,17 @@ export async function POST(
     );
   }
   const onFree = effectivePlan(user) === "free";
+  if (onFree) {
+    const refusal = freeRouteRefusal({
+      model,
+      quality: OUTPUT_MODES[sourceMode].quality,
+      upscales: OUTPUT_MODES[sourceMode].upscale !== "none",
+      durationS: b.durationS,
+    });
+    if (refusal) {
+      return NextResponse.json({ error: "plan_required", message: refusal }, { status: 402 });
+    }
+  }
   if (onFree && freeTierBudgetLeft(await freeTierSpentToday()) < q.credits) {
     return NextResponse.json(
       {

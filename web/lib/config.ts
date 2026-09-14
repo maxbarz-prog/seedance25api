@@ -117,13 +117,21 @@ export const PLANS = {
     id: "free",
     label: "Free",
     monthlyUsd: 0,
-    // One grant on signup, never renewed.
-    credits: 125,
+    // One grant on signup, never renewed — and exactly one video's worth.
+    // 8 credits is what the cheapest route costs at the shortest length:
+    // Seedance 2.0 Mini, 480p as rendered, 4s, no audio, no upscale. Nothing
+    // is left over, which is the point: a free account is a demonstration,
+    // not an allowance, and at $0.08 a fake one is not worth farming.
+    //
+    // This number is derived from the price table, not independent of it. If
+    // provider rates move, it drifts — the admin status page compares it
+    // against a live quote and says so (lib/status.ts, config.free_grant).
+    credits: 8,
     recurring: false,
     storageGb: 5,
-    // Free members upscale like everyone else: a 480p clip is not a fair
-    // sample of what the service does.
-    canUpscale: true,
+    // Upscaling is a paid feature. The free allocation cannot afford it
+    // anyway, and leaving it selectable only produces a refusal at submit.
+    canUpscale: false,
     // No card on file, so no top-ups. The allocation is the whole offer.
     canBuyCredits: false,
     // Months of unspent allocation that survive a renewal. Free never
@@ -618,6 +626,20 @@ export function qualitiesForModel(model: ModelId): Quality[] {
     (q) => VERIFIED_QUALITIES.includes(q) && supportsQuality(model, q)
   );
 }
+
+// What a Free account may generate. The allocation is one video's worth, so
+// the route it can take is the one that video is: cheapest model, lowest
+// quality, shortest length, no upscale. Everything else needs a plan, and is
+// refused by the API rather than merely hidden by the page.
+export const FREE_MODEL = "seedance-2.0-mini";
+export const FREE_QUALITY = "480p";
+export const FREE_MAX_DURATION_S = 4;
+
+// How many signup grants one address may collect in a day. A speed bump, not
+// a wall: a determined person has another address and another network, and
+// the real defence is that the grant is worth $0.08. Set high enough that a
+// shared office or a mobile carrier NAT does not punish real people.
+export const FREE_GRANTS_PER_IP_PER_DAY = 5;
 
 export const MIN_DURATION_S = 4;
 export const MAX_DURATION_S = 30; // absolute ceiling (Seedance 2.5)
