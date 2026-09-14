@@ -183,7 +183,10 @@ function encodeWeb(clip, masterPath) {
     "-movflags", "+faststart", "-an",
     mp4,
   ]);
-  sh(FFMPEG, ["-y", "-i", masterPath, "-vf", "scale=1920:-2", "-frames:v", "1", "-q:v", "3", jpg]);
+  // The poster is what shows until the clip plays. Not frame 0: a clip
+  // often opens on a blur or an empty frame before the subject arrives, and
+  // the hero did exactly that. A second in, the shot is what it is about.
+  sh(FFMPEG, ["-y", "-ss", "1", "-i", masterPath, "-vf", "scale=1920:-2", "-frames:v", "1", "-q:v", "3", jpg]);
   return { mp4, jpg };
 }
 
