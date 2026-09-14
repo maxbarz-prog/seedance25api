@@ -134,6 +134,7 @@ interface Money {
   issues: MoneyIssue[];
   owedCredits: number;
   frozen: { userId: string; email?: string; freeze: { reason: string; detail?: string; at: number } }[];
+  strikesEnabled: boolean;
 }
 
 export default function AdminPage() {
@@ -362,6 +363,39 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Content strikes. We run no moderation of our own: the provider
+            refuses the prompt and this only counts how often. Switching it
+            off changes nothing about what will render — it just stops three
+            refusals in a day from freezing the account, which is what you
+            want while deliberately probing what the provider allows. */}
+        {money && (
+          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+            <span className="text-sm text-muted">
+              Content strikes:{" "}
+              <strong className={money.strikesEnabled ? "text-ink" : "text-bad"}>
+                {money.strikesEnabled ? "counting" : "not counting"}
+              </strong>
+              {money.strikesEnabled
+                ? " — three provider refusals in a day freeze the account."
+                : " — refusals are logged but never freeze an account."}
+            </span>
+            <button
+              onClick={() =>
+                moneyAction(
+                  { action: "strikes", enabled: !money.strikesEnabled },
+                  money.strikesEnabled
+                    ? "Stop counting content strikes? Accounts will no longer be frozen for repeated provider refusals."
+                    : "Start counting content strikes again?"
+                )
+              }
+              disabled={moneyBusy}
+              className="rounded-full border border-line px-4 py-1.5 text-sm hover:border-accent disabled:opacity-50"
+            >
+              {money.strikesEnabled ? "Stop counting" : "Start counting"}
+            </button>
           </div>
         )}
 

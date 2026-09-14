@@ -187,10 +187,29 @@ export async function recordFreeTierSpend(credits: number): Promise<number> {
   return addSystemCounter(`free-spend#${dayKey()}`, credits);
 }
 
+// Strike counting, switchable from the money desk.
+//
+// We run no moderation of our own — the provider refuses the prompt and we
+// only count how often that happens. So this switch does NOT make anything
+// generate that would not have; it only stops the counter from freezing an
+// account. That matters when someone is deliberately probing what the
+// provider refuses, which on a test stage is a reasonable thing to do and
+// would otherwise lock the tester out after three tries.
+const STRIKES_OFF = "strikes:off";
+
+export async function strikesEnabled(): Promise<boolean> {
+  return !(await getSystem(STRIKES_OFF));
+}
+
+export async function setStrikesEnabled(on: boolean): Promise<void> {
+  await setSystem(STRIKES_OFF, on ? null : String(Date.now()));
+}
+
 // A moderation rejection against this member. The third in a day freezes
 // the account: the provider bans keys, not users, so a member who keeps
 // sending prohibited prompts is a risk to every other member's service.
 export async function recordContentStrike(userId: string, detail: string): Promise<number> {
+  if (!(await strikesEnabled())) return 0;
   const strikes = await addSystemCounter(`strikes#${userId}#${dayKey()}`, 1);
   if (strikes >= CONTENT_STRIKES_PER_DAY && !(await accountFrozen(userId))) {
     await freezeAccount(userId, "content policy", `${strikes} moderation rejections today; last: ${detail.slice(0, 120)}`);

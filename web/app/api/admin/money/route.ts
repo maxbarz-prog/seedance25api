@@ -9,6 +9,8 @@ import {
   frozenAccounts,
   halt,
   setDailyTopupLimit,
+  setStrikesEnabled,
+  strikesEnabled,
   unfreezeAccount,
 } from "@/lib/money";
 import { refundUnspentCredits } from "@/lib/refunds";
@@ -20,7 +22,12 @@ import { userByEmail } from "@/lib/db";
 export async function GET() {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  const [stop, issues, frozen] = await Promise.all([currentHalt(), moneyIssues(), frozenAccounts()]);
+  const [stop, issues, frozen, strikes] = await Promise.all([
+    currentHalt(),
+    moneyIssues(),
+    frozenAccounts(),
+    strikesEnabled(),
+  ]);
   const emails = new Map<string, string>();
   for (const id of [...issues.map((i) => i.userId), ...frozen.map((f) => f.userId)]) {
     if (emails.has(id)) continue;
@@ -33,6 +40,8 @@ export async function GET() {
     owedCredits: issues.reduce((a, i) => a + i.credits, 0),
     // Accounts stopped by a dispute or a fraud warning, waiting for a human.
     frozen: frozen.map((f) => ({ ...f, email: emails.get(f.userId) })),
+    // Whether a provider moderation rejection still counts towards a freeze.
+    strikesEnabled: strikes,
   });
 }
 
@@ -52,6 +61,9 @@ const Body = z.discriminatedUnion("action", [
   // The standard refund: unspent bought credits at REFUND_UNSPENT_SHARE, to
   // the cards they came from. Spent credits are never in it.
   z.object({ action: z.literal("refund-unspent"), email: z.string().email() }),
+  // Stop provider moderation rejections counting towards an account freeze.
+  // Nothing about what the provider will render changes either way.
+  z.object({ action: z.literal("strikes"), enabled: z.boolean() }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -75,6 +87,10 @@ export async function POST(req: NextRequest) {
     const target = await userByEmail(b.email);
     if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
     await unfreezeAccount(target.id);
+    return NextResponse.json({ ok: true });
+  }
+  if (b.action === "strikes") {
+    await setStrikesEnabled(b.enabled);
     return NextResponse.json({ ok: true });
   }
   if (b.action === "set-limit") {

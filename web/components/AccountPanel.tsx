@@ -416,7 +416,7 @@ export default function AccountPanel() {
           </p>
         )}
         {topupNudge && (
-          <p className="mt-1 text-sm text-bad">Add credits to run your video.</p>
+          <p className="mt-1 text-sm font-medium">Add credits to run your video.</p>
         )}
         {toast && <p className="mt-1 text-sm text-good">{toast}</p>}
         <div className="mt-4 flex flex-wrap gap-3">
