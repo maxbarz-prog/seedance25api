@@ -10,7 +10,9 @@ import {
   halt,
   setDailyTopupLimit,
   setStrikesEnabled,
+  setTopupLimitsEnabled,
   strikesEnabled,
+  topupLimitsEnabled,
   unfreezeAccount,
 } from "@/lib/money";
 import { refundUnspentCredits } from "@/lib/refunds";
@@ -22,11 +24,12 @@ import { userByEmail } from "@/lib/db";
 export async function GET() {
   const admin = await requireAdmin();
   if (!admin) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  const [stop, issues, frozen, strikes] = await Promise.all([
+  const [stop, issues, frozen, strikes, limits] = await Promise.all([
     currentHalt(),
     moneyIssues(),
     frozenAccounts(),
     strikesEnabled(),
+    topupLimitsEnabled(),
   ]);
   const emails = new Map<string, string>();
   for (const id of [...issues.map((i) => i.userId), ...frozen.map((f) => f.userId)]) {
@@ -42,6 +45,8 @@ export async function GET() {
     frozen: frozen.map((f) => ({ ...f, email: emails.get(f.userId) })),
     // Whether a provider moderation rejection still counts towards a freeze.
     strikesEnabled: strikes,
+    // Whether the age-based daily top-up ceilings apply to everyone.
+    topupLimitsEnabled: limits,
   });
 }
 
@@ -64,6 +69,9 @@ const Body = z.discriminatedUnion("action", [
   // Stop provider moderation rejections counting towards an account freeze.
   // Nothing about what the provider will render changes either way.
   z.object({ action: z.literal("strikes"), enabled: z.boolean() }),
+  // The blanket age-based top-up ceilings. A limit set for one account by
+  // support is separate and unaffected.
+  z.object({ action: z.literal("topup-limits"), enabled: z.boolean() }),
 ]);
 
 export async function POST(req: NextRequest) {
@@ -87,6 +95,10 @@ export async function POST(req: NextRequest) {
     const target = await userByEmail(b.email);
     if (!target) return NextResponse.json({ error: "No such user." }, { status: 404 });
     await unfreezeAccount(target.id);
+    return NextResponse.json({ ok: true });
+  }
+  if (b.action === "topup-limits") {
+    await setTopupLimitsEnabled(b.enabled);
     return NextResponse.json({ ok: true });
   }
   if (b.action === "strikes") {

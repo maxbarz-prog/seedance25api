@@ -43,8 +43,8 @@ interface Me {
   deactivated: boolean;
   deactivatedAt: number | null;
   frozen: boolean;
-  topupLimitUsd: number;
-  topupRemainingTodayUsd: number;
+  topupLimitUsd: number | null;
+  topupRemainingTodayUsd: number | null;
   topupLimitRisesInDays: number | null;
   topupNextLimitUsd: number | null;
   ledger: LedgerEntry[];
@@ -424,16 +424,16 @@ export default function AccountPanel() {
             <button
               key={usd}
               onClick={() => topup(usd)}
-              disabled={busy !== null || usd > me.topupRemainingTodayUsd}
+              disabled={busy !== null || (me.topupRemainingTodayUsd !== null && usd > me.topupRemainingTodayUsd)}
               className="rounded-xl border border-line px-5 py-2 text-sm hover:border-accent disabled:opacity-50"
             >
               +${usd}
             </button>
           ))}
         </div>
-        {me.canBuyCredits && (
-          // The daily limit, stated before it is hit. New accounts start low
-          // and rise with age; anyone who needs more asks, and is looked at.
+        {me.canBuyCredits && me.topupLimitUsd !== null && me.topupRemainingTodayUsd !== null && (
+          // The daily limit, stated before it is hit — and nothing at all when
+          // no limit applies, rather than a ceiling nobody is under.
           <p className="mt-2 text-xs text-muted">
             Daily limit ${me.topupLimitUsd}
             {me.topupRemainingTodayUsd < me.topupLimitUsd &&

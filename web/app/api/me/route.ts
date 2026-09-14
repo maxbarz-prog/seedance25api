@@ -62,8 +62,12 @@ export async function GET() {
       frozen: !!frozen,
       // The daily top-up limit and what is left of it, so the account page can
       // say so next to the buttons instead of after a refused click.
-      topupLimitUsd: limit.usdPerDay,
-      topupRemainingTodayUsd: Math.max(0, Math.floor(limit.usdPerDay - topupsLast24hUsd(ledger))),
+      // Null when no limit applies, so the page says nothing rather than
+      // inventing a ceiling.
+      topupLimitUsd: limit.unlimited ? null : limit.usdPerDay,
+      topupRemainingTodayUsd: limit.unlimited
+        ? null
+        : Math.max(0, Math.floor(limit.usdPerDay - topupsLast24hUsd(ledger))),
       topupLimitRisesInDays: limit.risesInDays ?? null,
       topupNextLimitUsd: limit.nextUsdPerDay ?? null,
       ledger: ledger.slice(0, 25),

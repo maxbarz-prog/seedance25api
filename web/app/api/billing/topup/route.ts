@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   const ledger = await ledgerFor(user.id, 200);
   const limit = await dailyTopupLimit(user);
   const todayUsd = topupsLast24hUsd(ledger);
-  if (todayUsd + usd > limit.usdPerDay) {
+  if (!limit.unlimited && todayUsd + usd > limit.usdPerDay) {
     const room = Math.max(0, Math.floor(limit.usdPerDay - todayUsd));
     return NextResponse.json(
       {

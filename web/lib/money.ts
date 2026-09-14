@@ -7,6 +7,7 @@ import {
   TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE,
   FREE_TIER_DAILY_BUDGET_CREDITS,
   CONTENT_STRIKES_PER_DAY,
+  TOPUP_LIMITS_ON_BY_DEFAULT,
 } from "./config";
 import { addSystemCounter, getSystem, listSystem, setSystem, Job, LedgerEntry, User } from "./db";
 import { rates } from "./pricing";
@@ -131,23 +132,48 @@ export async function frozenAccounts(): Promise<{ userId: string; freeze: Freeze
 const LIMIT_PREFIX = "limit#";
 
 export interface DailyLimit {
+  // Meaningless when unlimited — check that first.
   usdPerDay: number;
-  source: "age" | "support";
+  unlimited: boolean;
+  source: "age" | "support" | "off";
   // Age-based only: when the next step up arrives, in days from now.
   risesInDays?: number;
   nextUsdPerDay?: number;
 }
 
+// Whether the age-based limits apply at all, as a runtime switch over the
+// default in config. A limit support set for ONE account is not part of this
+// and keeps applying either way: turning the blanket policy off should not
+// quietly release an account somebody deliberately capped.
+const TOPUP_LIMITS_KEY = "topup-limits";
+
+export async function topupLimitsEnabled(): Promise<boolean> {
+  const v = await getSystem(TOPUP_LIMITS_KEY);
+  if (v === "on") return true;
+  if (v === "off") return false;
+  return TOPUP_LIMITS_ON_BY_DEFAULT;
+}
+
+export async function setTopupLimitsEnabled(on: boolean): Promise<void> {
+  await setSystem(TOPUP_LIMITS_KEY, on ? "on" : "off");
+}
+
 export async function dailyTopupLimit(user: Pick<User, "id" | "created_at">): Promise<DailyLimit> {
   const raw = await getSystem(LIMIT_PREFIX + user.id);
   const custom = raw ? Number(raw) : NaN;
-  if (Number.isFinite(custom) && custom > 0) return { usdPerDay: custom, source: "support" };
+  if (Number.isFinite(custom) && custom > 0) {
+    return { usdPerDay: custom, unlimited: false, source: "support" };
+  }
+  if (!(await topupLimitsEnabled())) {
+    return { usdPerDay: 0, unlimited: true, source: "off" };
+  }
   const ageDays = (Date.now() - user.created_at) / 86_400_000;
   const i = TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE.findIndex((t) => ageDays < t.underDays);
   const tier = TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE[i];
   const next = TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE[i + 1];
   return {
     usdPerDay: tier.usdPerDay,
+    unlimited: false,
     source: "age",
     ...(next ? { risesInDays: Math.max(1, Math.ceil(tier.underDays - ageDays)), nextUsdPerDay: next.usdPerDay } : {}),
   };

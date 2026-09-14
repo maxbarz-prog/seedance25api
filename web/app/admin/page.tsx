@@ -135,6 +135,7 @@ interface Money {
   owedCredits: number;
   frozen: { userId: string; email?: string; freeze: { reason: string; detail?: string; at: number } }[];
   strikesEnabled: boolean;
+  topupLimitsEnabled: boolean;
 }
 
 export default function AdminPage() {
@@ -363,6 +364,38 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* The blanket daily top-up ceilings. Off by default while we are
+            courting the first customers — a paying member told they may not
+            pay us costs more than the risk it bounds. A per-member limit set
+            from "One member" above is separate and still applies. */}
+        {money && (
+          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-line pt-4">
+            <span className="text-sm text-muted">
+              Daily top-up limits:{" "}
+              <strong className={money.topupLimitsEnabled ? "text-ink" : "text-bad"}>
+                {money.topupLimitsEnabled ? "on" : "off"}
+              </strong>
+              {money.topupLimitsEnabled
+                ? " — new accounts are capped by age, rising to $200/day."
+                : " — nobody is capped by age. Per-member limits still apply."}
+            </span>
+            <button
+              onClick={() =>
+                moneyAction(
+                  { action: "topup-limits", enabled: !money.topupLimitsEnabled },
+                  money.topupLimitsEnabled
+                    ? "Turn off the age-based daily top-up limits for everyone?"
+                    : "Turn the age-based daily top-up limits back on? New accounts will be capped at $30/day."
+                )
+              }
+              disabled={moneyBusy}
+              className="rounded-full border border-line px-4 py-1.5 text-sm hover:border-accent disabled:opacity-50"
+            >
+              {money.topupLimitsEnabled ? "Turn off" : "Turn on"}
+            </button>
           </div>
         )}
 

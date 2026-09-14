@@ -55,6 +55,16 @@ export const TOPUP_DAILY_LIMITS_BY_ACCOUNT_AGE: { underDays: number; usdPerDay: 
   { underDays: 90, usdPerDay: 100 },
   { underDays: Infinity, usdPerDay: 200 },
 ];
+// Whether the daily top-up limits above apply at all. OFF while we are
+// courting the first customers: the limits bound a risk we have not yet
+// measured, and the cost of getting them wrong is a paying member told they
+// may not pay us. Everything else that guards a card still stands — the
+// $10-$1000 per-transaction bounds, 3-D Secure on new accounts, the
+// saved-card daily ceiling that routes large amounts through Stripe's own
+// checks, and the freeze on any dispute or fraud warning. Flip at runtime
+// from the admin money desk; this constant is only the default.
+export const TOPUP_LIMITS_ON_BY_DEFAULT = false;
+
 // What comes back on a refund of UNSPENT bought credits, as a share of their
 // value. The rest covers the card fees paid both ways and the handling. Spent
 // credits are never refunded as money: the provider was paid for those
