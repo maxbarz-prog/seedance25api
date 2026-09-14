@@ -1,5 +1,6 @@
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import {
+  BatchWriteCommand,
   DeleteCommand,
   DynamoDBDocumentClient,
   GetCommand,
@@ -19,11 +20,13 @@ import {
   AdminUserRow,
   BillingInterval,
   DataStore,
+  Event,
   Job,
   JobStatus,
   LedgerEntry,
   MemberCount,
   Membership,
+  OnboardingFields,
   User,
 } from "./types";
 
@@ -35,6 +38,7 @@ import {
 //                                 idempotency guards live at pk = ext#<id>)
 //   jobs:   pk id;               GSI "user"    (hashKey user_id, rangeKey created_at),
 //                                GSI "pending" (hashKey pending, rangeKey created_at)
+//   events: pk day, sk sk        (day = UTC date, sk = createdAt#id; TTL on `expires`)
 // Admin aggregation scans tables — fine at MVP scale, revisit past ~10k rows.
 //
 // The "pending" index is sparse: PENDING_KEY is written while a job is
@@ -59,6 +63,10 @@ const LEDGER = process.env.TABLE_LEDGER!;
 // real user can occupy it.
 const SYSTEM_PK = "system";
 const JOBS = process.env.TABLE_JOBS!;
+const EVENTS = process.env.TABLE_EVENTS!;
+// Growth events are kept for half a year. The report reads 90 days at most;
+// the rest is headroom for a question nobody has asked yet, not an archive.
+const EVENT_TTL_S = 180 * 86_400;
 
 export class DynamoStore implements DataStore {
   private doc: DynamoDBDocumentClient;
@@ -601,6 +609,68 @@ export class DynamoStore implements DataStore {
       }
       start = r.LastEvaluatedKey;
     } while (start);
+    return out;
+  }
+
+  async setOnboarding(userId: string, fields: OnboardingFields): Promise<void> {
+    const keys = Object.keys(fields) as (keyof OnboardingFields)[];
+    if (!keys.length) return;
+    await this.doc.send(
+      new UpdateCommand({
+        TableName: USERS,
+        Key: { id: userId },
+        UpdateExpression: "SET " + keys.map((k) => `#${k} = :${k}`).join(", "),
+        ExpressionAttributeNames: Object.fromEntries(keys.map((k) => [`#${k}`, k])),
+        ExpressionAttributeValues: Object.fromEntries(keys.map((k) => [`:${k}`, fields[k] ?? null])),
+      })
+    );
+  }
+
+  async addEvents(events: Event[]): Promise<void> {
+    // BatchWrite takes 25 at a time and may hand some back unprocessed under
+    // load; those are retried once and then dropped. An event is a tally
+    // mark, not money — losing one under pressure beats failing the request
+    // that carried it.
+    const items = events.map((e) => ({
+      ...e,
+      sk: `${String(e.created_at).padStart(15, "0")}#${e.id}`,
+      expires: Math.floor(e.created_at / 1000) + EVENT_TTL_S,
+    }));
+    for (let i = 0; i < items.length; i += 25) {
+      let batch = items.slice(i, i + 25).map((Item) => ({ PutRequest: { Item } }));
+      for (let attempt = 0; attempt < 2 && batch.length; attempt++) {
+        const r = await this.doc.send(
+          new BatchWriteCommand({ RequestItems: { [EVENTS]: batch } })
+        );
+        const left = r.UnprocessedItems?.[EVENTS] ?? [];
+        batch = left as typeof batch;
+      }
+      if (batch.length) console.warn(`events: ${batch.length} dropped after retry`);
+    }
+  }
+
+  async eventsForDay(day: string, limit = 50000): Promise<Event[]> {
+    const out: Event[] = [];
+    let ExclusiveStartKey: Record<string, unknown> | undefined;
+    do {
+      const r = await this.doc.send(
+        new QueryCommand({
+          TableName: EVENTS,
+          KeyConditionExpression: "#d = :d",
+          ExpressionAttributeNames: { "#d": "day" },
+          ExpressionAttributeValues: { ":d": day },
+          ExclusiveStartKey,
+          Limit: Math.min(1000, limit - out.length),
+        })
+      );
+      for (const it of r.Items ?? []) {
+        const e = { ...(it as Event & { sk?: string; expires?: number }) };
+        delete e.sk;
+        delete e.expires;
+        out.push(e);
+      }
+      ExclusiveStartKey = r.LastEvaluatedKey;
+    } while (ExclusiveStartKey && out.length < limit);
     return out;
   }
 

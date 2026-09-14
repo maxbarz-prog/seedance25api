@@ -22,6 +22,24 @@ Revenue comes from the membership, not from marking up generation.
   subscription membership) with signature-verified webhook and idempotent credit
   grants; a mock mode covers local dev without keys.
 
+## Pages and the way in
+
+- `/` — the landing page: the tagline, the showcase clips
+  (`public/landing/`, rendered by the landing-showcase workflow from the
+  list in `lib/landing.ts`), and one call to action, `/create`. White
+  whatever the system theme; the only page whose tab carries the tagline.
+- `/create` — the composer. Public and cached like the landing page; a
+  signed-out visitor types a prompt, and pressing Generate (or Enter) is
+  what leads to sign-up. The draft survives in localStorage.
+- `/welcome` — the welcome flow a new account is sent to after sign-up:
+  finalize (Terms and Privacy), referral code or Skip, a two-question
+  survey. Answers live on the user row (`lib/onboarding.ts`); it ends at
+  `/create` with a one-time upgrade offer (`components/UpgradeModal.tsx`).
+- **Growth events** (`lib/events.ts`) — the browser reports page views, welcome
+  steps and the offer through `/api/events`; the server records account
+  creation, jobs and paid plans where they happen. `/admin` reads them back
+  as a funnel, by window, in the Growth section.
+
 ## Run locally
 
 ```bash

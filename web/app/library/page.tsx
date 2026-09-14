@@ -55,7 +55,7 @@ export default function LibraryPage() {
       {jobs.length === 0 ? (
         <p className="mt-4 text-muted">
           Nothing here yet.{" "}
-          <Link href="/" className="underline">
+          <Link href="/create" className="underline">
             Make your first video
           </Link>
           .

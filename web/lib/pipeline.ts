@@ -15,6 +15,7 @@ import { sendEmail } from "./email";
 import { EXTEND_CONTEXT_S, modeInfo, SITE_DOMAIN, SITE_NAME } from "./config";
 import { concat, durationOf, posterFromUrl, trimTail } from "./video";
 import { checkMargin, currentHalt, recordContentStrike } from "./money";
+import { record } from "./events";
 
 // Job pipeline: queued -> generating -> [upscaling ->] ready | failed.
 //
@@ -332,6 +333,7 @@ async function cleanupContext(job: Job) {
 // output into our own storage is the last step before the row is complete.
 async function finalize(job: Job, providerUrl: string) {
   await cleanupContext(job);
+  await record("job_ready", job.user_id, { model: job.model, mode: job.mode, kind: job.kind ?? "generate" });
   try {
     // An extension comes back as the continuation only. Members asked for a
     // longer video, so join it to the source before it lands in the library.
@@ -381,6 +383,7 @@ async function finalize(job: Job, providerUrl: string) {
 async function fail(job: Job, internalError?: string) {
   if (internalError) console.error(`job ${job.id} failed upstream:`, internalError);
   await cleanupContext(job);
+  await record("job_failed", job.user_id, { model: job.model, mode: job.mode, kind: job.kind ?? "generate" });
   // A moderation rejection counts against the member; enough of them in a
   // day and the account is frozen for a human. Never fatal to the refund.
   if (isStrike(internalError)) {

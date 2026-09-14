@@ -10,10 +10,12 @@ import {
   AdminJobRow,
   AdminUserRow,
   DataStore,
+  Event,
   Job,
   JobStatus,
   LedgerEntry,
   Membership,
+  OnboardingFields,
   User,
   BillingInterval,
 } from "./types";
@@ -83,6 +85,17 @@ export class SqliteStore implements DataStore {
         k TEXT PRIMARY KEY,
         v TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS events (
+        id TEXT PRIMARY KEY,
+        day TEXT NOT NULL,
+        name TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        visitor TEXT,
+        props TEXT,
+        attr TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_events_day ON events(day, created_at);
     `);
     // Additive migration for databases created before the model column.
     const adds = [
@@ -110,6 +123,12 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE ledger ADD COLUMN granted_delta INTEGER`,
       `ALTER TABLE users ADD COLUMN deactivated_at INTEGER`,
       `ALTER TABLE users ADD COLUMN cancel_at_period_end INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE users ADD COLUMN terms_accepted_at INTEGER`,
+      `ALTER TABLE users ADD COLUMN referral_answered_at INTEGER`,
+      `ALTER TABLE users ADD COLUMN survey_role TEXT`,
+      `ALTER TABLE users ADD COLUMN survey_goal TEXT`,
+      `ALTER TABLE users ADD COLUMN onboarded_at INTEGER`,
+      `ALTER TABLE users ADD COLUMN upgrade_prompted_at INTEGER`,
     ];
     for (const sql of adds) {
       try {
@@ -412,6 +431,48 @@ export class SqliteStore implements DataStore {
       .prepare(`SELECT k, v FROM system WHERE k LIKE ? ESCAPE '\\' ORDER BY k`)
       .all(prefix.replace(/[%_\\]/g, "\\$&") + "%") as { k: string; v: string }[];
     return rows.map((r) => ({ key: r.k, value: r.v }));
+  }
+
+  async setOnboarding(userId: string, fields: OnboardingFields): Promise<void> {
+    const keys = Object.keys(fields) as (keyof OnboardingFields)[];
+    if (!keys.length) return;
+    this.db()
+      .prepare(`UPDATE users SET ${keys.map((k) => `${k} = @${k}`).join(", ")} WHERE id = @id`)
+      .run({ ...fields, id: userId });
+  }
+
+  async addEvents(events: Event[]): Promise<void> {
+    if (!events.length) return;
+    const d = this.db();
+    const ins = d.prepare(
+      `INSERT OR IGNORE INTO events (id, day, name, actor, visitor, props, attr, created_at)
+       VALUES (@id, @day, @name, @actor, @visitor, @props, @attr, @created_at)`
+    );
+    d.transaction(() => {
+      for (const e of events) {
+        ins.run({
+          id: e.id,
+          day: e.day,
+          name: e.name,
+          actor: e.actor,
+          visitor: e.visitor ?? null,
+          props: e.props ? JSON.stringify(e.props) : null,
+          attr: e.attr ? JSON.stringify(e.attr) : null,
+          created_at: e.created_at,
+        });
+      }
+    })();
+  }
+
+  async eventsForDay(day: string, limit = 50000): Promise<Event[]> {
+    const rows = this.db()
+      .prepare(`SELECT * FROM events WHERE day = ? ORDER BY created_at ASC LIMIT ?`)
+      .all(day, limit) as (Omit<Event, "props" | "attr"> & { props: string | null; attr: string | null })[];
+    return rows.map((r) => ({
+      ...r,
+      props: r.props ? JSON.parse(r.props) : null,
+      attr: r.attr ? JSON.parse(r.attr) : null,
+    }));
   }
 
   async moneyIssues(): Promise<MoneyIssue[]> {

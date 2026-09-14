@@ -9,11 +9,13 @@ export type {
   AdminData,
   AdminJobRow,
   AdminUserRow,
+  Event,
   Job,
   JobMode,
   JobStatus,
   LedgerEntry,
   Membership,
+  OnboardingFields,
   User,
 } from "./data/types";
 
@@ -70,3 +72,6 @@ export const addSystemCounter: DataStore["addSystemCounter"] = (...a) =>
   store().addSystemCounter(...a);
 export const listSystem: DataStore["listSystem"] = (...a) => store().listSystem(...a);
 export const moneyIssues: DataStore["moneyIssues"] = () => store().moneyIssues();
+export const setOnboarding: DataStore["setOnboarding"] = (...a) => store().setOnboarding(...a);
+export const addEvents: DataStore["addEvents"] = (...a) => store().addEvents(...a);
+export const eventsForDay: DataStore["eventsForDay"] = (...a) => store().eventsForDay(...a);

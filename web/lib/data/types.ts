@@ -48,6 +48,60 @@ export interface User {
   // 10th" from "cancelled, ends on the 10th", and a member who cancels sees
   // no evidence it worked.
   cancel_at_period_end?: boolean;
+  // The welcome flow, one field per step so a half-finished run resumes at
+  // the right place rather than from the top. All absent on accounts made
+  // before the flow existed; those are never sent through it.
+  terms_accepted_at?: number | null;
+  referral_answered_at?: number | null;
+  survey_role?: string | null;
+  survey_goal?: string | null;
+  onboarded_at?: number | null;
+  // When the one-time upgrade offer was shown after the welcome flow. Shown
+  // once, ever — a second showing is nagging.
+  upgrade_prompted_at?: number | null;
+  created_at: number;
+}
+
+// What the welcome flow may write on a user. Everything else on the row is
+// owned by billing or auth and has its own setter.
+export type OnboardingFields = Partial<
+  Pick<
+    User,
+    | "terms_accepted_at"
+    | "referral_answered_at"
+    | "survey_role"
+    | "survey_goal"
+    | "onboarded_at"
+    | "upgrade_prompted_at"
+  >
+>;
+
+// One thing that happened, for the growth report. Written by the browser
+// (a page seen, a step completed, a modal dismissed) through /api/events and
+// by the server where the truth lives (an account created, a job started, a
+// plan paid for). Read only in aggregate, by day, on the admin page.
+//
+// `actor` is the person as best we know them: the user id once signed in,
+// otherwise the visitor id the browser minted. An `identify` event carries
+// both, which is how a funnel that starts anonymous and ends paid is stitched
+// into one line.
+export interface Event {
+  id: string;
+  // UTC calendar day, "2026-09-14". The partition the report reads by.
+  day: string;
+  name: string;
+  actor: string;
+  // The browser's visitor id, when the event came from a browser. Present
+  // alongside `actor` on signed-in events so the two can be linked.
+  visitor?: string | null;
+  // Small, flat, and bounded (see lib/events.ts). Never free text from the
+  // page — a survey answer is one of a fixed set, a referral code is at most
+  // twelve characters.
+  props?: Record<string, string | number | boolean | null> | null;
+  // Where this person first came from: referral code, utm_*, landing path,
+  // referrer host. Captured once by the browser and repeated on every event
+  // so an answer never depends on joining back to a first visit.
+  attr?: Record<string, string> | null;
   created_at: number;
 }
 
@@ -261,4 +315,12 @@ export interface DataStore {
 
   // Charges with no matching spend — see lib/data/reconcile.ts.
   moneyIssues(): Promise<MoneyIssue[]>;
+
+  setOnboarding(userId: string, fields: OnboardingFields): Promise<void>;
+
+  // Growth events (lib/events.ts). Written in small batches and read back a
+  // day at a time: the report wants everything in a window, and a day is
+  // the natural unit to page by.
+  addEvents(events: Event[]): Promise<void>;
+  eventsForDay(day: string, limit?: number): Promise<Event[]>;
 }

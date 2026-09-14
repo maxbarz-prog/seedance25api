@@ -27,6 +27,7 @@ import {
 } from "@/lib/plan";
 import { advanceJob } from "@/lib/pipeline";
 import { clientIp, userAgent } from "@/lib/request";
+import { record } from "@/lib/events";
 import {
   accountFrozen,
   currentHalt,
@@ -206,6 +207,13 @@ export async function POST(
     created_ua: userAgent(req),
   });
   if (onFree) await recordFreeTierSpend(q.credits);
+  await record("job_created", user.id, {
+    kind: "extend",
+    model,
+    mode: sourceMode,
+    credits: q.credits,
+    plan: effectivePlan(user),
+  });
   await advanceJob(job.id);
   return NextResponse.json({ id: job.id }, { status: 201 });
 }

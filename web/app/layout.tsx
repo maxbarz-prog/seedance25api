@@ -4,14 +4,17 @@ import "./globals.css";
 import Link from "next/link";
 import Header from "@/components/Header";
 import Providers from "@/components/Providers";
-import { SITE_NAME, SITE_TAGLINE } from "@/lib/config";
+import { SITE_NAME } from "@/lib/config";
 import { SUPPORT_EMAIL } from "@/lib/legal";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
+// The tab says the name and nothing else. The landing page is the one
+// exception (app/page.tsx sets an absolute title with the tagline): once
+// someone is inside, the name is all the tab needs to say.
 export const metadata: Metadata = {
-  title: `${SITE_NAME} — ${SITE_TAGLINE}`,
+  title: { default: SITE_NAME, absolute: SITE_NAME },
   description:
     "Generate Seedance video, upscaled to crisp 1080p. Members generate at our cost — the membership is the business model.",
 };

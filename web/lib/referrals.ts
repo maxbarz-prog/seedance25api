@@ -2,6 +2,7 @@ import { createHmac, randomBytes } from "crypto";
 import { cookies } from "next/headers";
 import { PlanId, REFERRAL_REWARD_USD } from "./config";
 import { getSystem, listSystem, setSystem, setSystemIfAbsent, userById } from "./db";
+import { record } from "./events";
 
 // Invites and referrals.
 //
@@ -213,6 +214,7 @@ export async function recordReferral(refereeId: string, code: string): Promise<R
     createdAt: Date.now(),
   };
   await setSystem(referralKey(refereeId), JSON.stringify(referral));
+  await record("referral_applied", refereeId, { code: referral.code });
   return { ok: true, referral };
 }
 
@@ -234,6 +236,7 @@ export async function vestReferral(refereeId: string): Promise<Referral | null> 
   const vested = { ...referral, vestedAt: Date.now() };
   await setSystem(referralKey(refereeId), JSON.stringify(vested));
   await earnReward(referral.referrerId);
+  await record("referral_vested", refereeId, { code: referral.code });
   return vested;
 }
 

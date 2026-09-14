@@ -10,6 +10,7 @@ import {
   userById,
 } from "./db";
 import { effectivePlan, grantedBalance, rolloverCeiling } from "./plan";
+import { record } from "./events";
 
 // Handing over a plan's credits. Lives apart from billing.ts so that signing
 // up — which grants the free allocation — does not drag the Stripe SDK into
@@ -79,13 +80,16 @@ export async function grantSignupCredits(userId: string) {
   const { freeCreditsEnabled } = await import("./money");
   if (!(await freeCreditsEnabled())) {
     console.log(`signup grant skipped for ${userId}: free credits are switched off`);
+    await record("signup_grant", userId, { granted: false, reason: "switched-off" });
     return;
   }
   if (!(await claimSignupGrantForAddress())) {
     console.warn(`signup grant skipped for ${userId}: address is over its daily share`);
+    await record("signup_grant", userId, { granted: false, reason: "address-cap" });
     return;
   }
   await grantPeriodCredits(userId, "free");
+  await record("signup_grant", userId, { granted: true, credits: PLANS.free.credits });
 }
 
 // Whether this request's address may still collect a signup grant today.

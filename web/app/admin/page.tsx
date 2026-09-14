@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import InviteMinter from "@/components/InviteMinter";
+import GrowthPanel from "@/components/GrowthPanel";
 
 interface Overview {
   totals: {
@@ -520,6 +521,8 @@ export default function AdminPage() {
           )}
         </div>
       </section>
+
+      <GrowthPanel />
 
       <section className="rounded-2xl border border-line bg-surface p-5">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

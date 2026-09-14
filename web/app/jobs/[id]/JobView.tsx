@@ -140,7 +140,7 @@ export default function JobView({ id }: { id: string }) {
     return (
       <div className="py-16 text-center text-muted">
         Video not found.{" "}
-        <Link href="/" className="underline">
+        <Link href="/create" className="underline">
           Back to the composer
         </Link>
       </div>
@@ -175,7 +175,7 @@ export default function JobView({ id }: { id: string }) {
         <div className="mt-8 rounded-2xl border border-line bg-surface p-8 text-center">
           <p className="text-bad">{job.error}</p>
           <Link
-            href="/"
+            href="/create"
             className="mt-4 inline-block rounded-full bg-accent px-6 py-2 text-sm font-medium text-accent-ink"
           >
             Try again
@@ -221,7 +221,7 @@ export default function JobView({ id }: { id: string }) {
               Download
             </a>
             <Link
-              href="/"
+              href="/create"
               className="rounded-full border border-line px-6 py-2 text-sm hover:border-accent"
             >
               Make another
