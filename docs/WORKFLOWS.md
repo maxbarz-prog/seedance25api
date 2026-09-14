@@ -59,6 +59,16 @@ even when the run fails: a render is money already spent, so a stall on the
 next model must not cost the answers already bought. Resume with
 `reuse_run_id` rather than starting over.
 
+### `landing-showcase.yml` — the landing page's clips
+Renders the showcase clips listed in `web/lib/landing.ts` on Seedance 2.5,
+upscales each to 4K, encodes the 1080p web versions the page serves, and
+commits those to the branch it was run on (`web/public/landing/`). The 4K
+masters are kept as the `landing-showcase-4k` artifact. Only missing clips
+are rendered, so a re-run after one failure pays for one clip; `force`
+re-renders everything, `only` limits it to named files. The script refuses
+to pass the `max_usd` cap: about $1.78 for the 1080p hero and $1.05 per
+720p card, $4.94 for the four.
+
 ### `upscale-4k.yml` — one clip to 4K
 Takes a file from an earlier bake-off artifact and upscales it, publishing
 under its own artifact name (`4k-sample`) so looking at one thing does not

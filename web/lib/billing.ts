@@ -15,11 +15,27 @@ import {
   setMembership,
   setStripeIds,
   User,
+  userById,
   userByStripeCustomer,
 } from "./db";
 import { usdToCredits } from "./pricing";
 import { grantPeriodCredits } from "./grants";
 import { intervalOf, planOf } from "./plan";
+import { record } from "./events";
+
+// "Started" means moved from a free plan to a paid one; a renewal, a tier
+// change or a re-sync is not a start. Written once, here, so the growth
+// report's last funnel step is the same event whichever webhook got there.
+async function recordPlanStart(
+  before: Pick<User, "membership"> | null | undefined,
+  userId: string,
+  planId: PlanId,
+  interval: BillingInterval
+) {
+  const wasPaid = !!before && PLANS[planOf(before)].monthlyUsd > 0;
+  const isPaid = PLANS[planId].monthlyUsd > 0;
+  if (!wasPaid && isPaid) await record("plan_started", userId, { plan: planId, interval });
+}
 
 // Stripe wrapper with a mock mode: without STRIPE_SECRET_KEY, checkout calls
 // return internal mock-payment URLs so the whole flow is testable locally.
@@ -358,7 +374,9 @@ export async function applyMembership(
 ) {
   const now = Date.now();
   const renewMs = interval === "year" ? 365 * 24 * 3600e3 : 30 * 24 * 3600e3;
+  const before = await userById(userId);
   await setMembership(userId, planId, renewsAt ?? now + renewMs, interval);
+  await recordPlanStart(before, userId, planId, interval);
   // Subscribing again undoes a previous cancellation.
   await setCancelAtPeriodEnd(userId, false);
   await grantPeriodCredits(userId, planId);
@@ -404,6 +422,7 @@ export async function syncSubscription(sub: Stripe.Subscription): Promise<void> 
   const active = sub.status === "active" || sub.status === "trialing" || sub.status === "past_due";
   if (active && !sub.cancel_at_period_end) {
     await setMembership(user.id, plan, periodEnd, interval);
+    await recordPlanStart(user, user.id, plan, interval);
     await setCancelAtPeriodEnd(user.id, false);
     await setStripeIds(user.id, customerId, sub.id);
   } else if (active && sub.cancel_at_period_end) {

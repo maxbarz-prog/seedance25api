@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { track } from "@/lib/track-client";
 
 export default function AuthForm({ kind }: { kind: "login" | "signup" }) {
   const params = useSearchParams();
+  useEffect(() => {
+    if (kind === "signup") track("signup_viewed", { auth: "builtin" });
+  }, [kind]);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -27,16 +31,17 @@ export default function AuthForm({ kind }: { kind: "login" | "signup" }) {
         return;
       }
       const next = params.get("next");
-      // New members go to the join step; the composer draft is waiting after.
-      // A plan picked on the pricing page rides along, so choosing a tier
-      // there and then signing up does not lose the choice.
-      const join = new URLSearchParams({ join: "1" });
+      // New members go through the welcome flow; the composer draft is
+      // waiting after. A plan picked on the pricing page rides along, so
+      // choosing a tier there and then signing up does not lose the choice.
+      const welcome = new URLSearchParams();
       for (const key of ["plan", "interval"]) {
         const v = params.get(key);
-        if (v) join.set(key, v);
+        if (v) welcome.set(key, v);
       }
+      const qs = welcome.toString();
       window.location.href =
-        kind === "signup" ? `/account?${join.toString()}` : next || "/";
+        kind === "signup" ? `/welcome${qs ? `?${qs}` : ""}` : next || "/create";
     } finally {
       setBusy(false);
     }

@@ -50,3 +50,61 @@ body {
   color: var(--ink);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
+
+/* The landing page is white whatever the system theme: it is the shop
+   window, and the footage is graded for a light surround. The class is put
+   on the root by the page (components/landing/ForceLight.tsx) so the header
+   and footer in the layout go light with it; `.landing` carries the same
+   tokens so the page itself is right before that script runs. Everything
+   past the front door follows the viewer's preference as before. */
+:root.force-light,
+.landing {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --ink: #16181d;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --accent: #4f46e5;
+  --accent-ink: #ffffff;
+  color-scheme: light;
+}
+.landing {
+  background: var(--bg);
+  color: var(--ink);
+}
+
+/* Where a showcase clip goes before it exists on this deployment. */
+.showcase-fallback {
+  background:
+    radial-gradient(60% 80% at 20% 30%, rgba(99, 102, 241, 0.55), transparent 70%),
+    radial-gradient(50% 70% at 80% 70%, rgba(16, 185, 129, 0.4), transparent 70%),
+    linear-gradient(135deg, #1f2937, #0b0f17);
+}
+
+/* The "also powers" row: one continuous crawl, the list repeated once so
+   the seam never shows. Stops on hover, and does not move at all for
+   anyone who asked for less motion. */
+.marquee {
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent, black 12%, black 88%, transparent);
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  animation: marquee 32s linear infinite;
+}
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track { animation: none; flex-wrap: wrap; justify-content: center; width: auto; }
+  .marquee { mask-image: none; }
+  .marquee-track > li[aria-hidden="true"] { display: none; }
+}

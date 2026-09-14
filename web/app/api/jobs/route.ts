@@ -43,6 +43,7 @@ import {
 } from "@/lib/money";
 import { presentJob } from "@/lib/present";
 import { clientIp, userAgent } from "@/lib/request";
+import { record } from "@/lib/events";
 
 const Body = z.object({
   prompt: z.string().min(1).max(MAX_PROMPT_CHARS),
@@ -322,6 +323,13 @@ export async function POST(req: NextRequest) {
     });
     if (onFree) await recordFreeTierSpend(q.credits);
     ids.push(job.id);
+    await record("job_created", user.id, {
+      kind: "generate",
+      model,
+      mode: outputMode,
+      credits: q.credits,
+      plan: effectivePlan(user),
+    });
   }
 
   // Kick the first pipeline step immediately so jobs leave "queued".

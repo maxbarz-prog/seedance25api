@@ -6,6 +6,9 @@ export interface Me {
   balanceCredits: number;
   planLabel: string;
   canBuyCredits: boolean;
+  needsOnboarding?: boolean;
+  upgradePromptedAt?: number | null;
+  onboardedAt?: number | null;
 }
 
 // Who is signed in, asked once per page load and shared.

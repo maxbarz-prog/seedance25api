@@ -50,6 +50,8 @@ export async function currentUser(): Promise<User | null> {
     // No password for Clerk-managed identities; the built-in login refuses
     // to match this sentinel.
     const created = await createUser(email, "clerk");
+    const { record } = await import("./events");
+    await record("account_created", created.id, { auth: "clerk" });
     // Same free allocation the built-in signup hands over.
     const { grantSignupCredits } = await import("./grants");
     await grantSignupCredits(created.id);

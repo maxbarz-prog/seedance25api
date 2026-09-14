@@ -64,6 +64,15 @@ export default $config({
       },
     });
 
+    // Growth events: one partition per UTC day, so the admin report reads a
+    // window as a handful of Queries rather than a Scan. `expires` is a TTL
+    // so the table holds a season of history, not forever.
+    const events = new sst.aws.Dynamo("Events", {
+      fields: { day: "string", sk: "string" },
+      primaryIndex: { hashKey: "day", rangeKey: "sk" },
+      ttl: "expires",
+    });
+
     // Private bucket: videos and reference images, served via presigned URLs.
     const media = new sst.aws.Bucket("Media", {
       cors: {
@@ -120,6 +129,7 @@ export default $config({
       TABLE_USERS: users.name,
       TABLE_LEDGER: ledger.name,
       TABLE_JOBS: jobs.name,
+      TABLE_EVENTS: events.name,
       VIDEO_BUCKET: media.name,
       SESSION_SECRET: process.env.SESSION_SECRET ?? "",
       CRON_SECRET: process.env.CRON_SECRET ?? "",
@@ -149,7 +159,7 @@ export default $config({
 
     const site = new sst.aws.Nextjs("Web", {
       path: "web",
-      link: [users, ledger, jobs, media],
+      link: [users, ledger, jobs, events, media],
       domain,
       environment,
       permissions: [{ actions: ["ses:SendEmail"], resources: ["*"] }],

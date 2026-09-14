@@ -25,7 +25,7 @@ export default function ResetForm() {
         setError(data.error || "Something went wrong.");
         return;
       }
-      window.location.href = "/";
+      window.location.href = "/create";
     } finally {
       setBusy(false);
     }

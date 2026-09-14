@@ -36,6 +36,7 @@ import CreditsDialog, { CreditsBlock } from "./CreditsDialog";
 import { PricingConstants, quoteWith } from "@/lib/pricing";
 import { BALANCE_EVENT } from "./Header";
 import { fetchMe } from "@/lib/me-client";
+import { flushEvents, track } from "@/lib/track-client";
 
 const ROLE_LABELS: Record<ImageRole, string> = {
   reference: "Reference",
@@ -279,9 +280,11 @@ export default function Composer({
       setError("Describe the video you want first.");
       return;
     }
+    track("generate_clicked", { signed_in: signedIn !== false, model, mode, duration_s: durationS });
     // Signed out: straight to signup, no round trip. The draft is already kept
     // in localStorage, so the prompt is waiting when they come back.
     if (signedIn === false) {
+      flushEvents();
       router.push("/sign-up");
       return;
     }
@@ -347,6 +350,15 @@ export default function Composer({
       <textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT_CHARS))}
+        // Enter runs it; Shift+Enter is a new line. A prompt is a sentence
+        // or two, and the box says so — reaching for the button after
+        // typing one is a step the page can spare.
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey && !busy) {
+            e.preventDefault();
+            generate();
+          }
+        }}
         placeholder="A barista pours latte art in slow motion, warm cafe lighting, cinematic 35mm look…"
         rows={4}
         className="w-full resize-y rounded-xl border border-line bg-bg p-4 text-base outline-none focus:border-accent"
@@ -441,14 +453,14 @@ export default function Composer({
             return (
               <button
                 key={id}
-                onClick={() =>
-                  locked
-                    ? setBlock({
-                        reason: "plan_required",
-                        message: `${MODELS[id].label} needs a paid plan. Free generates with ${MODELS[FREE_MODEL as ModelId].label} at 480p.`,
-                      })
-                    : setModel(id)
-                }
+                onClick={() => {
+                  if (!locked) return setModel(id);
+                  track("locked_option_clicked", { kind: "model", value: id });
+                  setBlock({
+                    reason: "plan_required",
+                    message: `${MODELS[id].label} needs a paid plan. Free generates with ${MODELS[FREE_MODEL as ModelId].label} at 480p.`,
+                  });
+                }}
                 disabled={!compatible(id)}
                 title={
                   locked
@@ -526,14 +538,14 @@ export default function Composer({
               return (
                 <button
                   key={qq}
-                  onClick={() =>
-                    locked
-                      ? setBlock({
-                          reason: "plan_required",
-                          message: `${QUALITIES[qq].label} needs a paid plan. Free renders at ${FREE_QUALITY}.`,
-                        })
-                      : setQuality(qq)
-                  }
+                  onClick={() => {
+                    if (!locked) return setQuality(qq);
+                    track("locked_option_clicked", { kind: "quality", value: qq });
+                    setBlock({
+                      reason: "plan_required",
+                      message: `${QUALITIES[qq].label} needs a paid plan. Free renders at ${FREE_QUALITY}.`,
+                    });
+                  }}
                   className={`rounded-full px-3 py-1 ${
                     quality === qq
                       ? "bg-accent text-accent-ink"
@@ -558,14 +570,14 @@ export default function Composer({
               return (
                 <button
                   key={uu}
-                  onClick={() =>
-                    locked
-                      ? setBlock({
-                          reason: "plan_required",
-                          message: "Upscaling needs a paid plan.",
-                        })
-                      : setUpscale(uu)
-                  }
+                  onClick={() => {
+                    if (!locked) return setUpscale(uu);
+                    track("locked_option_clicked", { kind: "upscale", value: uu });
+                    setBlock({
+                      reason: "plan_required",
+                      message: "Upscaling needs a paid plan.",
+                    });
+                  }}
                   className={`rounded-full px-3 py-1 ${
                     upscale === uu
                       ? "bg-accent text-accent-ink"

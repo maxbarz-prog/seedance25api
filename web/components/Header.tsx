@@ -59,11 +59,11 @@ export default function Header() {
           {SITE_NAME}
         </Link>
         <nav className="flex items-center gap-2 text-sm sm:gap-5">
-          {/* The wordmark already goes home, but a named tab is what people
-              look for. Hidden on a phone alongside the others — the header
-              has no room, and the wordmark is right there. */}
-          <Link href="/" className="hidden text-muted hover:text-ink sm:inline">
-            Home
+          {/* The wordmark goes to the front door; this goes to the work.
+              Hidden on a phone alongside the others — the header has no
+              room, and the button on the right leads to the same place. */}
+          <Link href="/create" className="hidden text-muted hover:text-ink sm:inline">
+            Create
           </Link>
           <Link href="/pricing" className="hidden text-muted hover:text-ink sm:inline">
             Pricing
@@ -125,11 +125,13 @@ export default function Header() {
               <Link href="/login" className="text-muted hover:text-ink">
                 Sign in
               </Link>
+              {/* Straight to the composer, not to a form: the prompt is
+                  the first thing, signing up is what Generate leads to. */}
               <Link
-                href="/signup"
+                href="/create"
                 className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
               >
-                Join
+                Try {SITE_NAME}
               </Link>
             </>
           )}

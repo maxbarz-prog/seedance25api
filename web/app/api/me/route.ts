@@ -3,6 +3,7 @@ import { clerkEnabled, currentUser } from "@/lib/auth";
 import { balance, ledgerFor, storageUsedBytes } from "@/lib/db";
 import { PLANS } from "@/lib/config";
 import { creditRefund } from "@/lib/economics";
+import { needsOnboarding } from "@/lib/onboarding";
 import { accountFrozen, dailyTopupLimit, topupsLast24hUsd } from "@/lib/money";
 import {
   canBuyCredits,
@@ -60,6 +61,11 @@ export async function GET() {
       // admin clears it. Shown so the member hears it from us, not from a
       // refused button.
       frozen: !!frozen,
+      // The welcome flow, for the composer to send a new member through it
+      // before anything else, and the one-time offer that follows it.
+      needsOnboarding: needsOnboarding(user),
+      upgradePromptedAt: user.upgrade_prompted_at ?? null,
+      onboardedAt: user.onboarded_at ?? null,
       // The daily top-up limit and what is left of it, so the account page can
       // say so next to the buttons instead of after a refused click.
       // Null when no limit applies, so the page says nothing rather than
