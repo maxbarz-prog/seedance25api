@@ -58,6 +58,8 @@ export default function Welcome() {
     return "/create?welcome=1";
   }, [params]);
 
+  // Once per page load. The search-params object is a new identity on
+  // every render, so listing `destination` here would refetch on each one.
   useEffect(() => {
     fetch("/api/onboarding")
       .then(async (r) => {
@@ -67,14 +69,15 @@ export default function Welcome() {
         }
         const d = (await r.json()) as State;
         if (d.step === "done") {
-          router.replace(destination());
+          window.location.assign(destination());
           return;
         }
         setState(d);
         setStep(d.step);
       })
       .catch(() => setError("Could not load your account. Refresh to try again."));
-  }, [router, destination]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!step || step === "done" || seen.current.has(step)) return;
@@ -142,7 +145,11 @@ export default function Welcome() {
       track("welcome_step_done", { step: "survey" });
       track("welcome_completed");
       flushEvents();
-      router.replace(destination());
+      // A full load, not a client transition: the composer's shared "who am
+      // I" answer was cached before the account existed, and a fresh
+      // document is the one sure way to make every part of the page ask
+      // again.
+      window.location.assign(destination());
     } finally {
       setBusy(false);
     }

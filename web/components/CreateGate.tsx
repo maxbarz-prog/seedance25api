@@ -17,8 +17,11 @@ export default function CreateGate() {
   const [offer, setOffer] = useState(false);
 
   useEffect(() => {
-    track("create_viewed", { from: params.get("welcome") ? "welcome" : "direct" });
-    fetchMe().then(({ user }) => {
+    const fromWelcome = !!params.get("welcome");
+    track("create_viewed", { from: fromWelcome ? "welcome" : "direct" });
+    // Arriving from the welcome flow, the answer cached for this page load
+    // (if any) predates the account: ask again.
+    fetchMe(fromWelcome).then(({ user }) => {
       if (!user) return;
       if (user.needsOnboarding) {
         router.replace("/welcome");

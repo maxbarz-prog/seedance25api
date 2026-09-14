@@ -52,15 +52,23 @@ body {
 }
 
 /* The landing page is white whatever the system theme: it is the shop
-   window, and the photography is graded for a light surround. Everything
+   window, and the footage is graded for a light surround. The class is put
+   on the root by the page (components/landing/ForceLight.tsx) so the header
+   and footer in the layout go light with it; `.landing` carries the same
+   tokens so the page itself is right before that script runs. Everything
    past the front door follows the viewer's preference as before. */
+:root.force-light,
 .landing {
   --bg: #ffffff;
   --surface: #ffffff;
   --ink: #16181d;
   --muted: #6b7280;
   --line: #e5e7eb;
+  --accent: #4f46e5;
+  --accent-ink: #ffffff;
   color-scheme: light;
+}
+.landing {
   background: var(--bg);
   color: var(--ink);
 }
