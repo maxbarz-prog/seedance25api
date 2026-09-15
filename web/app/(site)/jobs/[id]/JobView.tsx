@@ -164,7 +164,17 @@ export default function JobView({ id }: { id: string }) {
       </div>
     );
   }
-  if (!job) return <div className="py-16 text-center text-muted">Loading…</div>;
+  // The page loader lifts when the route renders, which is before the job is
+  // known. Keep a wheel of the same kind turning until there is something to
+  // look at, rather than a word.
+  if (!job) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-busy="true">
+        <span className="spinner" aria-hidden />
+        <span className="sr-only">Loading</span>
+      </div>
+    );
+  }
 
   const phase = phaseOf(job);
   const stepIdx =
@@ -175,7 +185,16 @@ export default function JobView({ id }: { id: string }) {
   return (
     <div className="py-10">
       <CreditsDialog block={block} onClose={() => setBlock(null)} />
-      <p className="text-sm text-muted">
+      <Link
+        href="/library"
+        className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-ink"
+      >
+        <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 4l-6 6 6 6" />
+        </svg>
+        Library
+      </Link>
+      <p className="mt-3 text-sm text-muted">
         “{job.prompt.slice(0, 140)}
         {job.prompt.length > 140 ? "…" : ""}”
         {" · "}
@@ -297,7 +316,10 @@ export default function JobView({ id }: { id: string }) {
         // The point of the clock is that a working queue does not look
         // like a stall.
         <div className="mt-8 overflow-hidden rounded-2xl border border-line bg-surface">
-          <div className="flex aspect-video w-full flex-col items-center justify-center gap-4 bg-ink text-white">
+          {/* A fixed dark ground, not bg-ink: `ink` is the text colour, which
+              in the dark theme is nearly white — and white text on it was
+              invisible. This frame should read as unlit film either way. */}
+          <div className="flex aspect-video w-full flex-col items-center justify-center gap-4 bg-[#111318] text-white">
             <span className="spinner" aria-hidden />
             <p className="text-sm font-medium">{labelFor(phase, job)}…</p>
             <Elapsed since={job.created_at} />

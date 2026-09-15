@@ -58,7 +58,7 @@ let clerk: ((req: NextRequest, event: NextFetchEvent) => unknown) | null = null;
 //
 // Anchored at a path boundary: /helpers or /pricing-plans would otherwise
 // match too, and skip Clerk on a page that was never meant to be public.
-const PUBLIC = /^\/(?:$|(?:pricing|help|terms|privacy|refunds)(?:\/|$))/;
+const PUBLIC = /^\/(?:$|(?:pricing|help|terms|privacy|refunds|signed-out)(?:\/|$))/;
 
 export default function middleware(req: NextRequest, event: NextFetchEvent) {
   // Runs for every path, including public ones: help.<domain>/anything has to

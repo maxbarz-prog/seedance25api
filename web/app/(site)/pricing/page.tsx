@@ -14,6 +14,7 @@ import {
 } from "@/lib/config";
 import { fmtUsd, quote, rates } from "@/lib/pricing";
 import PricingPlans from "@/components/PricingPlans";
+import ForceLight from "@/components/ForceLight";
 
 // Revalidated rather than rendered per request. The rates come from the same
 // environment for every visitor, so this HTML is identical for all of them and
@@ -49,6 +50,10 @@ export default function PricingPage() {
 
   return (
     <div className="py-10">
+      {/* White, like the landing page and the help centre: this is read
+          before anyone has an account, and the three should look like one
+          company. */}
+      <ForceLight />
       <h1 className="text-3xl font-semibold">Pricing</h1>
       <p className="mt-2 max-w-2xl text-muted">
         One membership, then generation priced at what it costs us to make and

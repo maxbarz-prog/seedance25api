@@ -5,7 +5,7 @@ import Farewell from "@/components/Farewell";
 import Cta from "@/components/landing/Cta";
 import LandingTrack from "@/components/landing/LandingTrack";
 import ShowcaseVideo from "@/components/landing/ShowcaseVideo";
-import ForceLight from "@/components/landing/ForceLight";
+import ForceLight from "@/components/ForceLight";
 import { DEFAULT_MODE, DEFAULT_MODEL, MODELS, PLANS, SITE_NAME, SITE_TAGLINE } from "@/lib/config";
 import { SEEDANCE_ALSO_POWERS, SHOWCASE } from "@/lib/landing";
 import { fmtUsd, quote } from "@/lib/pricing";

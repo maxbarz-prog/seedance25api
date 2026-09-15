@@ -2,9 +2,10 @@
 
 import { hideLoader, showLoader } from "@/lib/ui-events";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useSignIn } from "@clerk/nextjs/legacy";
+import { fetchMe } from "@/lib/me-client";
 import AuthShell, { Field, GoogleMark, isEmail, Or, Primary, Secondary, Title } from "./AuthShell";
 
 // Sign-in on Clerk, drawn by us. Email, then password; or Google. A
@@ -20,6 +21,7 @@ function clerkMessage(err: unknown): string {
 }
 
 export default function ClerkSignIn() {
+  const router = useRouter();
   const params = useSearchParams();
   const { isLoaded, signIn, setActive } = useSignIn();
   const [step, setStep] = useState<Step>("email");
@@ -34,9 +36,11 @@ export default function ClerkSignIn() {
   const started = useRef(false);
 
   // Only a path on this site: a `next` that pointed elsewhere would make
-  // sign-in an open redirect.
+  // sign-in an open redirect. One leading slash and nothing slash-like after
+  // it — a backslash counts, because URL parsing treats it as a slash for
+  // http and https, so "/\evil.com" resolves to another origin entirely.
   const next = params.get("next");
-  const done = next && next.startsWith("/") && !next.startsWith("//") ? next : "/create";
+  const done = next && next.startsWith("/") && !/^\/[/\\]/.test(next) ? next : "/create";
 
   // Google is a round trip to Clerk before the browser goes anywhere, so the
   // loading screen goes up on the click itself and comes down only if the
@@ -82,9 +86,14 @@ export default function ClerkSignIn() {
   async function finish(r: { status: string | null; createdSessionId: string | null }) {
     if (!isLoaded) return false;
     if (r.status === "complete" && r.createdSessionId) {
-      await setActive({ session: r.createdSessionId });
       showLoader();
-        window.location.assign(done);
+      await setActive({ session: r.createdSessionId });
+      // A client-side navigation, not a document load. Loading the document
+      // again means the browser blanks between the two, so the wait reads as
+      // spinner, white, spinner. Priming /api/me first means the composer and
+      // the header already know who arrived.
+      await fetchMe(true).catch(() => null);
+      router.replace(done);
       return true;
     }
     if (r.status === "needs_second_factor") {

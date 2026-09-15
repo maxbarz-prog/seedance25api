@@ -140,10 +140,22 @@ export default function PlanModal({ from, onClose }: { from: string; onClose: ()
           in the middle and a tall one starts at the top and scrolls. */}
       <div className="flex min-h-full items-center justify-center p-4">
       <div
-        className="w-full max-w-3xl overflow-hidden rounded-2xl bg-[#111318] text-white shadow-2xl"
+        className="relative w-full max-w-3xl overflow-hidden rounded-2xl bg-[#111318] text-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="bg-gradient-to-r from-emerald-200/80 via-lime-100 to-sky-200/80 px-6 py-2.5 text-center text-sm font-medium text-[#111318]">
+        {/* Top right of the card, where a close button belongs. It sits over
+            the banner, which is light, so it is drawn dark. */}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute right-3 top-2 z-10 rounded-full p-1.5 text-[#111318]/50 hover:bg-black/10 hover:text-[#111318]"
+        >
+          <svg viewBox="0 0 20 20" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M5 5l10 10M15 5L5 15" />
+          </svg>
+        </button>
+        <div className="bg-gradient-to-r from-emerald-200/80 via-lime-100 to-sky-200/80 px-12 py-2.5 text-center text-sm font-medium text-[#111318]">
           {banner}
         </div>
         <div className="border-b border-white/10 px-6 py-4 text-center">
@@ -155,16 +167,7 @@ export default function PlanModal({ from, onClose }: { from: string; onClose: ()
           </p>
         </div>
 
-        <div className="relative grid gap-8 p-6 sm:p-8 md:grid-cols-[1.1fr_1fr]">
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="absolute right-4 top-4 rounded-full border border-white/20 px-2.5 py-1 text-sm text-white/70 hover:border-white/60 hover:text-white"
-          >
-            ✕
-          </button>
-
+        <div className="grid gap-8 p-6 sm:p-8 md:grid-cols-[1.1fr_1fr]">
           <div>
             <div className="flex items-center gap-1 rounded-full border border-white/15 p-1 text-xs">
               {PAID_PLAN_IDS.map((id) => (

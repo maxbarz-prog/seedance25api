@@ -62,13 +62,13 @@ export default function ReferralCard() {
 
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div className="rounded-xl border border-line px-3 py-2">
-          <dt className="text-muted">Waiting to be used</dt>
+          <dt className="text-muted">Ready to use</dt>
           <dd className="text-lg font-semibold tabular-nums">
             {pending} {pending === 1 ? "month" : "months"}
           </dd>
         </div>
         <div className="rounded-xl border border-line px-3 py-2">
-          <dt className="text-muted">Already discounted</dt>
+          <dt className="text-muted">Already used</dt>
           <dd className="text-lg font-semibold tabular-nums">
             {applied} {applied === 1 ? "month" : "months"}
           </dd>

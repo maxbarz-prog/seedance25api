@@ -21,6 +21,7 @@ import {
   OUTPUT_MODES,
   OutputMode,
   QUALITIES,
+  FREE_MAX_IMAGES,
   FREE_MODEL,
   FREE_MAX_DURATION_S,
   FREE_QUALITY,
@@ -122,6 +123,13 @@ export default function Composer({
     (i) => i.role === "first_frame" || i.role === "last_frame"
   );
 
+  // What this plan may attach. Free buys one cheapest-route clip, so it gets
+  // one reference image and no reference video or audio — both of which the
+  // provider bills for on top of the render.
+  const maxImages = onFree ? FREE_MAX_IMAGES : MAX_IMAGES;
+  const maxRefVideos = onFree ? 0 : MAX_REF_VIDEOS;
+  const maxRefAudios = onFree ? 0 : MAX_REF_AUDIOS;
+
   async function addImages(files: FileList | null, kind: "image" | "video" | "audio" = "image") {
     if (!files || !files.length) return;
     setError(null);
@@ -129,10 +137,10 @@ export default function Composer({
     try {
       const room =
         kind === "image"
-          ? MAX_IMAGES - imageCount
+          ? maxImages - imageCount
           : kind === "video"
-            ? MAX_REF_VIDEOS - videoCount
-            : MAX_REF_AUDIOS - audioCount;
+            ? maxRefVideos - videoCount
+            : maxRefAudios - audioCount;
       for (const file of Array.from(files).slice(0, Math.max(0, room))) {
         const ok =
           kind === "image"
@@ -395,7 +403,7 @@ export default function Composer({
       />
       <div className="mt-1 flex items-center justify-between text-xs text-muted">
         <div className="flex items-center gap-2">
-          {uploadsEnabled && imageCount < MAX_IMAGES && (
+          {uploadsEnabled && imageCount < maxImages && (
             <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
               {uploading ? "Uploading…" : "+ Image"}
               <input
@@ -407,7 +415,40 @@ export default function Composer({
               />
             </label>
           )}
-          {uploadsEnabled && videoCount < MAX_REF_VIDEOS && (
+          {/* On Free these are shown but locked, the same way the paid models
+              are: a button that says what a plan unlocks is more use than a
+              button that is not there. */}
+          {uploadsEnabled && onFree && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  track("locked_option_clicked", { kind: "input", value: "reference_video" });
+                  setBlock({
+                    reason: "plan_required",
+                    message: "Reference video needs a paid plan. Free generates from a prompt and one image.",
+                  });
+                }}
+                className="rounded-full border border-line px-3 py-1 opacity-60 hover:border-accent"
+              >
+                + Reference video
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  track("locked_option_clicked", { kind: "input", value: "reference_audio" });
+                  setBlock({
+                    reason: "plan_required",
+                    message: "A reference audio track needs a paid plan.",
+                  });
+                }}
+                className="rounded-full border border-line px-3 py-1 opacity-60 hover:border-accent"
+              >
+                + Audio
+              </button>
+            </>
+          )}
+          {uploadsEnabled && !onFree && videoCount < maxRefVideos && (
             <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
               + Reference video
               <input
@@ -418,7 +459,7 @@ export default function Composer({
               />
             </label>
           )}
-          {uploadsEnabled && audioCount < MAX_REF_AUDIOS && (
+          {uploadsEnabled && !onFree && audioCount < maxRefAudios && (
             <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
               + Audio
               <input
