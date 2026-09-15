@@ -1,9 +1,9 @@
 "use client";
 
-import { showLoader } from "@/lib/ui-events";
+import { hideLoader, showLoader } from "@/lib/ui-events";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import AuthShell, { Field, GoogleMark, isEmail, Or, Primary, Secondary, Title } from "./AuthShell";
 
@@ -28,15 +28,28 @@ export default function ClerkSignIn() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // On the way out to Google: the loading screen is up and nothing on this
+  // form should look pressable.
+  const [leaving, setLeaving] = useState(false);
+  const started = useRef(false);
 
   // Only a path on this site: a `next` that pointed elsewhere would make
   // sign-in an open redirect.
   const next = params.get("next");
   const done = next && next.startsWith("/") && !next.startsWith("//") ? next : "/create";
 
+  // Google is a round trip to Clerk before the browser goes anywhere, so the
+  // loading screen goes up on the click itself and comes down only if the
+  // call fails. A press before clerk-js has loaded is remembered by
+  // `leaving` and started by the effect below, rather than being dropped and
+  // leaving the person to press again.
   async function google() {
-    if (!isLoaded) return;
+    if (started.current) return;
     setError(null);
+    setLeaving(true);
+    showLoader();
+    if (!isLoaded) return;
+    started.current = true;
     try {
       await signIn.authenticateWithRedirect({
         strategy: "oauth_google",
@@ -44,9 +57,17 @@ export default function ClerkSignIn() {
         redirectUrlComplete: done,
       });
     } catch (e) {
+      started.current = false;
+      hideLoader();
+      setLeaving(false);
       setError(clerkMessage(e));
     }
   }
+
+  useEffect(() => {
+    if (leaving && isLoaded) void google();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaving, isLoaded]);
 
   function submitEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -147,9 +168,9 @@ export default function ClerkSignIn() {
             onChange={(e) => setEmail(e.target.value)}
           />
           {error && <p className="text-sm text-bad">{error}</p>}
-          <Primary type="submit" disabled={!isLoaded}>Continue</Primary>
+          <Primary type="submit" disabled={leaving}>Continue</Primary>
           <Or />
-          <Secondary type="button" onClick={google} disabled={!isLoaded}>
+          <Secondary type="button" onClick={google} busy={leaving}>
             <GoogleMark /> Continue with Google
           </Secondary>
           <p className="pt-4 text-center text-sm text-muted">

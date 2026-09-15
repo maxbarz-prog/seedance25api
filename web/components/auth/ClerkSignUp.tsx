@@ -1,9 +1,9 @@
 "use client";
 
-import { showLoader } from "@/lib/ui-events";
+import { hideLoader, showLoader } from "@/lib/ui-events";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSignUp } from "@clerk/nextjs/legacy";
 import AuthShell, { Field, GoogleMark, isEmail, Or, Primary, Secondary, Title } from "./AuthShell";
 import { flushEvents, track } from "@/lib/track-client";
@@ -36,6 +36,10 @@ export default function ClerkSignUp() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [missing, setMissing] = useState<string[]>([]);
+  // On the way out to Google: every control is spent, so nothing on this
+  // form should look pressable while the loading screen is up.
+  const [leaving, setLeaving] = useState(false);
+  const started = useRef(false);
 
   useEffect(() => {
     track("signup_viewed", { auth: "clerk" });
@@ -117,9 +121,25 @@ export default function ClerkSignUp() {
     return `/welcome${s ? `?${s}` : ""}`;
   }
 
+  // Google is a round trip to Clerk before the browser goes anywhere, and on
+  // a cold connection that is a second or more of a page that looks like it
+  // ignored the press. So the loading screen goes up on the click itself,
+  // and comes down only if the call fails.
+  //
+  // A press before clerk-js has finished loading is remembered rather than
+  // dropped: `leaving` puts the screen up straight away and the effect below
+  // starts the flow the moment Clerk is ready. Without that, the first click
+  // on a fresh page does nothing at all and the second one appears to work,
+  // which is exactly how it looked.
   async function google() {
-    if (!isLoaded) return;
+    if (started.current) return;
     setError(null);
+    setLeaving(true);
+    showLoader();
+    // Clerk is not ready yet. The press is not lost: the effect below picks
+    // it up the moment it is, and the screen is already covered.
+    if (!isLoaded) return;
+    started.current = true;
     try {
       await signUp.authenticateWithRedirect({
         strategy: "oauth_google",
@@ -127,9 +147,17 @@ export default function ClerkSignUp() {
         redirectUrlComplete: done(),
       });
     } catch (e) {
+      started.current = false;
+      hideLoader();
+      setLeaving(false);
       setError(clerkMessage(e));
     }
   }
+
+  useEffect(() => {
+    if (leaving && isLoaded) void google();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaving, isLoaded]);
 
   function submitEmail(e: React.FormEvent) {
     e.preventDefault();
@@ -208,9 +236,9 @@ export default function ClerkSignUp() {
             onChange={(e) => setEmail(e.target.value)}
           />
           {error && <p className="text-sm text-bad">{error}</p>}
-          <Primary type="submit" disabled={!isLoaded}>Continue</Primary>
+          <Primary type="submit" disabled={leaving}>Continue</Primary>
           <Or />
-          <Secondary type="button" onClick={google} disabled={!isLoaded}>
+          <Secondary type="button" onClick={google} busy={leaving}>
             <GoogleMark /> Continue with Google
           </Secondary>
           <p className="pt-4 text-center text-sm text-muted">

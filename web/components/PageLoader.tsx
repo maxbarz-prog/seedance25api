@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { LOADING_EVENT } from "@/lib/ui-events";
+import { LOADING_DONE_EVENT, LOADING_EVENT } from "@/lib/ui-events";
 
 // The loading screen between pages: a spinner on the page's own ground,
 // shown the moment a link is pressed, gone once the next page is actually
@@ -108,6 +108,14 @@ export default function PageLoader() {
       show();
     };
     const onCode = () => show();
+    // The navigation was called off. Uncover at once rather than leaving the
+    // person watching a spinner for an error they cannot see.
+    const onCancelled = () => {
+      if (orphan.current) clearTimeout(orphan.current);
+      seq.current++;
+      setFading(false);
+      setShown(false);
+    };
     const onLeave = () => show();
     const onShow = (e: PageTransitionEvent) => {
       // Back from the bfcache: the page is already whole.
@@ -115,11 +123,13 @@ export default function PageLoader() {
     };
     document.addEventListener("click", onClick, true);
     window.addEventListener(LOADING_EVENT, onCode);
+    window.addEventListener(LOADING_DONE_EVENT, onCancelled);
     window.addEventListener("beforeunload", onLeave);
     window.addEventListener("pageshow", onShow);
     return () => {
       document.removeEventListener("click", onClick, true);
       window.removeEventListener(LOADING_EVENT, onCode);
+      window.removeEventListener(LOADING_DONE_EVENT, onCancelled);
       window.removeEventListener("beforeunload", onLeave);
       window.removeEventListener("pageshow", onShow);
     };
