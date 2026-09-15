@@ -1,0 +1,79 @@
+name: AWS limits
+
+# How much traffic the site can actually take, and whether it has been
+# refusing any.
+#
+# A browser opening the site fires a handful of requests at once — the page,
+# its prefetches, /api/me. Each one that misses the CDN is a Lambda
+# invocation, and Lambda refuses invocations past the account's concurrent
+# execution limit. The function URL turns that refusal into HTTP 429, which
+# reaches the browser as a failed page rather than a slow one. New AWS
+# accounts are capped far below the old 1000 default, so this is worth
+# knowing before launch rather than during it.
+#
+# Prints the account's ceiling, what the site's own functions reserve, and
+# the throttles CloudWatch actually recorded. READ-ONLY.
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "How far back to count throttles"
+        type: string
+        default: "6"
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  limits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: The account's ceiling
+        run: |
+          set -euo pipefail
+          aws lambda get-account-settings \
+            --query 'AccountLimit.{concurrent:ConcurrentExecutions,unreserved:UnreservedConcurrentExecutions,codeGB:TotalCodeSize}' \
+            --output table
+          echo "1000 is the old default; anything much lower is a new-account cap and is raised by a quota request."
+
+      - name: What each function of the site reserves
+        run: |
+          set -euo pipefail
+          for f in $(aws lambda list-functions --query 'Functions[].FunctionName' --output text | tr '\t' '\n' | grep -i remerge || true); do
+            c=$(aws lambda get-function-concurrency --function-name "$f" \
+              --query 'ReservedConcurrentExecutions' --output text 2>/dev/null || echo "-")
+            m=$(aws lambda get-function-configuration --function-name "$f" \
+              --query '[MemorySize,Timeout]' --output text 2>/dev/null || echo "- -")
+            echo "  $f  reserved=$c  mem/timeout=$m"
+          done
+
+      - name: Throttles CloudWatch recorded
+        env:
+          HOURS: ${{ inputs.hours }}
+        run: |
+          set -euo pipefail
+          start=$(date -u -d "-${HOURS} hours" +%Y-%m-%dT%H:%M:%SZ)
+          end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "  from $start to $end, per 5 minutes, across all functions:"
+          # Namespace-wide: one throttle anywhere is the same symptom.
+          aws cloudwatch get-metric-statistics \
+            --namespace AWS/Lambda --metric-name Throttles \
+            --start-time "$start" --end-time "$end" --period 300 --statistics Sum \
+            --query 'sort_by(Datapoints,&Timestamp)[?Sum>`0`].[Timestamp,Sum]' --output text \
+            | sed 's/^/    /' || true
+          echo "  (nothing above means no invocation was refused in that window)"
+          echo "  concurrent executions reached:"
+          aws cloudwatch get-metric-statistics \
+            --namespace AWS/Lambda --metric-name ConcurrentExecutions \
+            --start-time "$start" --end-time "$end" --period 300 --statistics Maximum \
+            --query 'sort_by(Datapoints,&Timestamp)[-6:].[Timestamp,Maximum]' --output text \
+            | sed 's/^/    /' || true
