@@ -81,6 +81,14 @@ spends nothing.
 
 ## Free
 
+### `clerk-webhook.yml` — Clerk's user.deleted webhook
+Registers `https://<site>/api/auth/clerk` with Clerk's webhook system (Svix
+underneath, reached with a portal token from the Clerk Backend API),
+subscribed to `user.deleted`, and files the signing secret in SSM as
+`CLERK_WEBHOOK_SIGNING_SECRET`. `list` shows what exists; `create` needs the
+word typed and redeploys dev afterwards. Prod deploys only from a `prod-*`
+tag, so push one after running it against prod.
+
 ### `deploy.yml` — the only way anything ships
 Deploys the `dev` stage on a push to `main` touching `web/`, `functions/`,
 `sst.config.ts` or `package.json`. **Production deploys only from a `prod-*`
