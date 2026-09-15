@@ -1,17 +1,18 @@
 "use client";
 
-import { showLoader } from "@/lib/ui-events";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import UpgradeModal from "./UpgradeModal";
+import PlanModal from "./PlanModal";
 import { fetchMe } from "@/lib/me-client";
 import { track } from "@/lib/track-client";
+import { showLoader } from "@/lib/ui-events";
 
 // Two things the composer page needs to know about the person, both from
 // /api/me: whether they still owe the welcome flow (sent there first), and
-// whether the one-time upgrade offer is due (shown here, over the composer,
-// on the visit straight after the flow). Also reports the page view — the
-// composer is the funnel's second step.
+// whether the one-time upgrade offer is due — the plan modal, shown here
+// over the composer on the visit straight after the flow. Closing it, by
+// the button or a click outside, leaves the composer. Also reports the page
+// view: the composer is the funnel's second step.
 export default function CreateGate() {
   const router = useRouter();
   const params = useSearchParams();
@@ -29,13 +30,29 @@ export default function CreateGate() {
         router.replace("/welcome");
         return;
       }
-      // Once, ever: the row remembers it was shown, and the modal records
-      // that on mount. Only after the flow — an old account that predates
-      // the flow has no onboardedAt and never sees it.
-      if (user.onboardedAt && !user.upgradePromptedAt) setOffer(true);
+      // Once, ever: the row remembers it was shown. Only after the flow —
+      // an old account that predates the flow has no onboardedAt and never
+      // sees it.
+      if (user.onboardedAt && !user.upgradePromptedAt) {
+        setOffer(true);
+        track("upgrade_modal_shown");
+        fetch("/api/onboarding", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ step: "upgrade_seen" }),
+        }).catch(() => {});
+      }
     });
   }, [router, params]);
 
   if (!offer) return null;
-  return <UpgradeModal onClose={() => setOffer(false)} />;
+  return (
+    <PlanModal
+      from="welcome-offer"
+      onClose={() => {
+        track("upgrade_modal_dismissed");
+        setOffer(false);
+      }}
+    />
+  );
 }

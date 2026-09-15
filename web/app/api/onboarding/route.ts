@@ -46,6 +46,7 @@ const Body = z.discriminatedUnion("step", [
     step: z.literal("survey"),
     role: z.string().max(32),
     goal: z.string().max(32),
+    source: z.string().max(32),
   }),
   z.object({ step: z.literal("upgrade_seen") }),
 ]);
@@ -89,12 +90,13 @@ export async function POST(req: NextRequest) {
   }
 
   if (b.step === "survey") {
-    if (!surveyOption("role", b.role) || !surveyOption("goal", b.goal)) {
+    if (!surveyOption("role", b.role) || !surveyOption("goal", b.goal) || !surveyOption("source", b.source)) {
       return noStore({ error: "Pick one of the options." }, 400);
     }
     await setOnboarding(user.id, {
       survey_role: b.role,
       survey_goal: b.goal,
+      survey_source: b.source,
       onboarded_at: user.onboarded_at ?? now,
     });
     return noStore({ ok: true, step: "done" });

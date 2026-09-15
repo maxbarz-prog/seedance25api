@@ -183,9 +183,10 @@ export default function GrowthPanel() {
             </div>
           </div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-3">
             <Answers title={`Survey: what best describes you`} rows={data.survey.role} />
             <Answers title={`Survey: what are you looking for`} rows={data.survey.goal} />
+            <Answers title={`Survey: how did you hear about us`} rows={data.survey.source} />
           </div>
 
           <div className="grid gap-6 lg:grid-cols-2">

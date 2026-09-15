@@ -179,7 +179,7 @@ export interface GrowthReport {
   // The welcome flow on its own, from the account existing to the offer
   // being answered, so a leak inside it is visible without the rest.
   welcome: FunnelStep[];
-  survey: { role: Breakdown[]; goal: Breakdown[] };
+  survey: { role: Breakdown[]; goal: Breakdown[]; source: Breakdown[] };
   referrals: {
     entered: number;
     accepted: number;
@@ -319,6 +319,7 @@ export async function growthReport(days: number): Promise<GrowthReport> {
   // Survey: the latest answer per person per question.
   const roleOf = new Map<string, string>();
   const goalOf = new Map<string, string>();
+  const sourceOf = new Map<string, string>();
   const paidInWindow = new Set<string>();
   for (const e of events) {
     if (e.name === "plan_started") paidInWindow.add(personOf(e));
@@ -328,6 +329,7 @@ export async function growthReport(days: number): Promise<GrowthReport> {
     if (!a) continue;
     if (q === "role") roleOf.set(personOf(e), a);
     if (q === "goal") goalOf.set(personOf(e), a);
+    if (q === "source") sourceOf.set(personOf(e), a);
   }
   const breakdown = (m: Map<string, string>): Breakdown[] => {
     const by = new Map<string, Breakdown>();
@@ -458,7 +460,7 @@ export async function growthReport(days: number): Promise<GrowthReport> {
     events: events.length,
     funnel,
     welcome,
-    survey: { role: breakdown(roleOf), goal: breakdown(goalOf) },
+    survey: { role: breakdown(roleOf), goal: breakdown(goalOf), source: breakdown(sourceOf) },
     referrals: { ...ref, topCodes },
     upgrade: up,
     free,

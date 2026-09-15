@@ -3,12 +3,15 @@ import { DEFAULT_MODE, DEFAULT_MODEL } from "@/lib/config";
 import Composer from "@/components/Composer";
 import CreateGate from "@/components/CreateGate";
 import PromptExamples from "@/components/PromptExamples";
+import VisitorOnly from "@/components/VisitorOnly";
 import Link from "next/link";
 import { pricingConstants, quote } from "@/lib/pricing";
 import { storageEnabled } from "@/lib/storage";
 
-// The composer: where video gets made. One question, the box, three clips
-// to start from, and the three things worth knowing about the money. Rendered
+// The composer: where video gets made. One question and the box. For a
+// visitor without an account, three clips to start from and the three
+// things worth knowing about the money follow; a member gets the box and
+// nothing else — they have seen the pitch. Rendered
 // once and revalidated: nothing on this page differs between visitors, and
 // the member-specific parts (the balance, the composer's state, the
 // welcome-flow gate) are client-side. A signed-out visitor sees it too: the
@@ -35,6 +38,7 @@ export default async function CreatePage() {
 
       <Composer pricing={pricing} uploadsEnabled={uploadsEnabled} />
 
+      <VisitorOnly>
       <PromptExamples />
 
       <section className="mt-12 grid gap-6 sm:grid-cols-3">
@@ -60,6 +64,7 @@ export default async function CreatePage() {
           </p>
         </div>
       </section>
+      </VisitorOnly>
     </div>
   );
 }

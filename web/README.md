@@ -39,10 +39,14 @@ Revenue comes from the membership, not from marking up generation.
 - The plan modal (`components/PlanModal.tsx`) is mounted once in the site
   layout and opened from the header's Upgrade button, the composer's
   refusal dialog and the welcome offer via `openPlans()` in `lib/ui-events.ts`.
-- `/welcome` — the welcome flow a new account is sent to after sign-up:
-  finalize (Terms and Privacy), referral code or Skip, a two-question
-  survey. Answers live on the user row (`lib/onboarding.ts`); it ends at
-  `/create` with a one-time upgrade offer (`components/UpgradeModal.tsx`).
+- `/welcome` — the welcome flow a new account is sent to after sign-up. Two
+  screens on the same split-screen shell as sign-up — finalize (the Terms
+  and Privacy consent, one Create account button) and a referral code or
+  Skip — then three dark full-screen questions with a progress bar: who
+  they are, what they came for, how they heard of us. Answers live on the
+  user row (`lib/onboarding.ts`); it ends at `/create` with the plan modal
+  over the composer, once, and a member's composer carries no examples or
+  pitch (`components/VisitorOnly.tsx`).
 - **Growth events** (`lib/events.ts`) — the browser reports page views, welcome
   steps and the offer through `/api/events`; the server records account
   creation, jobs and paid plans where they happen. `/admin` reads them back

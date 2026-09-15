@@ -55,6 +55,7 @@ export interface User {
   referral_answered_at?: number | null;
   survey_role?: string | null;
   survey_goal?: string | null;
+  survey_source?: string | null;
   onboarded_at?: number | null;
   // When the one-time upgrade offer was shown after the welcome flow. Shown
   // once, ever — a second showing is nagging.
@@ -71,6 +72,7 @@ export type OnboardingFields = Partial<
     | "referral_answered_at"
     | "survey_role"
     | "survey_goal"
+    | "survey_source"
     | "onboarded_at"
     | "upgrade_prompted_at"
   >
