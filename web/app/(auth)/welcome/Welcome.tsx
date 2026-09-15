@@ -306,6 +306,53 @@ const ROLE_ICONS: Record<string, React.ReactNode> = {
   other: <path d="M6 12h.01M12 12h.01M18 12h.01" />,
 };
 
+// Marks for the "how did you hear about us" cards. Simplified, one colour,
+// drawn inline: enough to be recognised at a glance, which is all a survey
+// card needs. Naming a platform as the answer to "where did you hear of us"
+// is the ordinary use of its name.
+const SOURCE_ICONS: Record<string, React.ReactNode> = {
+  linkedin: (
+    <>
+      <rect x="3" y="3" width="18" height="18" rx="3" />
+      <path d="M8 10v7M8 7v.5M12 17v-4a2 2 0 0 1 4 0v4M12 10v7" />
+    </>
+  ),
+  reddit: (
+    <>
+      <ellipse cx="12" cy="14" rx="7" ry="5" />
+      <circle cx="9.5" cy="13.5" r=".8" fill="currentColor" />
+      <circle cx="14.5" cy="13.5" r=".8" fill="currentColor" />
+      <path d="M12 9V5l4 1M9.5 16.5c1.5 1 3.5 1 5 0M19 11a1.5 1.5 0 1 0-2-2M5 11a1.5 1.5 0 1 1 2-2" />
+    </>
+  ),
+  facebook: <path d="M14 8h2V5h-2a3 3 0 0 0-3 3v2H9v3h2v7h3v-7h2l1-3h-3V8z" />,
+  youtube: (
+    <>
+      <rect x="3" y="6" width="18" height="12" rx="4" />
+      <path d="m10 9 5 3-5 3z" fill="currentColor" />
+    </>
+  ),
+  ai_chat: <path d="M4 5h16v11H9l-5 4z" />,
+  x: <path d="M5 4l14 16M19 4 5 20" />,
+  word_of_mouth: (
+    <>
+      <path d="M3 5h10v7H7l-4 3z" />
+      <path d="M13 9h8v7h-2l-3 3v-3h-3z" />
+    </>
+  ),
+  instagram: (
+    <>
+      <rect x="4" y="4" width="16" height="16" rx="4" />
+      <circle cx="12" cy="12" r="3.5" />
+      <circle cx="16.5" cy="7.5" r=".6" fill="currentColor" />
+    </>
+  ),
+  news: <path d="M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v5H4zM17 14h3v5h-3z" />,
+  tiktok: <path d="M13 4v10.5a3 3 0 1 1-3-3M13 4c0 2.5 2 4.5 4.5 4.5" />,
+  google: <path d="M20 12h-8v3h4.5A5 5 0 1 1 15 8.5" />,
+  other: <path d="M12 3l2.4 5.6L20 11l-5.6 2.4L12 19l-2.4-5.6L4 11l5.6-2.4z" />,
+};
+
 function SurveyScreens({
   survey,
   busy,
@@ -340,7 +387,15 @@ function SurveyScreens({
         <p className="mt-2 text-sm text-white/60">
           {q === "source" ? "Select one that applies." : "This helps us build the product for the people using it."}
         </p>
-        <div className={`mt-8 grid gap-3 ${wide ? "grid-cols-2 sm:grid-cols-3" : "sm:grid-cols-3"}`}>
+        <div
+          className={`mx-auto mt-8 grid gap-3 ${
+            wide
+              ? "grid-cols-2 sm:grid-cols-3"
+              : def.options.length <= 2
+                ? "max-w-xl sm:grid-cols-2"
+                : "sm:grid-cols-3"
+          }`}
+        >
           {def.options.map((o) => (
             <button
               key={o.key}
@@ -352,10 +407,10 @@ function SurveyScreens({
                 answers[q] === o.key ? "border-white" : "border-white/15"
               } ${wide ? "flex items-center gap-3 py-4" : "min-h-[8.5rem] flex flex-col justify-between"}`}
             >
-              {q === "role" && (
-                <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10">
+              {(q === "role" || q === "source") && (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10">
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    {ROLE_ICONS[o.key] ?? ROLE_ICONS.other}
+                    {q === "role" ? ROLE_ICONS[o.key] ?? ROLE_ICONS.other : SOURCE_ICONS[o.key] ?? SOURCE_ICONS.other}
                   </svg>
                 </span>
               )}

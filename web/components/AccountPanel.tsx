@@ -698,21 +698,19 @@ export default function AccountPanel() {
                   </p>
                 )}
                 <label className="block">
-                  <span className="text-muted">Type {me.email} to confirm</span>
+                  <span className="text-muted">Type <span className="font-mono">delete</span> to confirm</span>
                   <input
                     value={confirmEmail}
                     onChange={(e) => setConfirmEmail(e.target.value)}
-                    placeholder={me.email}
+                    placeholder="delete"
+                    autoComplete="off"
                     className="mt-1 w-full rounded-xl border border-line bg-bg px-3 py-2 outline-none focus:border-bad"
                   />
                 </label>
                 <div className="flex flex-wrap items-center gap-3">
                   <button
                     onClick={() => account("delete", { confirm: confirmEmail })}
-                    disabled={
-                      busy !== null ||
-                      confirmEmail.trim().toLowerCase() !== me.email.toLowerCase()
-                    }
+                    disabled={busy !== null || confirmEmail.trim().toLowerCase() !== "delete"}
                     className="rounded-full bg-bad px-4 py-1.5 font-medium text-white hover:opacity-90 disabled:opacity-40"
                   >
                     Delete my account

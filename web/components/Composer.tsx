@@ -22,6 +22,7 @@ import {
   OutputMode,
   QUALITIES,
   FREE_MODEL,
+  FREE_MAX_DURATION_S,
   FREE_QUALITY,
   QUALITY_IDS,
   Quality,
@@ -200,7 +201,17 @@ export default function Composer({
     fetchMe()
       .then((d) => {
         setSignedIn(!!d.user);
-        setOnFree(d.user?.plan === "free");
+        const free = d.user?.plan === "free";
+        setOnFree(free);
+        // Free renders one route. Start there rather than on the default
+        // route, which the API would refuse: a member's first press of
+        // Generate should make a video, not show a dialog.
+        if (free) {
+          setModel(FREE_MODEL as ModelId);
+          setQuality(FREE_QUALITY as Quality);
+          setUpscale("none");
+          setDurationS((d) => Math.min(d, FREE_MAX_DURATION_S));
+        }
       })
       .catch(() => {});
   }, []);

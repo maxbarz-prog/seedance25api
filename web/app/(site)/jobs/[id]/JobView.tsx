@@ -29,6 +29,7 @@ interface Job {
   error: string | null;
   kind?: string | null;
   source_job_id?: string | null;
+  created_at: number;
 }
 
 const STEPS = ["queued", "generating", "upscaling", "ready"] as const;
@@ -54,6 +55,23 @@ function labelFor(step: string, job: Job): string {
 // like a stall, so the wait keeps its own name until work actually starts.
 function phaseOf(job: Job): string {
   return job.status === "generating" && job.provider_phase === "queued" ? "queued" : job.status;
+}
+
+// A ticking clock since the job was created. Rendered on its own so the
+// once-a-second re-render does not touch the rest of the page.
+function Elapsed({ since }: { since: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const s = Math.max(0, Math.floor((now - since) / 1000));
+  const m = Math.floor(s / 60);
+  return (
+    <p className="text-xs tabular-nums text-white/60">
+      {m > 0 ? `${m}m ${String(s % 60).padStart(2, "0")}s` : `${s}s`}
+    </p>
+  );
 }
 
 export default function JobView({ id }: { id: string }) {
@@ -274,36 +292,44 @@ export default function JobView({ id }: { id: string }) {
           )}
         </div>
       ) : (
-        <div className="mt-8 rounded-2xl border border-line bg-surface p-8">
-          <ol className="space-y-4">
-            {STEPS.slice(0, 3).map((s, i) => {
-              // Nothing to show for a step this route never takes.
-              if (modeInfo(job.mode).upscale === "none" && s === "upscaling")
-                return null;
-              const state = i < stepIdx ? "done" : i === stepIdx ? "now" : "todo";
-              return (
-                <li key={s} className="flex items-center gap-3 text-sm">
-                  <span
-                    className={`inline-block h-2.5 w-2.5 rounded-full ${
-                      state === "done"
-                        ? "bg-good"
-                        : state === "now"
-                          ? "animate-pulse bg-accent"
-                          : "bg-line"
-                    }`}
-                  />
-                  <span className={state === "todo" ? "text-muted" : ""}>
-                    {labelFor(s, job)}
-                    {state === "now" && "…"}
-                  </span>
-                </li>
-              );
-            })}
-          </ol>
-          <p className="mt-6 text-xs text-muted">
-            Usually 1–3 minutes. You can close this page — the video will be in
-            your library.
-          </p>
+        // In progress: a frame the size the video will be, the spinner in
+        // the middle of it, the steps under it with the live one ticking.
+        // The point of the clock is that a working queue does not look
+        // like a stall.
+        <div className="mt-8 overflow-hidden rounded-2xl border border-line bg-surface">
+          <div className="flex aspect-video w-full flex-col items-center justify-center gap-4 bg-ink text-white">
+            <span className="spinner" aria-hidden />
+            <p className="text-sm font-medium">{labelFor(phase, job)}…</p>
+            <Elapsed since={job.created_at} />
+          </div>
+          <div className="p-6">
+            <ol className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+              {STEPS.slice(0, 3).map((s, i) => {
+                // Nothing to show for a step this route never takes.
+                if (modeInfo(job.mode).upscale === "none" && s === "upscaling")
+                  return null;
+                const state = i < stepIdx ? "done" : i === stepIdx ? "now" : "todo";
+                return (
+                  <li key={s} className="flex items-center gap-2">
+                    <span
+                      className={`inline-block h-2.5 w-2.5 rounded-full ${
+                        state === "done"
+                          ? "bg-good"
+                          : state === "now"
+                            ? "animate-pulse bg-accent"
+                            : "bg-line"
+                      }`}
+                    />
+                    <span className={state === "todo" ? "text-muted" : ""}>{labelFor(s, job)}</span>
+                  </li>
+                );
+              })}
+            </ol>
+            <p className="mt-4 text-xs text-muted">
+              Usually 1–3 minutes. You can close this page — the video will be in your library,
+              and you will get an email when it is ready.
+            </p>
+          </div>
         </div>
       )}
     </div>

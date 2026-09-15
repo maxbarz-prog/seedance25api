@@ -65,8 +65,11 @@ export default function Header() {
   return (
     <header className="border-b border-line bg-surface">
       <div className={`mx-auto flex ${width} items-center justify-between gap-2 px-3 py-3 sm:px-4`}>
+        {/* The wordmark goes to the front door for a visitor and to the
+            composer for a member: someone with an account has no use for
+            the shop window. */}
         <Link
-          href="/"
+          href={me ? "/create" : "/"}
           className={landing ? "text-2xl font-bold tracking-tight" : "text-lg font-semibold tracking-tight"}
         >
           {SITE_NAME}
