@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { pageWidthClass } from "./PageWidth";
+import { openPlans } from "@/lib/ui-events";
 import { CREDIT_USD, SITE_NAME } from "@/lib/config";
 import { fetchMe } from "@/lib/me-client";
 
@@ -22,8 +23,12 @@ export default function Header() {
   const [me, setMe] = useState<Me | null>(null);
   const [loaded, setLoaded] = useState(false);
   // The header's column follows the page's, so on the landing page it lines
-  // up with the wider hero rather than sitting inset from it.
-  const width = pageWidthClass(usePathname());
+  // up with the wider hero rather than sitting inset from it. The landing
+  // page also sets everything a size up and the wordmark in bold: it is
+  // the shop front, and the type is scaled to the footage next to it.
+  const landing = usePathname() === "/";
+  const width = pageWidthClass(landing ? "/" : null);
+  const nav = landing ? "text-base" : "text-sm";
 
   // force: the shared answer is cached for the page load, and these events mean
   // it has changed — a purchase, a spend, or coming back to the tab.
@@ -60,10 +65,13 @@ export default function Header() {
   return (
     <header className="border-b border-line bg-surface">
       <div className={`mx-auto flex ${width} items-center justify-between gap-2 px-3 py-3 sm:px-4`}>
-        <Link href="/" className="text-lg font-semibold tracking-tight">
+        <Link
+          href="/"
+          className={landing ? "text-2xl font-bold tracking-tight" : "text-lg font-semibold tracking-tight"}
+        >
           {SITE_NAME}
         </Link>
-        <nav className="flex items-center gap-2 text-sm sm:gap-5">
+        <nav className={`flex items-center gap-2 ${nav} sm:gap-5`}>
           {/* The wordmark goes to the front door; this goes to the work.
               Hidden on a phone alongside the others — the header has no
               room, and the button on the right leads to the same place. */}
@@ -99,21 +107,27 @@ export default function Header() {
                       aria-label still say credits. */}
                   <span className="ml-1 hidden font-normal text-muted xs:inline">credits</span>
                 </Link>
-                {/* A free member cannot top up, so the button sends them to
-                    the plans instead of a purchase they cannot make. */}
-                <Link
-                  href={me.canBuyCredits ? "/account?topup=1" : "/account?join=1"}
-                  className="border-l border-line bg-accent px-2.5 py-1 font-medium text-accent-ink hover:opacity-90 sm:px-3"
-                >
-                  {me.canBuyCredits ? (
-                    <>
-                      + Add<span className="hidden sm:inline"> credits</span>
-                    </>
-                  ) : (
-                    "Upgrade"
-                  )}
-                </Link>
+                {me.canBuyCredits && (
+                  <Link
+                    href="/account?topup=1"
+                    className="border-l border-line bg-accent px-2.5 py-1 font-medium text-accent-ink hover:opacity-90 sm:px-3"
+                  >
+                    + Add<span className="hidden sm:inline"> credits</span>
+                  </Link>
+                )}
               </span>
+              {/* A free member cannot top up, so the one button they get is
+                  the plans — its own, in the accent, next to the balance
+                  that explains why. */}
+              {!me.canBuyCredits && (
+                <button
+                  type="button"
+                  onClick={() => openPlans("header")}
+                  className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
+                >
+                  Upgrade
+                </button>
+              )}
               <Link
                 href="/account"
                 /* Held back to md: at the sm breakpoint every nav link appears
@@ -134,7 +148,9 @@ export default function Header() {
                   the first thing, signing up is what Generate leads to. */}
               <Link
                 href="/create"
-                className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
+                className={`rounded-full bg-accent font-medium text-accent-ink hover:opacity-90 ${
+                  landing ? "px-5 py-2" : "px-4 py-1.5"
+                }`}
               >
                 Try {SITE_NAME}
               </Link>

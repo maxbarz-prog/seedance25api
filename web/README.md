@@ -31,6 +31,14 @@ Revenue comes from the membership, not from marking up generation.
 - `/create` — the composer. Public and cached like the landing page; a
   signed-out visitor types a prompt, and pressing Generate (or Enter) is
   what leads to sign-up. The draft survives in localStorage.
+- `/sign-up`, `/sign-in` (Clerk) and `/signup`, `/login` (built-in auth) — a
+  split screen: the showcase clips on the left, one question at a time on
+  the right (`components/auth/`). The Clerk flows are drawn by us with
+  `useSignUp`/`useSignIn` from `@clerk/nextjs/legacy`: email, then password,
+  then the emailed code; Google returns through `/sso-callback`.
+- The plan modal (`components/PlanModal.tsx`) is mounted once in the site
+  layout and opened from the header's Upgrade button, the composer's
+  refusal dialog and the welcome offer via `openPlans()` in `lib/ui-events.ts`.
 - `/welcome` — the welcome flow a new account is sent to after sign-up:
   finalize (Terms and Privacy), referral code or Skip, a two-question
   survey. Answers live on the user row (`lib/onboarding.ts`); it ends at

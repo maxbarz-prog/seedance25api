@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { CREDIT_USD, MIN_TOPUP_PLAN, PLANS } from "@/lib/config";
+import { openPlans } from "@/lib/ui-events";
 
 // Shown instead of silently bouncing the member to /account when a generation
 // is refused for money reasons. Three causes, one dialog: the plan does not
@@ -107,12 +108,25 @@ export default function CreditsDialog({
           >
             Not now
           </button>
-          <Link
-            href={upgrade ? "/account?join=1" : "/account?topup=1"}
-            className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
-          >
-            {upgrade ? "See plans" : "Add credits"}
-          </Link>
+          {upgrade ? (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                openPlans("credits-dialog");
+              }}
+              className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
+            >
+              See plans
+            </button>
+          ) : (
+            <Link
+              href="/account?topup=1"
+              className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
+            >
+              Add credits
+            </Link>
+          )}
         </div>
       </div>
     </div>

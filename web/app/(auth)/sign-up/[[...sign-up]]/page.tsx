@@ -1,13 +1,13 @@
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
-import AuthForm from "@/components/AuthForm";
 import { clerkEnabled } from "@/lib/auth";
+import ClerkSignUp from "@/components/auth/ClerkSignUp";
 
 export default function Page() {
-  if (clerkEnabled()) redirect("/sign-in");
+  if (!clerkEnabled()) redirect("/signup");
   return (
-    <Suspense>
-      <AuthForm kind="login" />
+    <Suspense fallback={null}>
+      <ClerkSignUp />
     </Suspense>
   );
 }

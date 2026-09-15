@@ -58,6 +58,7 @@ body {
    tokens so the page itself is right before that script runs. Everything
    past the front door follows the viewer's preference as before. */
 :root.force-light,
+.force-light,
 .landing {
   --bg: #ffffff;
   --surface: #ffffff;

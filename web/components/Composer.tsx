@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ASPECT_RATIOS,
@@ -37,6 +37,7 @@ import { PricingConstants, quoteWith } from "@/lib/pricing";
 import { BALANCE_EVENT } from "./Header";
 import { fetchMe } from "@/lib/me-client";
 import { flushEvents, track } from "@/lib/track-client";
+import { PROMPT_EVENT } from "@/lib/ui-events";
 
 const ROLE_LABELS: Record<ImageRole, string> = {
   reference: "Reference",
@@ -62,6 +63,7 @@ export default function Composer({
 }) {
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
+  const promptRef = useRef<HTMLTextAreaElement>(null);
   const [model, setModel] = useState<ModelId>(DEFAULT_MODEL);
   const [durationS, setDurationS] = useState(DEFAULT_DURATION_S);
   const [aspect, setAspect] = useState<string>("16:9");
@@ -209,6 +211,20 @@ export default function Composer({
     if (signedIn === false) router.prefetch("/sign-up");
   }, [signedIn, router]);
 
+  // An example clip under the composer was clicked: its prompt goes in the
+  // box, and the box gets the cursor.
+  useEffect(() => {
+    const onPrompt = (e: Event) => {
+      const text = (e as CustomEvent<{ text?: string }>).detail?.text;
+      if (!text) return;
+      setPrompt(text.slice(0, MAX_PROMPT_CHARS));
+      promptRef.current?.focus();
+      promptRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    window.addEventListener(PROMPT_EVENT, onPrompt);
+    return () => window.removeEventListener(PROMPT_EVENT, onPrompt);
+  }, []);
+
   // Draft survives the signup/membership/top-up detour.
   useEffect(() => {
     try {
@@ -348,6 +364,7 @@ export default function Composer({
     <div className="rounded-2xl border border-line bg-surface p-5 shadow-sm">
       <CreditsDialog block={block} onClose={() => setBlock(null)} />
       <textarea
+        ref={promptRef}
         value={prompt}
         onChange={(e) => setPrompt(e.target.value.slice(0, MAX_PROMPT_CHARS))}
         // Enter runs it; Shift+Enter is a new line. A prompt is a sentence

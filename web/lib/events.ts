@@ -26,6 +26,9 @@ export const CLIENT_EVENTS = [
   // page opening is the last thing the browser can report before the account
   // exists; the server reports that.
   "signup_viewed",
+  // Our own sign-up form is a few screens; each one finished is reported so
+  // the drop between "reached sign-up" and "account created" has a shape.
+  "signup_step_done",
   // The welcome flow.
   "welcome_viewed",
   "welcome_step_done",
@@ -37,6 +40,10 @@ export const CLIENT_EVENTS = [
   "upgrade_modal_shown",
   "upgrade_modal_clicked",
   "upgrade_modal_dismissed",
+  // The plan modal, raised from the header, the composer's refusal dialog
+  // or the welcome offer; and a checkout started from it.
+  "plans_opened",
+  "plans_checkout",
 ] as const;
 
 export const SERVER_EVENTS = [

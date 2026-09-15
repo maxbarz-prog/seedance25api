@@ -46,11 +46,11 @@ export default function Landing() {
         {/* Tall enough to be the page, not a banner: a 2:1 frame at the
             column's full width, which on a wide monitor is the footage at
             close to the size it was made for. */}
-        <div className="relative flex min-h-[28rem] flex-col justify-end p-6 sm:min-h-[34rem] sm:p-10 lg:aspect-[2/1] lg:min-h-0 lg:p-14">
-          <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl lg:text-6xl">
+        <div className="relative flex min-h-[28rem] flex-col justify-end p-6 sm:min-h-[34rem] sm:p-10 lg:aspect-[21/9] lg:min-h-0 lg:p-14 xl:p-16">
+          <h1 className="max-w-4xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl lg:text-6xl xl:text-7xl">
             {SITE_TAGLINE}
           </h1>
-          <p className="mt-4 max-w-xl text-base text-white/85 sm:text-lg lg:max-w-2xl lg:text-xl">
+          <p className="mt-4 max-w-xl text-base text-white/85 sm:text-lg lg:max-w-2xl lg:text-xl xl:mt-6 xl:text-2xl">
             {SITE_NAME} turns a sentence into video with Seedance, the model behind some of
             the most-used editors in the world, and charges what it costs us to run.
             Type a prompt. Press Generate. The first one is free.
@@ -75,7 +75,7 @@ export default function Landing() {
       {/* Who else runs on the model. Said precisely: these are Seedance's
           customers, not ours. */}
       <section className="mt-10 text-center">
-        <p className="text-sm text-muted">
+        <p className="text-sm text-muted lg:text-base">
           Built on Seedance, the video model that also powers:
         </p>
         <div className="marquee mt-4" aria-label="Products built on Seedance">
@@ -83,7 +83,7 @@ export default function Landing() {
             {[...SEEDANCE_ALSO_POWERS, ...SEEDANCE_ALSO_POWERS].map((name, i) => (
               <li
                 key={`${name}-${i}`}
-                className="px-8 text-lg font-semibold tracking-tight text-ink/70 lg:px-10 lg:text-xl"
+                className="px-8 text-lg font-semibold tracking-tight text-ink/70 lg:px-12 lg:text-2xl"
                 aria-hidden={i >= SEEDANCE_ALSO_POWERS.length}
               >
                 {name}
@@ -95,11 +95,11 @@ export default function Landing() {
 
       {/* What it does, shown rather than described. */}
       <section className="mt-20 text-center">
-        <h2 className="mx-auto max-w-3xl text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+        <h2 className="mx-auto text-3xl font-semibold leading-tight tracking-tight sm:text-4xl lg:text-5xl xl:text-6xl">
           One composer. Every Seedance model.
           <br className="hidden sm:block" /> Rendered, upscaled, delivered.
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl text-muted">
+        <p className="mx-auto mt-4 max-w-2xl text-muted lg:text-lg xl:text-xl">
           Text to video, image to video, references, extensions and AI upscaling to 4K, priced
           per second and shown before anything is charged.
         </p>
@@ -113,8 +113,8 @@ export default function Landing() {
               <ShowcaseVideo file={c.file} className="absolute inset-0 h-full w-full object-cover" />
             </div>
             <figcaption className="p-5">
-              <h3 className="font-medium lg:text-lg">{c.title}</h3>
-              <p className="mt-2 line-clamp-3 text-sm text-muted lg:text-base" title={c.prompt}>
+              <h3 className="font-medium lg:text-xl">{c.title}</h3>
+              <p className="mt-2 line-clamp-3 text-sm text-muted lg:text-base xl:text-lg" title={c.prompt}>
                 &ldquo;{c.prompt}&rdquo;
               </p>
               <p className="mt-3 text-xs text-muted">
@@ -127,7 +127,7 @@ export default function Landing() {
 
       {/* The pitch that used to be the homepage's headline, kept where it
           belongs: after the pictures. */}
-      <section className="mt-20 grid gap-6 sm:grid-cols-3">
+      <section className="mt-20 grid gap-6 sm:grid-cols-3 [&_h3]:lg:text-xl [&_p]:lg:text-base">
         <div className="rounded-2xl border border-line bg-surface p-6">
           <h3 className="font-medium">Priced at cost</h3>
           <p className="mt-2 text-sm text-muted">
@@ -153,8 +153,8 @@ export default function Landing() {
       </section>
 
       <section className="mt-20 rounded-3xl bg-ink px-6 py-14 text-center text-white sm:px-10">
-        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Start with a free video.</h2>
-        <p className="mx-auto mt-3 max-w-xl text-white/80">
+        <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl lg:text-5xl">Start with a free video.</h2>
+        <p className="mx-auto mt-3 max-w-xl text-white/80 lg:text-lg">
           No card. One clip on us, then plans from ${std.monthlyUsd} a month.
         </p>
         <Cta
