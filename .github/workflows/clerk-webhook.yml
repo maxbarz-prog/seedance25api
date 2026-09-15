@@ -81,10 +81,24 @@ jobs:
       - name: Get a Svix portal token
         run: |
           set -euo pipefail
-          curl -sS -o /dev/null -w "svix app: HTTP %{http_code} (400 = already exists)\n" \
-            -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/webhooks/svix || true
-          r=$(curl -sS -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/webhooks/svix_url)
-          url=$(printf '%s' "$r" | jq -r '.svix_url // empty')
+          # Creating the app answers 200 with a portal URL of its own; if it
+          # already exists the answer is 400 and svix_url is the way in. Read
+          # the URL from whichever answered — asking svix_url straight after
+          # a create raced Clerk's own registration and was told no app exists.
+          made=$(curl -sS -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/webhooks/svix)
+          url=$(printf '%s' "$made" | jq -r '.svix_url // empty' 2>/dev/null || true)
+          if [ -n "$url" ]; then
+            echo "svix app: created"
+          else
+            echo "svix app: $(printf '%s' "$made" | jq -r '.errors[0].code // "exists"' 2>/dev/null || echo exists)"
+          fi
+          r=""
+          for attempt in 1 2 3 4; do
+            [ -n "$url" ] && break
+            r=$(curl -sS -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/webhooks/svix_url)
+            url=$(printf '%s' "$r" | jq -r '.svix_url // empty')
+            [ -n "$url" ] || sleep 3
+          done
           if [ -z "$url" ]; then
             echo "Clerk gave no portal URL: $(printf '%s' "$r" | jq -c 'del(.svix_url)' 2>/dev/null || echo "$r" | head -c 300)"
             exit 1
