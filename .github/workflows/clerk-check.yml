@@ -25,6 +25,15 @@ on:
         type: choice
         options: ["dev", "prod"]
         default: dev
+      mode:
+        description: "show = print everything. home = also point Clerk's own fallback pages at this site."
+        type: choice
+        options: ["show", "home"]
+        default: show
+      confirm:
+        description: 'For home: type "home" to confirm.'
+        type: string
+        default: ""
 
 permissions:
   id-token: write
@@ -35,6 +44,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'home'
+        run: |
+          if [ "${{ inputs.confirm }}" != "home" ]; then
+            echo 'Not confirmed — type "home" in the confirm box.'
+            exit 1
+          fi
+
       - name: Assume deploy role via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -108,3 +125,41 @@ jobs:
             "  \(.id)  created \(.created_at / 1000 | strftime("%Y-%m-%d %H:%M"))  last_in \((.last_sign_in_at // 0) / 1000 | strftime("%Y-%m-%d %H:%M"))  @\(.email_addresses[0].email_address | split("@")[1] // "-")  verified=\(.email_addresses[0].verification.status // "-")  via=\([.external_accounts[]?.provider] | join(",") // "password")  pw=\(.password_enabled)"
           '
           echo "  total: $(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/users/count | jq -r '.total_count')"
+
+      - name: Where Clerk sends people when it cannot use ours
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          # A development instance's Account Portal ends every fallback at
+          # /default-redirect, which forwards to the instance's development
+          # origin — http://localhost:3000 out of the box. Somebody finishing a
+          # sign-in on dev.remerged.ai then lands on their own machine, where
+          # nothing is listening. That is the dead link, and this is the field
+          # it comes from.
+          i=$(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/instance)
+          printf '%s' "$i" > /tmp/instance.json
+          jq -r 'to_entries[] | select(.key | test("origin|url|home|allowed"; "i")) | "    \(.key) = \(.value)"' /tmp/instance.json
+          if [ "$STAGE" = "prod" ]; then site="https://remerged.ai"; else site="https://dev.remerged.ai"; fi
+          echo "SITE=$site" >> "$GITHUB_ENV"
+          have=$(jq -r '.development_origin // ""' /tmp/instance.json)
+          if [ "$have" = "$site" ]; then
+            echo "  development origin already points at $site."
+          else
+            echo "  development origin is '$have' — Clerk's fallback pages send people there, not to $site."
+            echo "  -> re-run this workflow with mode=home to change it."
+          fi
+
+      - name: Point the fallback pages at this site
+        if: inputs.mode == 'home'
+        run: |
+          set -euo pipefail
+          r=$(curl -sS -X PATCH -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"development_origin\": \"$SITE\"}" https://api.clerk.com/v1/instance)
+          if printf '%s' "$r" | jq -e '.errors' >/dev/null 2>&1; then
+            echo "Clerk rejected the change:"; printf '%s' "$r" | jq -r '.errors[]? | "  \(.message)"'; exit 1
+          fi
+          now=$(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/instance \
+            | jq -r '.development_origin // "-"')
+          echo "  development origin is now: $now"

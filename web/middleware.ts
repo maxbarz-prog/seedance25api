@@ -43,15 +43,22 @@ let clerk: ((req: NextRequest, event: NextFetchEvent) => unknown) | null = null;
 // every request it sees, which marks the response as belonging to one visitor
 // and takes it out of the CDN. Nothing here reads the session — the header
 // fetches the balance client-side from /api/me, which Clerk does see.
-// Pages whose HTML is the same for everyone. Not "pages anyone may use":
-// /account and /library are behind sign-in, but their markup is a shell that
-// fetches the member's data from /api/me in the browser, so the document itself
-// carries nothing private and belongs in the CDN. Protection lives in the API
-// handlers, which Clerk does still see.
 //
-// Anchored at a path boundary: /helpers or /accounts-export would otherwise
+// Only marketing pages are on this list, and that is deliberate. Refreshing
+// the session is not bookkeeping Clerk does for its own sake: a session token
+// lives about a minute, and the middleware is what renews it as somebody
+// moves around the site. Skip it on the pages members actually use and the
+// only thing left to renew on is a background fetch, which cannot complete
+// the redirect that renewal sometimes needs — so the browser goes on
+// believing there is a session while the server stops seeing one. That is
+// how a member ends up looking signed out to /api/me, being offered the
+// sign-up form, and being told by Clerk that they are already signed in.
+// The composer, the library, the account page and the welcome flow are all
+// behind sign-in anyway, so nothing of value is lost from the CDN.
+//
+// Anchored at a path boundary: /helpers or /pricing-plans would otherwise
 // match too, and skip Clerk on a page that was never meant to be public.
-const PUBLIC = /^\/(?:$|(?:create|welcome|pricing|help|terms|privacy|refunds|account|library|jobs)(?:\/|$))/;
+const PUBLIC = /^\/(?:$|(?:pricing|help|terms|privacy|refunds)(?:\/|$))/;
 
 export default function middleware(req: NextRequest, event: NextFetchEvent) {
   // Runs for every path, including public ones: help.<domain>/anything has to
