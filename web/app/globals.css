@@ -57,7 +57,13 @@ body {
    and footer in the layout go light with it; `.landing` carries the same
    tokens so the page itself is right before that script runs. Everything
    past the front door follows the viewer's preference as before. */
+/* The light pages apply this two ways. The marker element is in the HTML the
+   server sends, so the tokens are right at first paint — the class below is
+   added by script, which cannot run before the page is drawn, and a page that
+   starts dark and turns white is worse than either. The class stays for
+   browsers without :has(), and so that anything keyed on it still works. */
 :root.force-light,
+:root:has(.force-light-now),
 .force-light,
 .landing {
   --bg: #ffffff;

@@ -18,6 +18,7 @@ import {
   MIN_DURATION_S,
   DEFAULT_MODE,
   MODEL_IDS,
+  REF_VIDEO_CONTEXT_S,
   MODELS,
   OUTPUT_MODES,
   resolveMode,
@@ -223,7 +224,21 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const q = quote({ model, durationS: b.durationS, mode: outputMode, audio: b.audio });
+  // What the provider will be billed for beyond the render itself.
+  //
+  // Every second of an attached reference clip is input the provider charges
+  // for, and it switches the whole request to the with-video rate. That was
+  // priced for extensions and not for a reference video attached here, so a
+  // job with one was quoted as though it were not there. The seconds are a
+  // constant rather than anything the request carries: the pipeline trims
+  // each clip to exactly this before sending it, so the number cannot be
+  // argued with from the browser.
+  const contextS = count("reference_video") * REF_VIDEO_CONTEXT_S;
+  // A reference audio track means the output carries sound, and on the models
+  // that price sound separately that is the higher rate — whatever the flag
+  // in the request says.
+  const audio = b.audio || count("reference_audio") > 0;
+  const q = quote({ model, durationS: b.durationS, mode: outputMode, contextS, audio });
   const total = q.credits * b.variations;
   const bal = await balance(user.id);
   if (bal < total) {
@@ -304,7 +319,8 @@ export async function POST(req: NextRequest) {
       model,
       duration_s: b.durationS,
       aspect: b.aspect,
-      audio: b.audio ? 1 : 0,
+      // The value the job was priced at, not the one the request asked for.
+      audio: audio ? 1 : 0,
       mode: outputMode,
       // Kept in step with the mode so the pipeline never has to re-derive it.
       upscale_factor: OUTPUT_MODES[outputMode].upscaleFactor,

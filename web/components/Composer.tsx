@@ -23,6 +23,7 @@ import {
   QUALITIES,
   FREE_MAX_IMAGES,
   FREE_MODEL,
+  REF_VIDEO_CONTEXT_S,
   FREE_MAX_DURATION_S,
   FREE_QUALITY,
   QUALITY_IDS,
@@ -301,13 +302,19 @@ export default function Composer({
         model,
         durationS: Math.min(durationS, maxDuration),
         mode,
-        audio,
+        // Every second of a reference clip is input the provider charges for,
+        // and the server trims each one to exactly this many before sending,
+        // so the price of attaching one is fixed and known here too.
+        contextS: videoCount * REF_VIDEO_CONTEXT_S,
+        // A reference track means the output has sound, whatever the switch
+        // says, and sound is a different rate on the models that price it.
+        audio: audio || audioCount > 0,
       });
     } catch {
       return null;
     }
-     
-  }, [pricing, model, durationS, maxDuration, mode, audio]);
+
+  }, [pricing, model, durationS, maxDuration, mode, audio, videoCount, audioCount]);
 
   async function generate() {
     setError(null);

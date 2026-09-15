@@ -12,8 +12,16 @@ import {
   storeVideoFromUrl,
 } from "./storage";
 import { sendEmail } from "./email";
-import { EXTEND_CONTEXT_S, modeInfo, SITE_DOMAIN, SITE_NAME } from "./config";
-import { concat, durationOf, posterFromUrl, trimTail } from "./video";
+import {
+  EXTEND_CONTEXT_S,
+  MAX_IMAGES,
+  MAX_REF_VIDEOS,
+  modeInfo,
+  REF_VIDEO_CONTEXT_S,
+  SITE_DOMAIN,
+  SITE_NAME,
+} from "./config";
+import { concat, durationOf, posterFromUrl, trimHead, trimTail } from "./video";
 import { checkMargin, currentHalt, recordContentStrike } from "./money";
 import { record } from "./events";
 
@@ -107,6 +115,33 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
           })
         )
       ).filter((i): i is { url: string; role: Role } => !!i);
+      // A reference clip was priced at REF_VIDEO_CONTEXT_S seconds of input,
+      // so that is exactly what may be sent. Anything longer is trimmed to
+      // it; anything that cannot be trimmed fails the job rather than going
+      // up at full length, because the provider bills what it receives and
+      // the member has already been charged for five seconds of it. A failed
+      // job refunds, so the cost of being strict here is a retry.
+      for (let n = 0; n < inputs.length; n++) {
+        const i = inputs[n];
+        if (i.role !== "reference_video") continue;
+        const res = await fetch(i.url);
+        if (!res.ok) throw new Error(`reference video fetch ${res.status}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        const seconds = await durationOf(buf);
+        if (seconds === null) {
+          throw new Error("reference video: cannot measure the clip, so it cannot be priced");
+        }
+        if (seconds <= REF_VIDEO_CONTEXT_S) continue;
+        const head = await trimHead(buf, REF_VIDEO_CONTEXT_S);
+        if (!head) {
+          throw new Error("reference video: trim failed, refusing to send more than was charged");
+        }
+        const key = refContextKey(job, n);
+        await storeBuffer(key, head, "video/mp4");
+        const url = await readUrl(key);
+        if (!url) throw new Error("reference video: trimmed clip unreadable");
+        inputs[n] = { url, role: i.role };
+      }
       let sourceVideoUrl: string | undefined;
       if (job.kind === "extend" && job.source_job_id) {
         const source = await jobById(job.source_job_id);
@@ -114,22 +149,25 @@ export async function advanceJob(id: string): Promise<Job | undefined> {
         if (!sourceVideoUrl || !source) throw new Error("extend: source video unavailable");
         // Only the tail of the source goes up as the reference video: the
         // provider bills every second of it as input, and the quote assumed
-        // EXTEND_CONTEXT_S. Any trimming problem falls back to the full clip.
+        // EXTEND_CONTEXT_S.
+        //
+        // This used to fall back to sending the whole source when the trim
+        // failed, which meant paying for a clip's worth of input the member
+        // had not been charged for — quietly, and in proportion to how long
+        // their video already was. Failing is the cheaper mistake: the job
+        // refunds and they try again.
         if (source.duration_s > EXTEND_CONTEXT_S && storageEnabled()) {
-          try {
-            const res = await fetch(sourceVideoUrl);
-            if (!res.ok) throw new Error(`source fetch ${res.status}`);
-            const tail = await trimTail(Buffer.from(await res.arrayBuffer()), EXTEND_CONTEXT_S);
-            if (tail) {
-              const key = extendContextKey(job);
-              await storeBuffer(key, tail, "video/mp4");
-              sourceVideoUrl = (await readUrl(key)) ?? sourceVideoUrl;
-            } else {
-              console.warn(`job ${id}: ffmpeg unavailable, sending the full ${source.duration_s}s source`);
-            }
-          } catch (err) {
-            console.warn(`job ${id}: tail trim failed, sending the full source:`, err);
+          const res = await fetch(sourceVideoUrl);
+          if (!res.ok) throw new Error(`extend: source fetch ${res.status}`);
+          const tail = await trimTail(Buffer.from(await res.arrayBuffer()), EXTEND_CONTEXT_S);
+          if (!tail) {
+            throw new Error("extend: trim failed, refusing to send more than was charged");
           }
+          const key = extendContextKey(job);
+          await storeBuffer(key, tail, "video/mp4");
+          const trimmed = await readUrl(key);
+          if (!trimmed) throw new Error("extend: trimmed source unreadable");
+          sourceVideoUrl = trimmed;
         }
       }
       let taskId: string;
@@ -324,9 +362,22 @@ function extendContextKey(job: Job): string {
   return `tmp/${job.user_id}/${job.id}-context.mp4`;
 }
 
+// The same, for each reference clip attached to a new generation.
+function refContextKey(job: Job, n: number): string {
+  return `tmp/${job.user_id}/${job.id}-ref${n}.mp4`;
+}
+
 async function cleanupContext(job: Job) {
-  if (job.kind !== "extend") return;
-  await deleteObject(extendContextKey(job)).catch((e) => console.warn("context cleanup failed:", e));
+  const keys =
+    job.kind === "extend"
+      ? [extendContextKey(job)]
+      : // One per possible reference input. Deleting a key that was never
+        // written costs nothing, and the lifecycle rule on tmp/ would clear
+        // them anyway; this just does not wait a day.
+        Array.from({ length: MAX_REF_VIDEOS + MAX_IMAGES }, (_, n) => refContextKey(job, n));
+  await Promise.all(
+    keys.map((k) => deleteObject(k).catch((e) => console.warn("context cleanup failed:", e)))
+  );
 }
 
 // Status is already "ready" (claimed) by the time we get here; copying the

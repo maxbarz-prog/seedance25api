@@ -133,6 +133,36 @@ export async function posterFromUrl(url: string, atSeconds = 1): Promise<Buffer 
 }
 
 // Last `seconds` of an MP4, re-encoded so the cut is frame-accurate.
+// The opening seconds, for a reference clip somebody attached to a new
+// generation: what a reference is for is the look of the thing, and the look
+// is established at the start. The tail is the extension case, where the
+// question is where the clip left off.
+export async function trimHead(input: Buffer, seconds: number): Promise<Buffer | null> {
+  if (!ffmpegAvailable()) return null;
+  const dir = scratch();
+  const inPath = join(dir, "in.mp4");
+  const outPath = join(dir, "out.mp4");
+  try {
+    writeFileSync(inPath, input);
+    const { code, stderr } = await run([
+      "-y", "-v", "error",
+      "-i", inPath,
+      "-t", String(seconds),
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p",
+      "-c:a", "aac",
+      "-movflags", "+faststart",
+      outPath,
+    ]);
+    if (code !== 0) throw new Error(`ffmpeg exited ${code}: ${stderr.slice(0, 300)}`);
+    return readFileSync(outPath);
+  } catch (err) {
+    console.warn("ffmpeg head trim failed:", err);
+    return null;
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 export async function trimTail(input: Buffer, seconds: number): Promise<Buffer | null> {
   if (!ffmpegAvailable()) return null;
   const dir = scratch();

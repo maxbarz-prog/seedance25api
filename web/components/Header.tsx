@@ -26,7 +26,11 @@ export default function Header() {
   // up with the wider hero rather than sitting inset from it. The landing
   // page also sets everything a size up and the wordmark in bold: it is
   // the shop front, and the type is scaled to the footage next to it.
-  const landing = usePathname() === "/";
+  const path = usePathname();
+  const landing = path === "/";
+  // The pages someone reads before they have an account: white, and with no
+  // grey link competing with the button that is the point of the page.
+  const marketing = landing || path === "/pricing" || path.startsWith("/help");
   const width = pageWidthClass(landing ? "/" : null);
   const nav = landing ? "text-base" : "text-sm";
 
@@ -81,10 +85,10 @@ export default function Header() {
           {/* The wordmark goes to the front door; this goes to the work.
               Hidden on a phone alongside the others — the header has no
               room, and the button on the right leads to the same place.
-              Not on the landing page at all: the page is one long argument
-              for pressing the button, and a quiet grey link to the same
-              destination only competes with it. */}
-          {!landing && (
+              Not on the pages that sell the thing: each is an argument for
+              pressing the button on the right, and a quiet grey link to the
+              same destination only competes with it. */}
+          {!marketing && (
             <Link href="/create" className="hidden text-muted hover:text-ink sm:inline">
               Create
             </Link>

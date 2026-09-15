@@ -673,4 +673,15 @@ export const EXTEND_MAX_S = 15;
 // so only the tail goes up (trimmed server-side); it also fixes the price of
 // an extension regardless of how long the source is.
 export const EXTEND_CONTEXT_S = 5;
+// Seconds of an attached reference video sent to the provider on a NEW
+// generation, and the seconds it is priced at.
+//
+// Same reasoning as the line above, and the same number, because it is the
+// same thing arriving by a different door: the provider bills every second
+// of a reference clip as input tokens. The price cannot be allowed to depend
+// on how long the uploaded file happens to be, because the server does not
+// know that when it charges — so the clip is trimmed to this before it is
+// sent, and this is what the quote carries. A reference video therefore has
+// one fixed price, and no number from the browser can lower it.
+export const REF_VIDEO_CONTEXT_S = 5;
 export type AspectRatio = (typeof ASPECT_RATIOS)[number];
