@@ -1,0 +1,180 @@
+name: Clerk webhook
+
+# Points Clerk's user.deleted webhook at a stage, and files the signing
+# secret in SSM — the same shape as stripe-webhook.yml, for the same reason:
+# the secret travels Clerk -> runner -> SSM and never a clipboard, and the
+# setup can be re-applied to a fresh instance without anyone remembering
+# which boxes to tick.
+#
+# Clerk's webhooks are Svix underneath. The Clerk Backend API hands out a
+# short-lived Svix "app portal" token (POST /v1/webhooks/svix_url); that
+# token authenticates the Svix API for this one application, which is how
+# the endpoint is created and its secret read back.
+#
+# FREE. `list` is read-only; `create` needs the word typed. After `create`
+# on dev the deploy workflow is dispatched so the new secret reaches the
+# Lambda; prod deploys only from a prod-* tag, so that one is left to you.
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/clerk-webhook.yml"]
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Which stage's Clerk instance (its secret key in SSM)"
+        type: choice
+        options: ["dev", "prod"]
+        default: dev
+      site:
+        description: "Site the endpoint should call (blank = the stage's own: dev.remerged.ai / remerged.ai)"
+        type: string
+        default: ""
+      mode:
+        description: "list = show the endpoints that exist. create = add ours (or reuse it) and store its secret."
+        type: choice
+        options: ["list", "create"]
+        default: list
+      confirm:
+        description: 'For create: type "create" to confirm.'
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+  actions: write
+
+jobs:
+  webhook:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'create'
+        run: |
+          if [ "${{ inputs.confirm }}" != "create" ]; then
+            echo 'Not confirmed — type "create" in the confirm box.'
+            exit 1
+          fi
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load the Clerk secret key from SSM
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          v=$(aws ssm get-parameter --name "/remerged/$STAGE/CLERK_SECRET_KEY" --with-decryption \
+            --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "CLERK_SECRET_KEY=$v" >> "$GITHUB_ENV"
+
+      # Clerk -> Svix. Make sure the Svix app exists (Clerk creates it lazily;
+      # a second create answers 400 and that is fine), then take a portal
+      # token and read the application id out of it.
+      - name: Get a Svix portal token
+        run: |
+          set -euo pipefail
+          curl -sS -o /dev/null -w "svix app: HTTP %{http_code} (400 = already exists)\n" \
+            -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/webhooks/svix || true
+          r=$(curl -sS -X POST -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/webhooks/svix_url)
+          url=$(printf '%s' "$r" | jq -r '.svix_url // empty')
+          if [ -z "$url" ]; then
+            echo "Clerk gave no portal URL: $(printf '%s' "$r" | jq -c 'del(.svix_url)' 2>/dev/null || echo "$r" | head -c 300)"
+            exit 1
+          fi
+          token="${url#*#key=}"
+          if [ "$token" = "$url" ]; then
+            echo "Portal URL has no #key= token; its shape is: $(printf '%s' "$url" | sed -E 's#(https?://[^/]+/).*#\1…#')"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          # The token is a JWT; the application id is a claim. Print the claim
+          # NAMES so a change in Clerk's token shape is diagnosable from the log
+          # without printing any values.
+          payload=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+' | awk '{ l=length($0)%4; if (l==2) print $0"=="; else if (l==3) print $0"="; else print $0 }' | base64 -d 2>/dev/null || true)
+          echo "token claims: $(printf '%s' "$payload" | jq -r 'keys | join(", ")' 2>/dev/null || echo unreadable)"
+          app=$(printf '%s' "$payload" | jq -r '.sub // .app_id // .appId // empty' 2>/dev/null || true)
+          if [ -z "$app" ]; then
+            echo "Could not find the application id in the token; falling back to the portal's own lookup."
+          fi
+          echo "SVIX_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "SVIX_APP=$app" >> "$GITHUB_ENV"
+          # Region: Clerk's Svix instance answers on the US host for most
+          # instances; try EU if the US host refuses the token.
+          for base in https://api.svix.com https://api.eu.svix.com; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" "$base/api/v1/app/$app/endpoint/?limit=1")
+            echo "$base -> HTTP $code"
+            if [ "$code" = "200" ]; then echo "SVIX_BASE=$base" >> "$GITHUB_ENV"; break; fi
+          done
+
+      - name: List the endpoints
+        run: |
+          set -euo pipefail
+          if [ -z "${SVIX_BASE:-}" ]; then echo "No Svix host accepted the token — see above."; exit 1; fi
+          curl -sS -H "Authorization: Bearer $SVIX_TOKEN" "$SVIX_BASE/api/v1/app/$SVIX_APP/endpoint/" \
+            | jq -r '.data[] | "  \(.id)  \(.url)  events=\(.filterTypes // ["all"] | join(","))  disabled=\(.disabled)"'
+          echo "(none above means no endpoints yet)"
+
+      - name: Create the endpoint and file its secret
+        if: inputs.mode == 'create'
+        env:
+          STAGE: ${{ inputs.stage }}
+          SITE_IN: ${{ inputs.site }}
+        run: |
+          set -euo pipefail
+          site="${SITE_IN:-}"
+          if [ -z "$site" ]; then
+            if [ "$STAGE" = "prod" ]; then site="remerged.ai"; else site="dev.remerged.ai"; fi
+          fi
+          url="https://$site/api/auth/clerk"
+          existing=$(curl -sS -H "Authorization: Bearer $SVIX_TOKEN" "$SVIX_BASE/api/v1/app/$SVIX_APP/endpoint/" \
+            | jq -r --arg u "$url" '.data[] | select(.url == $u) | .id' | head -1)
+          if [ -n "$existing" ]; then
+            id="$existing"
+            echo "endpoint for $url exists: $id — reusing it and refreshing the event list"
+            curl -sS -o /dev/null -w "update: HTTP %{http_code}\n" -X PATCH -H "Authorization: Bearer $SVIX_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"filterTypes":["user.deleted"],"disabled":false}' \
+              "$SVIX_BASE/api/v1/app/$SVIX_APP/endpoint/$id"
+          else
+            r=$(curl -sS -X POST -H "Authorization: Bearer $SVIX_TOKEN" -H "Content-Type: application/json" \
+              -d "$(jq -nc --arg u "$url" --arg d "Remerged $STAGE — account erasure on user.deleted" \
+                    '{url:$u, description:$d, filterTypes:["user.deleted"]}')" \
+              "$SVIX_BASE/api/v1/app/$SVIX_APP/endpoint/")
+            id=$(printf '%s' "$r" | jq -r '.id // empty')
+            if [ -z "$id" ]; then
+              echo "Svix did not create the endpoint: $(printf '%s' "$r" | head -c 400)"
+              exit 1
+            fi
+            echo "created endpoint $id for $url"
+          fi
+          secret=$(curl -sS -H "Authorization: Bearer $SVIX_TOKEN" "$SVIX_BASE/api/v1/app/$SVIX_APP/endpoint/$id/secret/" | jq -r '.key // empty')
+          if [ -z "$secret" ]; then
+            echo "Svix returned no signing secret for $id."
+            exit 1
+          fi
+          echo "::add-mask::$secret"
+          # Straight from the response into SSM; never printed.
+          aws ssm put-parameter --name "/remerged/$STAGE/CLERK_WEBHOOK_SIGNING_SECRET" \
+            --value "$secret" --type SecureString --overwrite >/dev/null
+          echo "done:"
+          echo "  endpoint $url  events=user.deleted"
+          echo "  secret   written to /remerged/$STAGE/CLERK_WEBHOOK_SIGNING_SECRET"
+          echo "  fingerprint $(printf '%s' "$secret" | sha256sum | cut -c1-12)"
+
+      # The Lambda reads the secret at deploy, so dev is redeployed here.
+      # Prod deploys only from a prod-* tag: push one when ready.
+      - name: Redeploy dev so the Lambda picks the secret up
+        if: inputs.mode == 'create' && inputs.stage == 'dev'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy.yml --ref main -R "$GITHUB_REPOSITORY"
+          echo "deploy.yml dispatched on main (dev stage)."
