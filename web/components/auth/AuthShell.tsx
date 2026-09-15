@@ -95,13 +95,18 @@ export function Primary({ children, busy, ...rest }: React.ButtonHTMLAttributes<
   );
 }
 
-export function Secondary({ children, ...rest }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+export function Secondary({
+  children,
+  busy,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { busy?: boolean }) {
   return (
     <button
       {...rest}
+      disabled={busy || rest.disabled}
       className="flex w-full items-center justify-center gap-2 rounded-full border border-line py-3 font-medium hover:border-accent disabled:opacity-50"
     >
-      {children}
+      {busy ? <span className="spinner spinner-sm" aria-hidden /> : children}
     </button>
   );
 }
