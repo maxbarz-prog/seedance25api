@@ -99,6 +99,13 @@ body {
   .spinner { animation: none; }
 }
 
+/* The survey screens in the welcome flow: the lights go down. */
+.survey-dark {
+  background:
+    radial-gradient(70% 50% at 50% 0%, rgba(56, 84, 140, 0.45), transparent 70%),
+    linear-gradient(180deg, #0f1522, #07090e);
+}
+
 /* Where a showcase clip goes before it exists on this deployment. */
 .showcase-fallback {
   background:

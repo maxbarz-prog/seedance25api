@@ -127,6 +127,7 @@ export class SqliteStore implements DataStore {
       `ALTER TABLE users ADD COLUMN referral_answered_at INTEGER`,
       `ALTER TABLE users ADD COLUMN survey_role TEXT`,
       `ALTER TABLE users ADD COLUMN survey_goal TEXT`,
+      `ALTER TABLE users ADD COLUMN survey_source TEXT`,
       `ALTER TABLE users ADD COLUMN onboarded_at INTEGER`,
       `ALTER TABLE users ADD COLUMN upgrade_prompted_at INTEGER`,
     ];

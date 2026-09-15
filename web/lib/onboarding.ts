@@ -5,7 +5,7 @@ import { User } from "./db";
 //
 //   1. Finalize   agree to the Terms, acknowledge the Privacy Policy
 //   2. Referral   a code, or Skip
-//   3. Survey     who they are, what they came for
+//   3. Survey     who they are, what they came for, how they heard of us
 //
 // The answers live on the user row, one field per step, so the flow resumes
 // where it stopped and never runs twice. Accounts made before the flow
@@ -41,6 +41,7 @@ export const SURVEY = {
       { key: "filmmaker", label: "Filmmaker", blurb: "Shorts, previs, music video" },
       { key: "developer", label: "Developer or founder", blurb: "Building something with video" },
       { key: "exploring", label: "Just exploring", blurb: "Curious what it can do" },
+      { key: "other", label: "Other", blurb: "Not listed here" },
     ],
   },
   goal: {
@@ -48,6 +49,23 @@ export const SURVEY = {
     options: [
       { key: "editing", label: "The best editing experience", blurb: "Control, quality, iteration" },
       { key: "price", label: "The cheapest price", blurb: "The most video for the money" },
+    ],
+  },
+  source: {
+    question: "How did you hear about us?",
+    options: [
+      { key: "linkedin", label: "LinkedIn", blurb: "" },
+      { key: "reddit", label: "Reddit", blurb: "" },
+      { key: "facebook", label: "Facebook", blurb: "" },
+      { key: "youtube", label: "YouTube", blurb: "" },
+      { key: "ai_chat", label: "ChatGPT / AI chat", blurb: "" },
+      { key: "x", label: "Twitter / X", blurb: "" },
+      { key: "word_of_mouth", label: "Word of mouth", blurb: "" },
+      { key: "instagram", label: "Instagram", blurb: "" },
+      { key: "news", label: "News / podcasts", blurb: "" },
+      { key: "tiktok", label: "TikTok", blurb: "" },
+      { key: "google", label: "Google", blurb: "" },
+      { key: "other", label: "Other", blurb: "" },
     ],
   },
 } as const;
