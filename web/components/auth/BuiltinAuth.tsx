@@ -1,5 +1,6 @@
 "use client";
 
+import { showLoader } from "@/lib/ui-events";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -66,9 +67,11 @@ export default function BuiltinAuth({ kind }: { kind: "login" | "signup" }) {
           if (v) q.set(k, v);
         }
         const s = q.toString();
+        showLoader();
         window.location.assign(`/welcome${s ? `?${s}` : ""}`);
       } else {
         const next = params.get("next");
+        showLoader();
         window.location.assign(next && next.startsWith("/") && !next.startsWith("//") ? next : "/create");
       }
     } finally {

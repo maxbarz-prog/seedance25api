@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SURVEY as SURVEY_TYPE } from "@/lib/onboarding";
 import { flushEvents, track } from "@/lib/track-client";
+import { showLoader } from "@/lib/ui-events";
 
 // The welcome flow, three steps, one screen each. Which step to draw comes
 // from the server so a refresh or a second device resumes rather than
@@ -145,6 +146,7 @@ export default function Welcome() {
       track("welcome_step_done", { step: "survey" });
       track("welcome_completed");
       flushEvents();
+      showLoader();
       // A full load, not a client transition: the composer's shared "who am
       // I" answer was cached before the account existed, and a fresh
       // document is the one sure way to make every part of the page ask

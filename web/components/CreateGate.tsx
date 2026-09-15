@@ -1,5 +1,6 @@
 "use client";
 
+import { showLoader } from "@/lib/ui-events";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import UpgradeModal from "./UpgradeModal";
@@ -24,6 +25,7 @@ export default function CreateGate() {
     fetchMe(fromWelcome).then(({ user }) => {
       if (!user) return;
       if (user.needsOnboarding) {
+        showLoader();
         router.replace("/welcome");
         return;
       }
