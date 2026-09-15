@@ -132,11 +132,15 @@ export default function PlanModal({ from, onClose }: { from: string; onClose: ()
       role="dialog"
       aria-modal="true"
       aria-labelledby="plan-modal-title"
-      className="fixed inset-0 z-50 overflow-y-auto bg-black/60 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-sm"
       onClick={onClose}
     >
+      {/* Centred in the viewport when it fits, scrollable when it does not:
+          the flex box is at least the viewport tall, so a short modal sits
+          in the middle and a tall one starts at the top and scrolls. */}
+      <div className="flex min-h-full items-center justify-center p-4">
       <div
-        className="mx-auto my-6 max-w-3xl overflow-hidden rounded-2xl bg-[#111318] text-white shadow-2xl"
+        className="w-full max-w-3xl overflow-hidden rounded-2xl bg-[#111318] text-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="bg-gradient-to-r from-emerald-200/80 via-lime-100 to-sky-200/80 px-6 py-2.5 text-center text-sm font-medium text-[#111318]">
@@ -265,6 +269,7 @@ export default function PlanModal({ from, onClose }: { from: string; onClose: ()
             </p>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

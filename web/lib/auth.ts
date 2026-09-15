@@ -46,10 +46,21 @@ export async function currentUser(): Promise<User | null> {
       primary && primary.verification?.status === "verified" ? primary.emailAddress : undefined;
     if (!cu || !email) return null;
     const existing = await userByEmail(email);
-    if (existing) return existing;
+    if (existing) {
+      // Rows from before the mapping existed pick it up the first time
+      // they are seen: an insert-if-absent, so it costs a read-check rather
+      // than a write on every request.
+      const { setSystemIfAbsent } = await import("./db");
+      await setSystemIfAbsent(`clerk#${cu.id}`, existing.id).catch(() => {});
+      return existing;
+    }
     // No password for Clerk-managed identities; the built-in login refuses
     // to match this sentinel.
     const created = await createUser(email, "clerk");
+    {
+      const { setSystem } = await import("./db");
+      await setSystem(`clerk#${cu.id}`, created.id).catch(() => {});
+    }
     const { record } = await import("./events");
     await record("account_created", created.id, { auth: "clerk" });
     // Same free allocation the built-in signup hands over.

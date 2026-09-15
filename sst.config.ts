@@ -147,6 +147,7 @@ export default $config({
       MOCK_BILLING: process.env.MOCK_BILLING ?? "",
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "",
       CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ?? "",
+      CLERK_WEBHOOK_SIGNING_SECRET: process.env.CLERK_WEBHOOK_SIGNING_SECRET ?? "",
       COST_SD25_480P_PER_SEC: process.env.COST_SD25_480P_PER_SEC ?? "",
       COST_SD25_1080P_PER_SEC: process.env.COST_SD25_1080P_PER_SEC ?? "",
       COST_SD20_480P_PER_SEC: process.env.COST_SD20_480P_PER_SEC ?? "",

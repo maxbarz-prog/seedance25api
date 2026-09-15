@@ -1,19 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { currentUser, session } from "@/lib/auth";
-import {
-  balance,
-  deleteUser,
-  jobsFor,
-  setDeactivated,
-  setMembership,
-} from "@/lib/db";
-import { cancelSubscription, stripeEnabled, stripeClient } from "@/lib/billing";
-import { deleteObject } from "@/lib/storage";
-import { ledgerFor, setSystem } from "@/lib/db";
-import { evidencePack } from "@/app/api/admin/evidence/route";
+import { clerkEnabled, currentUser, session } from "@/lib/auth";
+import { setDeactivated } from "@/lib/db";
+import { cancelSubscription } from "@/lib/billing";
 import { effectivePlan } from "@/lib/plan";
 import { PLANS } from "@/lib/config";
+import { eraseAccount } from "@/lib/account";
 
 // Leaving. Three doors, deliberately separate, because they are not the same
 // decision and a member should never discover afterwards that they picked a
@@ -31,7 +23,7 @@ import { PLANS } from "@/lib/config";
 
 const Body = z.object({
   action: z.enum(["unsubscribe", "deactivate", "reactivate", "delete"]),
-  // Delete only: the account's own email, typed. A confirmation that can be
+  // Delete only: the word "delete", typed. A confirmation that can be
   // clicked through without reading is not a confirmation.
   confirm: z.string().optional(),
 });
@@ -82,52 +74,30 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, message: "Welcome back." });
   }
 
-  // delete
-  if ((confirm ?? "").trim().toLowerCase() !== user.email.toLowerCase()) {
+  // delete. Confirmed by typing the word — the same for a password account
+  // and one signed in with Google, which has no password to ask for.
+  if ((confirm ?? "").trim().toLowerCase() !== "delete") {
     return NextResponse.json(
       {
         error: "confirm_mismatch",
-        message: "Type your email address exactly to confirm deletion.",
+        message: 'Type "delete" to confirm.',
       },
       { status: 400 }
     );
   }
-
-  // Cancel before erasing: once the user row is gone the webhook that would
-  // normally reconcile the subscription has nothing to attach to.
-  if (paid) await cancelSubscription(user).catch(() => {});
-  if (stripeEnabled() && user.stripe_subscription_id) {
-    await stripeClient()
-      .subscriptions.cancel(user.stripe_subscription_id)
-      .catch(() => {});
+  let clerkId: string | null = null;
+  if (clerkEnabled()) {
+    const { currentUser: clerkUser } = await import("@clerk/nextjs/server");
+    clerkId = (await clerkUser())?.id ?? null;
   }
-  await setMembership(user.id, "free", null, null);
-
-  // Videos first — the store's deleteUser removes the job rows, and once
-  // those are gone nothing remembers which objects to remove.
-  const jobs = await jobsFor(user.id, 10000);
-  for (const j of jobs) {
-    await deleteObject(j.video_url).catch(() => {});
-    await deleteObject(j.poster_key).catch(() => {});
-  }
-
-  const remaining = await balance(user.id);
-  // A chargeback can follow a deletion by months. Keep what would answer it —
-  // the delivery record and the ledger, no videos — under the email, since
-  // that is all a dispute will name. Nothing personal beyond what the dispute
-  // itself carries.
-  await setSystem(
-    `evidence#${user.email.toLowerCase()}`,
-    JSON.stringify({ deletedAt: Date.now(), ...evidencePack(user, jobs, await ledgerFor(user.id, 1000), null) })
-  ).catch((e) => console.error("evidence snapshot failed:", e));
-  await deleteUser(user.id);
+  const r = await eraseAccount(user, { clerkId, deleteClerkUser: true });
   const s = await session();
   s.destroy();
   await s.save();
   return NextResponse.json({
     ok: true,
-    deletedVideos: jobs.length,
-    forfeitedCredits: remaining,
+    deletedVideos: r.deletedVideos,
+    forfeitedCredits: r.forfeitedCredits,
     message: "Account deleted.",
   });
 }

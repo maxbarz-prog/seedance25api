@@ -36,6 +36,16 @@ Revenue comes from the membership, not from marking up generation.
   the right (`components/auth/`). The Clerk flows are drawn by us with
   `useSignUp`/`useSignIn` from `@clerk/nextjs/legacy`: email, then password,
   then the emailed code; Google returns through `/sso-callback`.
+- **Deleting an account** goes through `lib/account.ts` from two doors: the
+  member pressing Delete (confirmed by typing `delete`, which works the same
+  for a Google sign-in as for a password), and Clerk's `user.deleted`
+  webhook at `/api/auth/clerk`, so an identity removed in the Clerk
+  dashboard takes our row, credits and videos with it. Our own deletion
+  removes the Clerk user too. The webhook needs
+  `CLERK_WEBHOOK_SIGNING_SECRET` in SSM (`/remerged/<stage>/`) and the
+  endpoint added under Webhooks in the Clerk dashboard, subscribed to
+  `user.deleted`. The Clerk id → row mapping is `clerk#<id>` in the system
+  store, written the first time an identity is seen.
 - The plan modal (`components/PlanModal.tsx`) is mounted once in the site
   layout and opened from the header's Upgrade button, the composer's
   refusal dialog and the welcome offer via `openPlans()` in `lib/ui-events.ts`.

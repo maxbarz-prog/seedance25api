@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { fetchMe } from "@/lib/me-client";
+import { openPlans } from "@/lib/ui-events";
+import { PLANS } from "@/lib/config";
 
 interface Job {
   id: string;
@@ -14,9 +17,28 @@ interface Job {
   created_at: number;
 }
 
+function gb(bytes: number): string {
+  const g = bytes / 1e9;
+  return g >= 10 ? g.toFixed(0) : g >= 1 ? g.toFixed(1) : g >= 0.01 ? g.toFixed(2) : "0";
+}
+
 export default function LibraryPage() {
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [unauthed, setUnauthed] = useState(false);
+  const [me, setMe] = useState<{
+    plan: string;
+    storageUsedBytes: number;
+    storageQuotaBytes: number;
+  } | null>(null);
+
+  useEffect(() => {
+    fetchMe().then(({ user }) => {
+      const u = user as (typeof user & { storageUsedBytes?: number; storageQuotaBytes?: number }) | null;
+      if (u && typeof u.storageUsedBytes === "number" && typeof u.storageQuotaBytes === "number") {
+        setMe({ plan: u.plan, storageUsedBytes: u.storageUsedBytes, storageQuotaBytes: u.storageQuotaBytes });
+      }
+    });
+  }, []);
 
   useEffect(() => {
     fetch("/api/jobs")
@@ -49,9 +71,44 @@ export default function LibraryPage() {
   }
   if (!jobs) return <div className="py-16 text-center text-muted">Loading…</div>;
 
+  const usedPct = me ? Math.min(100, (me.storageUsedBytes / Math.max(1, me.storageQuotaBytes)) * 100) : 0;
+  const paid = me ? PLANS[me.plan as keyof typeof PLANS]?.monthlyUsd > 0 : false;
+
   return (
     <div className="py-10">
-      <h1 className="text-2xl font-semibold">Library</h1>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <h1 className="text-2xl font-semibold">Library</h1>
+        {me && (
+          // How much of the plan's storage the videos take, and the way to
+          // more of it. Every plan up adds storage and monthly credits, so
+          // the button says both.
+          <div className="flex flex-wrap items-center gap-4 text-sm">
+            <div className="min-w-[14rem]">
+              <div className="flex justify-between text-xs text-muted">
+                <span>Storage</span>
+                <span className="tabular-nums">
+                  {gb(me.storageUsedBytes)} of {gb(me.storageQuotaBytes)} GB
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded bg-line" role="progressbar" aria-valuenow={Math.round(usedPct)} aria-valuemin={0} aria-valuemax={100}>
+                <div
+                  className={`h-full ${usedPct >= 90 ? "bg-bad" : usedPct >= 70 ? "bg-warn" : "bg-accent"}`}
+                  style={{ width: `${usedPct}%` }}
+                />
+              </div>
+            </div>
+            {!paid || usedPct >= 70 ? (
+              <button
+                type="button"
+                onClick={() => openPlans("library")}
+                className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
+              >
+                {paid ? "More storage" : "Upgrade for more storage and monthly credits"}
+              </button>
+            ) : null}
+          </div>
+        )}
+      </div>
       {jobs.length === 0 ? (
         <p className="mt-4 text-muted">
           Nothing here yet.{" "}
@@ -96,9 +153,13 @@ export default function LibraryPage() {
                     className="aspect-video w-full object-cover"
                   />
                 ) : (
+                  // No poster: a job from before posters existed. The video
+                  // is asked for its first frame only (metadata plus the
+                  // fragment) so the card shows a still rather than a
+                  // black box, without fetching the whole clip.
                   <video
-                    src={j.video_url}
-                    preload="none"
+                    src={`${j.video_url}#t=0.1`}
+                    preload="metadata"
                     muted
                     loop
                     playsInline
