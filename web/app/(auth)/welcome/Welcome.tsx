@@ -286,7 +286,7 @@ function ReferralStep({
           type="button"
           disabled={busy}
           onClick={() => onSubmit("", true)}
-          className="w-full py-1 text-center text-sm text-muted hover:text-ink"
+          className="w-full py-1 text-center text-sm text-muted/70 hover:text-ink"
         >
           Skip
         </button>

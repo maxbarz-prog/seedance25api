@@ -63,7 +63,10 @@ export default function Header() {
     : null;
 
   return (
-    <header className="border-b border-line bg-surface">
+    // Sticky on every page: the balance and the way out of wherever you are
+    // should not need scrolling back for. Below the plan modal and the
+    // loading screen in the stack, so neither ends up behind it.
+    <header className="sticky top-0 z-40 border-b border-line bg-surface">
       <div className={`mx-auto flex ${width} items-center justify-between gap-2 px-3 py-3 sm:px-4`}>
         {/* The wordmark goes to the front door for a visitor and to the
             composer for a member: someone with an account has no use for
@@ -77,10 +80,15 @@ export default function Header() {
         <nav className={`flex items-center gap-2 ${nav} sm:gap-5`}>
           {/* The wordmark goes to the front door; this goes to the work.
               Hidden on a phone alongside the others — the header has no
-              room, and the button on the right leads to the same place. */}
-          <Link href="/create" className="hidden text-muted hover:text-ink sm:inline">
-            Create
-          </Link>
+              room, and the button on the right leads to the same place.
+              Not on the landing page at all: the page is one long argument
+              for pressing the button, and a quiet grey link to the same
+              destination only competes with it. */}
+          {!landing && (
+            <Link href="/create" className="hidden text-muted hover:text-ink sm:inline">
+              Create
+            </Link>
+          )}
           <Link href="/pricing" className="hidden text-muted hover:text-ink sm:inline">
             Pricing
           </Link>

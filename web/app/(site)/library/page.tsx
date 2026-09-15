@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { fetchMe } from "@/lib/me-client";
 import { openPlans } from "@/lib/ui-events";
-import { PLANS } from "@/lib/config";
 
 interface Job {
   id: string;
@@ -40,17 +39,36 @@ export default function LibraryPage() {
     });
   }, []);
 
+  // Load, and keep loading while anything is still being made: a card that
+  // says "Generating…" should become the video by itself. The timer only
+  // exists while there is something to wait for, so a settled library costs
+  // one request.
   useEffect(() => {
-    fetch("/api/jobs")
-      .then(async (r) => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    async function load() {
+      try {
+        const r = await fetch("/api/jobs");
         if (r.status === 401) {
           setUnauthed(true);
-          return { jobs: [] };
+          return;
         }
-        return r.json();
-      })
-      .then((d) => setJobs(d.jobs))
-      .catch(() => setJobs([]));
+        const d = await r.json();
+        if (stop) return;
+        setJobs(d.jobs);
+        const working = (d.jobs as Job[]).some(
+          (j) => j.status !== "ready" && j.status !== "failed"
+        );
+        if (working) timer = setTimeout(load, 4000);
+      } catch {
+        if (!stop) setJobs((prev) => prev ?? []);
+      }
+    }
+    load();
+    return () => {
+      stop = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   async function remove(id: string) {
@@ -69,19 +87,24 @@ export default function LibraryPage() {
       </div>
     );
   }
-  if (!jobs) return <div className="py-16 text-center text-muted">Loading…</div>;
+  if (!jobs) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-busy="true">
+        <span className="spinner" aria-hidden />
+        <span className="sr-only">Loading</span>
+      </div>
+    );
+  }
 
   const usedPct = me ? Math.min(100, (me.storageUsedBytes / Math.max(1, me.storageQuotaBytes)) * 100) : 0;
-  const paid = me ? PLANS[me.plan as keyof typeof PLANS]?.monthlyUsd > 0 : false;
 
   return (
     <div className="py-10">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h1 className="text-2xl font-semibold">Library</h1>
         {me && (
-          // How much of the plan's storage the videos take, and the way to
-          // more of it. Every plan up adds storage and monthly credits, so
-          // the button says both.
+          // How much of the plan's storage the videos take. The way to more
+          // of it appears only when the bar says it is needed.
           <div className="flex flex-wrap items-center gap-4 text-sm">
             <div className="min-w-[14rem]">
               <div className="flex justify-between text-xs text-muted">
@@ -97,13 +120,18 @@ export default function LibraryPage() {
                 />
               </div>
             </div>
-            {!paid || usedPct >= 70 ? (
+            {/* Only once the bar is in the red. Until then the number is the
+                whole message, and a button asking for money next to a bar
+                that is barely started is noise. */}
+            {usedPct >= 90 ? (
               <button
                 type="button"
                 onClick={() => openPlans("library")}
-                className="rounded-full bg-accent px-4 py-1.5 font-medium text-accent-ink hover:opacity-90"
+                aria-label="Get more storage"
+                title="Get more storage"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-accent text-lg leading-none text-accent-ink hover:opacity-90"
               >
-                {paid ? "More storage" : "Upgrade for more storage and monthly credits"}
+                +
               </button>
             ) : null}
           </div>

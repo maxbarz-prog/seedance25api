@@ -3,6 +3,7 @@ import {
   DEFAULT_PLAN,
   MODELS,
   FREE_MAX_DURATION_S,
+  FREE_MAX_IMAGES,
   FREE_MODEL,
   FREE_QUALITY,
   PLANS,
@@ -112,6 +113,10 @@ export function freeRouteRefusal(opts: {
   quality: string;
   upscales: boolean;
   durationS: number;
+  // Counts of what was attached. Absent means none, so the two callers that
+  // cannot carry inputs do not have to say so.
+  images?: number;
+  refMedia?: number;
 }): string | null {
   if (opts.model !== FREE_MODEL) {
     const label = MODELS[FREE_MODEL as keyof typeof MODELS]?.label ?? FREE_MODEL;
@@ -125,6 +130,12 @@ export function freeRouteRefusal(opts: {
   }
   if (opts.durationS > FREE_MAX_DURATION_S) {
     return `The Free plan makes ${FREE_MAX_DURATION_S}-second videos. Pick a plan for longer ones.`;
+  }
+  if ((opts.images ?? 0) > FREE_MAX_IMAGES) {
+    return `The Free plan takes ${FREE_MAX_IMAGES} reference image. Pick a plan to use more.`;
+  }
+  if ((opts.refMedia ?? 0) > 0) {
+    return "Reference video and audio need a paid plan.";
   }
   return null;
 }

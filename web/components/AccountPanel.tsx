@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { openPlans, showLoader } from "@/lib/ui-events";
 import {
   BillingInterval,
   CREDIT_USD,
@@ -222,13 +223,23 @@ export default function AccountPanel() {
     if (data?.url) window.location.href = data.url;
   }
 
+  // Signing out is several things in a row — our cookie, then Clerk's — and
+  // none of them changes the page while it happens. The loading screen goes
+  // up on the click so the wait belongs to something, and it ends on a page
+  // that says so rather than dropping someone on the landing page wondering
+  // whether it worked.
   async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    if (authMode === "clerk") {
-      const { default: SignOut } = await import("@/components/ClerkSignOut");
-      await SignOut();
-    }
-    window.location.href = "/";
+    showLoader();
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      if (authMode === "clerk") {
+        const { default: SignOut } = await import("@/components/ClerkSignOut");
+        await SignOut("/signed-out");
+      }
+    } catch {}
+    // Clerk redirects itself when it is in play; this covers the built-in
+    // path and anything that did not navigate.
+    window.location.href = "/signed-out";
   }
 
   if (!me) {
@@ -389,18 +400,20 @@ export default function AccountPanel() {
                 );
               })}
             </div>
-            <label className="mt-4 block text-sm">
-              <span className="text-muted">Have an invite code?</span>
-              <input
-                id="invite-code"
-                value={invite}
-                onChange={(e) => setInvite(e.target.value.toUpperCase())}
-                placeholder="First month free"
-                autoComplete="off"
-                spellCheck={false}
-                className="mt-1 w-full max-w-xs rounded-lg border border-line bg-bg px-3 py-2 font-mono tracking-wider uppercase placeholder:font-sans placeholder:normal-case placeholder:tracking-normal"
-              />
-              <span className="mt-1 block text-xs text-muted">
+            <label className="mt-5 block text-sm">
+              <span className="flex flex-wrap items-center gap-2">
+                <span className="text-muted">Have an invite code?</span>
+                <input
+                  id="invite-code"
+                  value={invite}
+                  onChange={(e) => setInvite(e.target.value.toUpperCase())}
+                  placeholder="First month free"
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="w-44 rounded-lg border border-line bg-bg px-2.5 py-1 text-sm font-mono tracking-wider uppercase placeholder:font-sans placeholder:normal-case placeholder:tracking-normal"
+                />
+              </span>
+              <span className="mt-2 block text-xs text-muted">
                 Enter it, then pick the plan it is for. Invites are for Standard, billed monthly.
               </span>
             </label>
@@ -457,16 +470,28 @@ export default function AccountPanel() {
         )}
         {toast && <p className="mt-1 text-sm text-good">{toast}</p>}
         <div className="mt-4 flex flex-wrap gap-3">
-          {TOPUP_PRESETS_USD.map((usd) => (
+          {me.canBuyCredits ? (
+            TOPUP_PRESETS_USD.map((usd) => (
+              <button
+                key={usd}
+                onClick={() => topup(usd)}
+                disabled={busy !== null || (me.topupRemainingTodayUsd !== null && usd > me.topupRemainingTodayUsd)}
+                className="rounded-xl border border-accent px-5 py-2 text-sm font-medium text-accent hover:bg-accent hover:text-accent-ink disabled:opacity-50"
+              >
+                +${usd}
+              </button>
+            ))
+          ) : (
+            // A plan that cannot buy credits gets one button rather than three
+            // amounts it cannot pick. It goes where the answer is.
             <button
-              key={usd}
-              onClick={() => topup(usd)}
-              disabled={busy !== null || (me.topupRemainingTodayUsd !== null && usd > me.topupRemainingTodayUsd)}
-              className="rounded-xl border border-line px-5 py-2 text-sm hover:border-accent disabled:opacity-50"
+              type="button"
+              onClick={() => openPlans("account-credits")}
+              className="rounded-xl bg-accent px-5 py-2 text-sm font-medium text-accent-ink hover:opacity-90"
             >
-              +${usd}
+              + Add credits
             </button>
-          ))}
+          )}
         </div>
         {me.canBuyCredits && me.topupLimitUsd !== null && me.topupRemainingTodayUsd !== null && (
           // The daily limit, stated before it is hit — and nothing at all when

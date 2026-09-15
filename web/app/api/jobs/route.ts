@@ -212,6 +212,8 @@ export async function POST(req: NextRequest) {
       quality,
       upscales: OUTPUT_MODES[outputMode].upscale !== "none",
       durationS: b.durationS,
+      images: imageCount,
+      refMedia: count("reference_video") + count("reference_audio"),
     });
     if (refusal) {
       return NextResponse.json(

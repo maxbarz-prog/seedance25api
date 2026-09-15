@@ -639,6 +639,10 @@ export function qualitiesForModel(model: ModelId): Quality[] {
 export const FREE_MODEL = "seedance-2.0-mini";
 export const FREE_QUALITY = "480p";
 export const FREE_MAX_DURATION_S = 4;
+// One reference image, and no reference video or audio track. The free
+// allocation buys a single cheapest-route clip, and every extra input is
+// something the provider bills for or that the cheapest model does not take.
+export const FREE_MAX_IMAGES = 1;
 
 // How many signup grants one address may collect in a day. A speed bump, not
 // a wall: a determined person has another address and another network, and
