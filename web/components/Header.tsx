@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { pageWidthClass } from "./PageWidth";
 import { CREDIT_USD, SITE_NAME } from "@/lib/config";
 import { fetchMe } from "@/lib/me-client";
 
@@ -19,6 +21,9 @@ export const BALANCE_EVENT = "remerged:balance";
 export default function Header() {
   const [me, setMe] = useState<Me | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // The header's column follows the page's, so on the landing page it lines
+  // up with the wider hero rather than sitting inset from it.
+  const width = pageWidthClass(usePathname());
 
   // force: the shared answer is cached for the page load, and these events mean
   // it has changed — a purchase, a spend, or coming back to the tab.
@@ -54,7 +59,7 @@ export default function Header() {
 
   return (
     <header className="border-b border-line bg-surface">
-      <div className="mx-auto flex max-w-5xl items-center justify-between gap-2 px-3 py-3 sm:px-4">
+      <div className={`mx-auto flex ${width} items-center justify-between gap-2 px-3 py-3 sm:px-4`}>
         <Link href="/" className="text-lg font-semibold tracking-tight">
           {SITE_NAME}
         </Link>

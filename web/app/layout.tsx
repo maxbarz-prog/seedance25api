@@ -4,6 +4,7 @@ import "./globals.css";
 import Link from "next/link";
 import Header from "@/components/Header";
 import Providers from "@/components/Providers";
+import PageWidth from "@/components/PageWidth";
 import { SITE_NAME } from "@/lib/config";
 import { SUPPORT_EMAIL } from "@/lib/legal";
 
@@ -27,7 +28,9 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}>
         <Providers>
         <Header />
-        <main className="mx-auto max-w-5xl px-4 pb-24">{children}</main>
+        <main className="pb-24">
+          <PageWidth className="px-4">{children}</PageWidth>
+        </main>
         <footer className="border-t border-line py-8 text-center text-sm text-muted">
           <p className="space-x-4">
             <Link href="/pricing" className="hover:text-ink">Pricing</Link>

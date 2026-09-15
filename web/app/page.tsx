@@ -43,11 +43,14 @@ export default function Landing() {
           className="absolute inset-0 h-full w-full object-cover"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-black/10" aria-hidden />
-        <div className="relative flex min-h-[26rem] flex-col justify-end p-6 sm:min-h-[32rem] sm:p-10 lg:min-h-[36rem]">
-          <h1 className="max-w-2xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
+        {/* Tall enough to be the page, not a banner: a 2:1 frame at the
+            column's full width, which on a wide monitor is the footage at
+            close to the size it was made for. */}
+        <div className="relative flex min-h-[28rem] flex-col justify-end p-6 sm:min-h-[34rem] sm:p-10 lg:aspect-[2/1] lg:min-h-0 lg:p-14">
+          <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl lg:text-6xl">
             {SITE_TAGLINE}
           </h1>
-          <p className="mt-4 max-w-xl text-base text-white/85 sm:text-lg">
+          <p className="mt-4 max-w-xl text-base text-white/85 sm:text-lg lg:max-w-2xl lg:text-xl">
             {SITE_NAME} turns a sentence into video with Seedance, the model behind some of
             the most-used editors in the world, and charges what it costs us to run.
             Type a prompt. Press Generate. The first one is free.
@@ -55,13 +58,13 @@ export default function Landing() {
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Cta
               where="hero"
-              className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 font-medium text-ink hover:bg-white/90"
+              className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-2.5 font-medium text-ink hover:bg-white/90 lg:px-6 lg:py-3 lg:text-lg"
             >
               Try {SITE_NAME} for free <span aria-hidden>›</span>
             </Cta>
             <Link
               href="/pricing"
-              className="rounded-full border border-white/40 px-5 py-2.5 font-medium text-white hover:bg-white/10"
+              className="rounded-full border border-white/40 px-5 py-2.5 font-medium text-white hover:bg-white/10 lg:px-6 lg:py-3 lg:text-lg"
             >
               See pricing
             </Link>
@@ -80,7 +83,7 @@ export default function Landing() {
             {[...SEEDANCE_ALSO_POWERS, ...SEEDANCE_ALSO_POWERS].map((name, i) => (
               <li
                 key={`${name}-${i}`}
-                className="px-8 text-lg font-semibold tracking-tight text-ink/70"
+                className="px-8 text-lg font-semibold tracking-tight text-ink/70 lg:px-10 lg:text-xl"
                 aria-hidden={i >= SEEDANCE_ALSO_POWERS.length}
               >
                 {name}
@@ -102,7 +105,7 @@ export default function Landing() {
         </p>
       </section>
 
-      <section className="mt-10 grid gap-5 sm:grid-cols-3">
+      <section className="mt-10 grid gap-5 sm:grid-cols-3 lg:gap-6">
         {cards.map((c) => (
           <figure key={c.file} className="overflow-hidden rounded-2xl border border-line bg-surface">
             <div className="relative aspect-video overflow-hidden bg-ink">
@@ -110,8 +113,8 @@ export default function Landing() {
               <ShowcaseVideo file={c.file} className="absolute inset-0 h-full w-full object-cover" />
             </div>
             <figcaption className="p-5">
-              <h3 className="font-medium">{c.title}</h3>
-              <p className="mt-2 line-clamp-3 text-sm text-muted" title={c.prompt}>
+              <h3 className="font-medium lg:text-lg">{c.title}</h3>
+              <p className="mt-2 line-clamp-3 text-sm text-muted lg:text-base" title={c.prompt}>
                 &ldquo;{c.prompt}&rdquo;
               </p>
               <p className="mt-3 text-xs text-muted">
