@@ -17,5 +17,9 @@ export default function ForceLight() {
     document.documentElement.classList.add("force-light");
     return () => document.documentElement.classList.remove("force-light");
   }, []);
-  return null;
+  // The marker is what makes it instant: it is in the document the server
+  // sends, so the stylesheet's :root:has() rule applies before the first
+  // paint. The effect above is the fallback, and it cannot run early enough
+  // on its own — which is why the page flashed dark and then went white.
+  return <span className="force-light-now hidden" aria-hidden />;
 }
