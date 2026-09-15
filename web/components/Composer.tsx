@@ -408,10 +408,15 @@ export default function Composer({
         rows={4}
         className="w-full resize-y rounded-xl border border-line bg-bg p-4 text-base outline-none focus:border-accent"
       />
-      <div className="mt-1 flex items-center justify-between text-xs text-muted">
-        <div className="flex items-center gap-2">
+      {/* Wrapping, not shrinking. On a phone these four do not fit on one
+          line, and a flex row that squeezes them breaks each label across two
+          lines inside its own pill and leaves the counter touching the last
+          one. Let the row run onto a second line instead, and let nothing in
+          it get narrower than its words. */}
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted">
+        <div className="flex flex-wrap items-center gap-2">
           {uploadsEnabled && imageCount < maxImages && (
-            <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
+            <label className="cursor-pointer whitespace-nowrap rounded-full border border-line px-3 py-1 hover:border-accent">
               {uploading ? "Uploading…" : "+ Image"}
               <input
                 type="file"
@@ -436,9 +441,10 @@ export default function Composer({
                     message: "Reference video needs a paid plan. Free generates from a prompt and one image.",
                   });
                 }}
-                className="rounded-full border border-line px-3 py-1 opacity-60 hover:border-accent"
+                className="whitespace-nowrap rounded-full border border-line px-3 py-1 opacity-60 hover:border-accent"
               >
-                + Reference video
+                <span className="sm:hidden">+ Video</span>
+              <span className="hidden sm:inline">+ Reference video</span>
               </button>
               <button
                 type="button"
@@ -449,15 +455,16 @@ export default function Composer({
                     message: "A reference audio track needs a paid plan.",
                   });
                 }}
-                className="rounded-full border border-line px-3 py-1 opacity-60 hover:border-accent"
+                className="whitespace-nowrap rounded-full border border-line px-3 py-1 opacity-60 hover:border-accent"
               >
                 + Audio
               </button>
             </>
           )}
           {uploadsEnabled && !onFree && videoCount < maxRefVideos && (
-            <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
-              + Reference video
+            <label className="cursor-pointer whitespace-nowrap rounded-full border border-line px-3 py-1 hover:border-accent">
+              <span className="sm:hidden">+ Video</span>
+              <span className="hidden sm:inline">+ Reference video</span>
               <input
                 type="file"
                 accept="video/mp4,video/quicktime"
@@ -467,7 +474,7 @@ export default function Composer({
             </label>
           )}
           {uploadsEnabled && !onFree && audioCount < maxRefAudios && (
-            <label className="cursor-pointer rounded-full border border-line px-3 py-1 hover:border-accent">
+            <label className="cursor-pointer whitespace-nowrap rounded-full border border-line px-3 py-1 hover:border-accent">
               + Audio
               <input
                 type="file"
@@ -518,13 +525,16 @@ export default function Composer({
             </span>
           ))}
         </div>
-        <span>
+        <span className="ml-auto shrink-0 tabular-nums">
           {prompt.length}/{MAX_PROMPT_CHARS}
         </span>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
-        <div className="flex items-center gap-1 rounded-full border border-line p-1 text-xs">
+        {/* Four names in one pill do not fit a phone. They wrap onto a second
+            row rather than each breaking across two lines inside its own
+            chip, and the container stops being a capsule when they do. */}
+        <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-line p-1 text-xs sm:rounded-full">
           {MODEL_IDS.map((id) => {
             const locked = onFree && id !== FREE_MODEL;
             const ok = compatible(id) && !locked;
@@ -549,7 +559,7 @@ export default function Composer({
                         ? `${MODELS[id].label} is text-to-video only.`
                         : `${MODELS[id].label} needs a starting image.`
                 }
-                className={`rounded-full px-3 py-1 ${
+                className={`whitespace-nowrap rounded-full px-3 py-1 ${
                   model === id
                     ? "bg-accent text-accent-ink"
                     : ok
@@ -610,7 +620,7 @@ export default function Composer({
             fact that the render is the expensive half. */}
         <div className="flex items-center gap-2">
           <span className="text-muted">Quality</span>
-          <div className="flex items-center gap-1 rounded-full border border-line p-1">
+          <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-line p-1 sm:rounded-full">
             {qualities.map((qq) => {
               const locked = onFree && qq !== FREE_QUALITY;
               return (
@@ -642,7 +652,7 @@ export default function Composer({
 
         <div className="flex items-center gap-2">
           <span className="text-muted">Upscale</span>
-          <div className="flex items-center gap-1 rounded-full border border-line p-1">
+          <div className="flex flex-wrap items-center gap-1 rounded-2xl border border-line p-1 sm:rounded-full">
             {upscales.map((uu) => {
               const locked = onFree && uu !== "none";
               return (
