@@ -1,5 +1,6 @@
 "use client";
 
+import { showLoader } from "@/lib/ui-events";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -113,6 +114,7 @@ export default function ClerkSignUp() {
         await setActive({ session: r.createdSessionId });
         track("signup_step_done", { step: "code" });
         flushEvents();
+        showLoader();
         window.location.assign(done());
         return;
       }

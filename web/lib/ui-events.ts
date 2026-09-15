@@ -12,6 +12,14 @@
 
 export const PLANS_EVENT = "remerged:plans";
 export const PROMPT_EVENT = "remerged:prompt";
+// LOADING: the code is about to navigate (router.push, location.assign).
+// A link click is caught by the loader itself; this is for the rest.
+export const LOADING_EVENT = "remerged:loading";
+
+export function showLoader() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(LOADING_EVENT));
+}
 
 export function openPlans(from: string) {
   if (typeof window === "undefined") return;

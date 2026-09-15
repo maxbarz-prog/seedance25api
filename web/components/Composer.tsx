@@ -37,7 +37,7 @@ import { PricingConstants, quoteWith } from "@/lib/pricing";
 import { BALANCE_EVENT } from "./Header";
 import { fetchMe } from "@/lib/me-client";
 import { flushEvents, track } from "@/lib/track-client";
-import { PROMPT_EVENT } from "@/lib/ui-events";
+import { PROMPT_EVENT, showLoader } from "@/lib/ui-events";
 
 const ROLE_LABELS: Record<ImageRole, string> = {
   reference: "Reference",
@@ -301,6 +301,7 @@ export default function Composer({
     // in localStorage, so the prompt is waiting when they come back.
     if (signedIn === false) {
       flushEvents();
+      showLoader();
       router.push("/sign-up");
       return;
     }
@@ -354,6 +355,7 @@ export default function Composer({
       // before the next page paints — which reads as the click having failed.
       // finally still runs after a return, hence the flag rather than one.
       navigating = true;
+      showLoader();
       router.push(variations > 1 ? "/library" : `/jobs/${data.id}`);
     } finally {
       if (!navigating) setBusy(false);

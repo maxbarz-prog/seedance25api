@@ -1,5 +1,6 @@
 "use client";
 
+import { showLoader } from "@/lib/ui-events";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -85,7 +86,8 @@ export default function PlanModal({ from, onClose }: { from: string; onClose: ()
   async function start() {
     track("plans_checkout", { plan, interval, signed_in: !!signedIn });
     if (!signedIn) {
-      window.location.assign(`/signup?plan=${plan}&interval=${interval}`);
+      showLoader();
+        window.location.assign(`/signup?plan=${plan}&interval=${interval}`);
       return;
     }
     setBusy(true);
@@ -108,10 +110,12 @@ export default function PlanModal({ from, onClose }: { from: string; onClose: ()
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ kind: "subscribe", plan, interval }),
         });
+        showLoader();
         window.location.assign("/account");
         return;
       }
-      window.location.assign(data.url);
+      showLoader();
+        window.location.assign(data.url);
     } finally {
       setBusy(false);
     }

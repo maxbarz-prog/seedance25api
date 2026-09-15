@@ -1,5 +1,6 @@
 "use client";
 
+import { showLoader } from "@/lib/ui-events";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -61,7 +62,8 @@ export default function ClerkSignIn() {
     if (!isLoaded) return false;
     if (r.status === "complete" && r.createdSessionId) {
       await setActive({ session: r.createdSessionId });
-      window.location.assign(done);
+      showLoader();
+        window.location.assign(done);
       return true;
     }
     if (r.status === "needs_second_factor") {

@@ -74,6 +74,31 @@ body {
   color: var(--ink);
 }
 
+/* The loading screen between pages (components/PageLoader.tsx): a ring in
+   the accent colour. Without JavaScript nothing would ever remove it, so it
+   fades itself out after a few seconds regardless. Under reduced motion it
+   holds still: a static ring says "wait" just as well. */
+.spinner {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 9999px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+.page-loader {
+  animation: loader-fallback 0s 4s forwards;
+}
+@keyframes loader-fallback {
+  to { opacity: 0; pointer-events: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}
+
 /* Where a showcase clip goes before it exists on this deployment. */
 .showcase-fallback {
   background:
