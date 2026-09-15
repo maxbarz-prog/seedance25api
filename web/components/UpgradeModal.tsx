@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect } from "react";
 import { FREE_MODEL, FREE_QUALITY, FREE_MAX_DURATION_S, MODELS, PLANS } from "@/lib/config";
 import { track } from "@/lib/track-client";
+import { openPlans } from "@/lib/ui-events";
 
 // The one-time offer after the welcome flow. Full screen, in our own
 // styling: this is the moment a new member learns what the free account is
@@ -78,13 +78,17 @@ export default function UpgradeModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="mt-8 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
-          <Link
-            href="/account?join=1"
-            onClick={() => track("upgrade_modal_clicked", { plan: "standard" })}
+          <button
+            type="button"
+            onClick={() => {
+              track("upgrade_modal_clicked", { plan: "standard" });
+              onClose();
+              openPlans("welcome-offer");
+            }}
             className="w-full rounded-full bg-accent px-8 py-3 text-center font-medium text-accent-ink hover:opacity-90 sm:w-auto"
           >
             See plans
-          </Link>
+          </button>
           <button
             type="button"
             onClick={dismiss}
