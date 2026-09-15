@@ -1,0 +1,110 @@
+name: Clerk check
+
+# Prints what a Clerk instance is actually configured to do, so a redirect that
+# lands somewhere dead can be diagnosed from the settings rather than guessed at.
+#
+# Three sources, none of them secret:
+#   - the Backend API's domain list: where Clerk serves its frontend API and its
+#     hosted Account Portal. A redirect Clerk will not honour ends up at the
+#     portal, so a portal host with no DNS behind it is a dead link.
+#   - the frontend API's /v1/environment, the same document clerk-js reads in
+#     the browser: every URL the SDK falls back to, and which fields a sign-up
+#     must carry before it is complete (a missing one sends OAuth sign-ups to
+#     the portal's "continue" page instead of back to us).
+#   - the last few accounts, reduced to timestamps and providers: enough to see
+#     whether a sign-in made a new account or found an old one.
+#
+# READ-ONLY. It changes nothing, and prints no address, name or token: emails
+# appear as their domain only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Which stage's Clerk instance"
+        type: choice
+        options: ["dev", "prod"]
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: Load the Clerk keys
+        env:
+          STAGE: ${{ inputs.stage }}
+        run: |
+          set -euo pipefail
+          v=$(aws ssm get-parameter --name "/remerged/$STAGE/CLERK_SECRET_KEY" --with-decryption \
+            --query Parameter.Value --output text)
+          echo "::add-mask::$v"
+          echo "CLERK_SECRET_KEY=$v" >> "$GITHUB_ENV"
+          case "$v" in
+            sk_live_*) echo "  secret key: LIVE (production instance)" ;;
+            sk_test_*) echo "  secret key: TEST (development instance)" ;;
+            *) echo "Unrecognised Clerk key format."; exit 1 ;;
+          esac
+          # The publishable key is in the browser bundle already — not a secret.
+          # Its tail is the frontend API host in base64, which is how clerk-js
+          # knows where to talk, and how this job does.
+          p=$(aws ssm get-parameter --name "/remerged/$STAGE/NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY" \
+            --query Parameter.Value --output text)
+          echo "  publishable: $p"
+          host=$(python3 -c "import base64,sys; s=sys.argv[1].split('_',2)[2]; s+='='*(-len(s)%4); print(base64.b64decode(s).decode().rstrip('\$'))" "$p")
+          echo "  frontend API: $host"
+          echo "FAPI=$host" >> "$GITHUB_ENV"
+
+      - name: Where Clerk serves itself
+        run: |
+          set -euo pipefail
+          d=$(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/domains)
+          printf '%s' "$d" | jq -r '
+            .data[]? |
+            "  domain \(.name)\n    satellite:      \(.is_satellite)\n    frontend api:   \(.frontend_api_url)\n    account portal: \(.accounts_portal_url // "-")\n    proxy:          \(.proxy_url // "-")"
+          '
+
+      - name: What the browser is told
+        run: |
+          set -euo pipefail
+          # No auth: this is the document clerk-js fetches on every page load.
+          env=$(curl -sS "https://$FAPI/v1/environment?__clerk_api_version=2025-04-10&_clerk_js_version=5.100.0")
+          printf '%s' "$env" > /tmp/env.json
+          if ! jq -e '.display_config' /tmp/env.json >/dev/null 2>&1; then
+            echo "Could not read the environment document:"; head -c 500 /tmp/env.json; exit 1
+          fi
+          echo "  every URL the SDK falls back to:"
+          jq -r '.display_config | to_entries[] | select(.key | test("url$")) | "    \(.key) = \(.value)"' /tmp/env.json
+          echo "  instance:"
+          jq -r '.display_config | "    environment: \(.instance_environment_type // "-")   home: \(.home_url // "-")"' /tmp/env.json
+          echo "  what a sign-up must carry before Clerk calls it complete:"
+          jq -r '.user_settings.attributes | to_entries[] | select(.value.enabled) | "    \(.key): enabled, required=\(.value.required), verify=\(.value.verifications // [] | join(","))"' /tmp/env.json
+          echo "  social:"
+          jq -r '.user_settings.social | to_entries[] | select(.value.enabled) | "    \(.key)"' /tmp/env.json
+          echo "  sign-up mode:"
+          jq -r '.user_settings.sign_up // {} | "    \(.)"' /tmp/env.json
+          jq -r '.user_settings.legal_consent_enabled // false | "    legal consent enabled: \(.)"' /tmp/env.json
+          echo "  restrictions:"
+          jq -r '.user_settings.restrictions // {} | "    \(.)"' /tmp/env.json
+
+      - name: The last few accounts
+        run: |
+          set -euo pipefail
+          # Timestamps and providers only. The address itself never appears.
+          u=$(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" \
+            "https://api.clerk.com/v1/users?limit=8&order_by=-created_at")
+          printf '%s' "$u" | jq -r '
+            .[]? |
+            "  \(.id)  created \(.created_at / 1000 | strftime("%Y-%m-%d %H:%M"))  last_in \((.last_sign_in_at // 0) / 1000 | strftime("%Y-%m-%d %H:%M"))  @\(.email_addresses[0].email_address | split("@")[1] // "-")  verified=\(.email_addresses[0].verification.status // "-")  via=\([.external_accounts[]?.provider] | join(",") // "password")  pw=\(.password_enabled)"
+          '
+          echo "  total: $(curl -sS -H "Authorization: Bearer $CLERK_SECRET_KEY" https://api.clerk.com/v1/users/count | jq -r '.total_count')"
