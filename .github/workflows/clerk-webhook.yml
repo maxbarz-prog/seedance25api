@@ -109,23 +109,39 @@ jobs:
             exit 1
           fi
           echo "::add-mask::$token"
-          # The token is a JWT; the application id is a claim. Print the claim
-          # NAMES so a change in Clerk's token shape is diagnosable from the log
-          # without printing any values.
-          payload=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+' | awk '{ l=length($0)%4; if (l==2) print $0"=="; else if (l==3) print $0"="; else print $0 }' | base64 -d 2>/dev/null || true)
-          echo "token claims: $(printf '%s' "$payload" | jq -r 'keys | join(", ")' 2>/dev/null || echo unreadable)"
-          app=$(printf '%s' "$payload" | jq -r '.sub // .app_id // .appId // empty' 2>/dev/null || true)
-          if [ -z "$app" ]; then
-            echo "Could not find the application id in the token; falling back to the portal's own lookup."
+          # The key is base64 JSON: {appId, oneTimeToken, region}. The one-time
+          # token is exchanged for a session token on the regional Svix host;
+          # that session token is what authenticates the API for this app.
+          # Claim NAMES are printed so a change in shape is diagnosable from
+          # the log without printing any values.
+          payload=$(printf '%s' "$token" | tr '_-' '/+' | awk '{ l=length($0)%4; if (l==2) print $0"=="; else if (l==3) print $0"="; else print $0 }' | base64 -d 2>/dev/null || true)
+          echo "key claims: $(printf '%s' "$payload" | jq -r 'keys | join(", ")' 2>/dev/null || echo unreadable)"
+          app=$(printf '%s' "$payload" | jq -r '.appId // .app_id // .sub // empty' 2>/dev/null || true)
+          ott=$(printf '%s' "$payload" | jq -r '.oneTimeToken // empty' 2>/dev/null || true)
+          region=$(printf '%s' "$payload" | jq -r '.region // empty' 2>/dev/null || true)
+          echo "app: ${app:-?}  region: ${region:-?}"
+          if [ -z "$app" ] || [ -z "$ott" ]; then
+            echo "The key did not carry an app id and a one-time token."
+            exit 1
           fi
-          echo "SVIX_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "::add-mask::$ott"
           echo "SVIX_APP=$app" >> "$GITHUB_ENV"
-          # Region: Clerk's Svix instance answers on the US host for most
-          # instances; try EU if the US host refuses the token.
-          for base in https://api.svix.com https://api.eu.svix.com; do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" "$base/api/v1/app/$app/endpoint/?limit=1")
-            echo "$base -> HTTP $code"
-            if [ "$code" = "200" ]; then echo "SVIX_BASE=$base" >> "$GITHUB_ENV"; break; fi
+          case "$region" in
+            eu) hosts="https://api.eu.svix.com https://api.svix.com" ;;
+            us) hosts="https://api.us.svix.com https://api.svix.com" ;;
+            *)  hosts="https://api.svix.com https://api.us.svix.com https://api.eu.svix.com" ;;
+          esac
+          for base in $hosts; do
+            r=$(curl -sS -X POST -H "Content-Type: application/json" -d "$(jq -nc --arg t "$ott" '{oneTimeToken:$t}')"               "$base/api/v1/auth/one-time-token/" || true)
+            sess=$(printf '%s' "$r" | jq -r '.token // empty' 2>/dev/null || true)
+            if [ -n "$sess" ]; then
+              echo "::add-mask::$sess"
+              echo "SVIX_TOKEN=$sess" >> "$GITHUB_ENV"
+              echo "SVIX_BASE=$base" >> "$GITHUB_ENV"
+              echo "$base -> session token issued"
+              break
+            fi
+            echo "$base -> no session token ($(printf '%s' "$r" | jq -r '.detail // .code // "no answer"' 2>/dev/null | head -c 120))"
           done
 
       - name: List the endpoints
