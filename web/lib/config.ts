@@ -6,7 +6,7 @@ export const SITE_NAME = "Remerged";
 // appears: the browser tab on every other page just says the name. The
 // earlier line is kept because it is still true and still the pitch on the
 // pricing page and in the help centre — it just is not the headline.
-export const SITE_TAGLINE = "Building the future of video generation";
+export const SITE_TAGLINE = "Building the future of video";
 export const SITE_TAGLINE_PRICING = "AI video, priced at cost";
 // The registered domain: what members see, and what links in outbound email
 // point at. DNS for it lives at Cloudflare (see sst.config.ts).
