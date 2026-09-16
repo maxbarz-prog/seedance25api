@@ -10,6 +10,7 @@ import {
   AdminJobRow,
   AdminUserRow,
   DataStore,
+  AuditEntry,
   Event,
   Job,
   JobStatus,
@@ -96,6 +97,21 @@ export class SqliteStore implements DataStore {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_events_day ON events(day, created_at);
+
+      -- The audit diary. No index on subject, matching the Dynamo table:
+      -- looking an address up has to be a deliberate act, not something a
+      -- query can stumble into. See lib/audit.ts.
+      CREATE TABLE IF NOT EXISTS audit (
+        id TEXT PRIMARY KEY,
+        bucket TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        subject TEXT NOT NULL,
+        account TEXT,
+        props TEXT,
+        expires INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_bucket ON audit(bucket, at);
     `);
     // Additive migration for databases created before the model column.
     const adds = [
@@ -463,6 +479,39 @@ export class SqliteStore implements DataStore {
         });
       }
     })();
+  }
+
+  async addAudit(entries: AuditEntry[]): Promise<void> {
+    if (!entries.length) return;
+    const d = this.db();
+    const ins = d.prepare(
+      `INSERT OR IGNORE INTO audit (id, bucket, at, kind, subject, account, props, expires)
+       VALUES (@id, @bucket, @at, @kind, @subject, @account, @props, @expires)`
+    );
+    d.transaction(() => {
+      for (const e of entries) {
+        ins.run({
+          id: e.id,
+          bucket: e.bucket,
+          at: e.at,
+          kind: e.kind,
+          subject: e.subject,
+          account: e.account ?? null,
+          props: e.props ? JSON.stringify(e.props) : null,
+          expires: e.expires,
+        });
+      }
+    })();
+  }
+
+  async auditForMonth(bucket: string, limit = 5000): Promise<AuditEntry[]> {
+    // Dynamo expires rows itself; sqlite is the development store, so the
+    // same promise is kept here by not returning what has aged out.
+    const now = Math.floor(Date.now() / 1000);
+    const rows = this.db()
+      .prepare(`SELECT * FROM audit WHERE bucket = ? AND expires > ? ORDER BY at ASC LIMIT ?`)
+      .all(bucket, now, limit) as (Omit<AuditEntry, "props"> & { props: string | null })[];
+    return rows.map((r) => ({ ...r, props: r.props ? JSON.parse(r.props) : null }));
   }
 
   async eventsForDay(day: string, limit = 50000): Promise<Event[]> {

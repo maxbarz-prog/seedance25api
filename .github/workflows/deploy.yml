@@ -54,7 +54,7 @@ jobs:
               echo "$1=$v" >> "$GITHUB_ENV"
             fi
           }
-          for name in SESSION_SECRET CRON_SECRET ADMIN_EMAILS EMAIL_FROM SUPPORT_FORWARD_TO \
+          for name in SESSION_SECRET AUDIT_SALT CRON_SECRET ADMIN_EMAILS EMAIL_FROM SUPPORT_FORWARD_TO \
                       STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET \
                       BYTEPLUS_API_KEY TOPAZ_API_KEY FAL_KEY PROVIDER_MODE MOCK_BILLING \
                       PIPELINE_CONCURRENCY \

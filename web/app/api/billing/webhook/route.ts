@@ -14,6 +14,7 @@ import {
 import { getSystem, setStripeIds, User, userById, userByStripeCustomer } from "@/lib/db";
 import { forfeitGrantedCredits, grantPeriodCredits } from "@/lib/grants";
 import { freezeAccount } from "@/lib/money";
+import { audit } from "@/lib/audit";
 import { effectivePlan } from "@/lib/plan";
 import {
   consumeReward,
@@ -190,6 +191,11 @@ export async function POST(req: NextRequest) {
       // member does not spend more of our money until a human has looked.
       if (disputed && member) {
         await freezeAccount(member.id, "disputed", `charge ${charge.id}, $${(charge.amount / 100).toFixed(2)}`);
+        await audit("dispute", {
+          email: member.email,
+          account: member.id,
+          props: { chargeId: charge.id, usd: charge.amount / 100 },
+        });
       }
 
       if (charge.metadata?.kind === "topup") {

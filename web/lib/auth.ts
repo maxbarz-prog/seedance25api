@@ -63,6 +63,9 @@ export async function currentUser(): Promise<User | null> {
     }
     const { record } = await import("./events");
     await record("account_created", created.id, { auth: "clerk" });
+    // And a line in the diary, which outlives the row above.
+    const { audit } = await import("./audit");
+    await audit("account_created", { email, account: created.id, props: { auth: "clerk" } });
     // Same free allocation the built-in signup hands over.
     const { grantSignupCredits } = await import("./grants");
     await grantSignupCredits(created.id);

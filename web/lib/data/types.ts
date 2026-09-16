@@ -325,4 +325,45 @@ export interface DataStore {
   // the natural unit to page by.
   addEvents(events: Event[]): Promise<void>;
   eventsForDay(day: string, limit?: number): Promise<Event[]>;
+
+  // The audit diary (lib/audit.ts). Append-only, one partition per calendar
+  // month. Deliberately no read-by-subject: see the note on AuditEntry.
+  addAudit(entries: AuditEntry[]): Promise<void>;
+  auditForMonth(bucket: string, limit?: number): Promise<AuditEntry[]>;
+}
+
+// One line in the diary: something that happened, when, to which account.
+//
+// This is a RECORD, not state. Nothing the product does may read it, branch
+// on it, or look an address up in it — an account deleted and remade with the
+// same email must behave exactly as it did the first time. The only reader is
+// the admin timeline, and it reads a month at a time rather than by subject,
+// which is why there is no index to look one up with.
+//
+// It holds no content and no network identifiers: no prompts, no videos, no
+// IP addresses, no user agents. Amounts, counts, dates, ids and fixed codes
+// only, which is everything a chargeback, an audit or a fraud question needs
+// and nothing a person could be profiled with.
+export interface AuditEntry {
+  id: string;
+  // UTC calendar month, "2026-09". The partition a timeline reads by.
+  bucket: string;
+  at: number;
+  // One of lib/audit.ts's AuditKind. A fixed code, never free text.
+  kind: string;
+  // A keyed hash of the email address, not the address. Stable across
+  // accounts that share one, so a timeline survives deletion and re-signup,
+  // and useless to anyone who lifts the table without the key.
+  subject: string;
+  // The user row's id at the time. Meaningless once that row is gone, which
+  // is the point: it groups a run of entries without naming anybody.
+  account?: string | null;
+  // Flat, bounded, and drawn from the same rules as the growth events:
+  // amounts, plan ids, provider ids, reason codes.
+  props?: Record<string, string | number | boolean | null> | null;
+  // Unix SECONDS after which this line stops being kept, set by lib/audit.ts
+  // from the kind — money outlives abuse, abuse outlives lifecycle. It rides
+  // on the entry because how long to keep something is the diary's decision,
+  // not the store's; the store only has to honour it.
+  expires: number;
 }

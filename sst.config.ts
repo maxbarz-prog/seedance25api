@@ -73,6 +73,22 @@ export default $config({
       ttl: "expires",
     });
 
+    // The audit diary (web/lib/audit.ts): a dated record of things that
+    // happened, kept so a timeline can be reconstructed after the live rows
+    // are gone. One partition per calendar month, because that is how a
+    // timeline is read.
+    //
+    // Deliberately no index on `subject`. The product must not be able to ask
+    // "have I seen this address before" — an account deleted and remade has
+    // to behave as if it were new — so the only way in is a month at a time,
+    // from the admin page. TTL on `expires`, which each line carries
+    // according to its kind: money outlives abuse, abuse outlives lifecycle.
+    const audit = new sst.aws.Dynamo("Audit", {
+      fields: { bucket: "string", sk: "string" },
+      primaryIndex: { hashKey: "bucket", rangeKey: "sk" },
+      ttl: "expires",
+    });
+
     // Private bucket: videos and reference images, served via presigned URLs.
     const media = new sst.aws.Bucket("Media", {
       cors: {
@@ -130,8 +146,15 @@ export default $config({
       TABLE_LEDGER: ledger.name,
       TABLE_JOBS: jobs.name,
       TABLE_EVENTS: events.name,
+      TABLE_AUDIT: audit.name,
       VIDEO_BUCKET: media.name,
       SESSION_SECRET: process.env.SESSION_SECRET ?? "",
+      // The key the audit diary hashes email addresses under. Its own secret,
+      // so a timeline can be read by someone who has not been handed the
+      // session secret; lib/audit.ts falls back to that one when it is unset,
+      // because a predictable key would make every hash in the table
+      // reversible from a list of addresses.
+      AUDIT_SALT: process.env.AUDIT_SALT ?? "",
       CRON_SECRET: process.env.CRON_SECRET ?? "",
       ADMIN_EMAILS: process.env.ADMIN_EMAILS ?? "",
       EMAIL_FROM: process.env.EMAIL_FROM ?? "",
@@ -160,7 +183,7 @@ export default $config({
 
     const site = new sst.aws.Nextjs("Web", {
       path: "web",
-      link: [users, ledger, jobs, events, media],
+      link: [users, ledger, jobs, events, audit, media],
       domain,
       environment,
       permissions: [{ actions: ["ses:SendEmail"], resources: ["*"] }],

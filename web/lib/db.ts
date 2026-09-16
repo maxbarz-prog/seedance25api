@@ -75,3 +75,7 @@ export const moneyIssues: DataStore["moneyIssues"] = () => store().moneyIssues()
 export const setOnboarding: DataStore["setOnboarding"] = (...a) => store().setOnboarding(...a);
 export const addEvents: DataStore["addEvents"] = (...a) => store().addEvents(...a);
 export const eventsForDay: DataStore["eventsForDay"] = (...a) => store().eventsForDay(...a);
+// The audit diary. Write freely; read only from the admin timeline — see the
+// rules at the top of lib/audit.ts.
+export const addAudit: DataStore["addAudit"] = (...a) => store().addAudit(...a);
+export const auditForMonth: DataStore["auditForMonth"] = (...a) => store().auditForMonth(...a);
