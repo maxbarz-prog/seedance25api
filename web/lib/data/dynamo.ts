@@ -16,6 +16,7 @@ import { modelTimings } from "./timing";
 import {
   AddLedgerOpts,
   AdminData,
+  AuditEntry,
   AdminJobRow,
   AdminUserRow,
   BillingInterval,
@@ -64,6 +65,7 @@ const LEDGER = process.env.TABLE_LEDGER!;
 const SYSTEM_PK = "system";
 const JOBS = process.env.TABLE_JOBS!;
 const EVENTS = process.env.TABLE_EVENTS!;
+const AUDIT = process.env.TABLE_AUDIT!;
 // Growth events are kept for half a year. The report reads 90 days at most;
 // the rest is headroom for a question nobody has asked yet, not an archive.
 const EVENT_TTL_S = 180 * 86_400;
@@ -647,6 +649,49 @@ export class DynamoStore implements DataStore {
       }
       if (batch.length) console.warn(`events: ${batch.length} dropped after retry`);
     }
+  }
+
+  // The audit diary. Written one line at a time rather than in batches: these
+  // are rare, and unlike a growth event, losing one is not acceptable — a
+  // dropped line is a hole in a record somebody will later rely on. So this
+  // one throws on failure and lets lib/audit.ts decide what to do about it.
+  async addAudit(entries: AuditEntry[]): Promise<void> {
+    for (const e of entries) {
+      await this.doc.send(
+        new PutCommand({
+          TableName: AUDIT,
+          // `expires` rides on the entry: retention is the diary's policy
+          // (lib/audit.ts), not the store's, and it differs by kind.
+          Item: { ...e, sk: `${String(e.at).padStart(15, "0")}#${e.id}` },
+        })
+      );
+    }
+  }
+
+  async auditForMonth(bucket: string, limit = 5000): Promise<AuditEntry[]> {
+    const out: AuditEntry[] = [];
+    let ExclusiveStartKey: Record<string, unknown> | undefined;
+    do {
+      const r = await this.doc.send(
+        new QueryCommand({
+          TableName: AUDIT,
+          KeyConditionExpression: "#b = :b",
+          ExpressionAttributeNames: { "#b": "bucket" },
+          ExpressionAttributeValues: { ":b": bucket },
+          ExclusiveStartKey,
+          Limit: Math.min(1000, limit - out.length),
+        })
+      );
+      for (const it of r.Items ?? []) {
+        // `sk` is the store's own ordering key and means nothing outside it.
+        // `expires` stays: a reader is entitled to see when a line goes.
+        const e = { ...(it as AuditEntry & { sk?: string }) };
+        delete e.sk;
+        out.push(e);
+      }
+      ExclusiveStartKey = r.LastEvaluatedKey;
+    } while (ExclusiveStartKey && out.length < limit);
+    return out;
   }
 
   async eventsForDay(day: string, limit = 50000): Promise<Event[]> {

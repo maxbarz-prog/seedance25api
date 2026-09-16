@@ -62,6 +62,31 @@ Revenue comes from the membership, not from marking up generation.
   creation, jobs and paid plans where they happen. `/admin` reads them back
   as a funnel, by window, in the Growth section.
 
+- **The audit diary** (`lib/audit.ts`) — a dated record of things that happened,
+  kept so a timeline can be reconstructed after the live rows are gone: accounts
+  created and deleted, payments, refunds, disputes, freezes. A chargeback
+  arrives months after the payment and a deletion takes the account's history
+  with it, which is what this is for.
+
+  Three rules make it a record rather than a second copy of the product's state,
+  and `npm run lint` fails the build if the first one is broken:
+
+  1. **Nothing reads it.** No sign-up check, no grant, no rate limit. An account
+     deleted and remade with the same address behaves exactly as it did the
+     first time, because nothing on that path knows the diary exists. The only
+     reader is `/api/admin/audit`.
+  2. **No content.** No prompts, no videos, no IP addresses, no user agents.
+     Amounts, counts, dates, provider ids and fixed reason codes.
+  3. **It expires.** Each line carries the date it stops being kept and the
+     store deletes it then: seven years for money, two for everything else.
+
+  The address is not stored. What is stored is an HMAC of it under `AUDIT_SALT`,
+  so a timeline still joins across a deletion and a fresh sign-up when an
+  administrator types the address in, while a copy of the table on its own is a
+  list of hashes with no key to reverse them. Changing that salt orphans every
+  hash already written, so `ssm-secrets.yml` generates it once and leaves it
+  alone.
+
 ## Run locally
 
 ```bash

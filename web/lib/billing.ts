@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { audit, auditUser } from "./audit";
 import {
   BillingInterval,
   MIN_TOPUP_USD,
@@ -295,6 +296,11 @@ export async function cancelSubscription(user: User): Promise<{ endsAt: number |
     // they are looking at tells the truth on the next render.
     await setMembership(user.id, planOf(user), endsAt, intervalOf(user));
     await setCancelAtPeriodEnd(user.id, true);
+    await audit("membership_cancelled", {
+      email: user.email,
+      account: user.id,
+      props: { plan: planOf(user), endsAt, via: "stripe" },
+    });
     return { endsAt };
   }
   // No Stripe (dev, or a comped membership): the renewal date is the whole
@@ -302,6 +308,11 @@ export async function cancelSubscription(user: User): Promise<{ endsAt: number |
   // the cancellation. It lapses to free by itself — but the flag still has to
   // be set, or the account page cannot show that it happened.
   await setCancelAtPeriodEnd(user.id, true);
+  await audit("membership_cancelled", {
+    email: user.email,
+    account: user.id,
+    props: { plan: planOf(user), endsAt: user.membership_renews_at ?? null, via: "local" },
+  });
   return { endsAt: user.membership_renews_at ?? null };
 }
 
@@ -324,6 +335,9 @@ export async function applyTopup(
     memo: `Top-up $${usd.toFixed(2)}`,
     externalId,
   });
+  // Only when it actually landed: the ledger's idempotency guard returns null
+  // for a replay, and a diary that logs replays is a diary nobody can add up.
+  if (entry) await auditUser("payment", userId, { usd, kind: "topup", externalId });
   return entry !== null;
 }
 
@@ -352,10 +366,12 @@ export async function refundCharge(chargeId: string, idempotencyKey: string): Pr
 // is right: it blocks generating until it is topped up again. Idempotent on
 // the charge, so a replayed event cannot take them twice.
 export async function clawbackTopup(userId: string, usd: number, chargeId: string) {
-  return addLedger(userId, -usdToCredits(usd), "clawback", {
+  const entry = await addLedger(userId, -usdToCredits(usd), "clawback", {
     memo: `Top-up refunded $${usd.toFixed(2)}`,
     externalId: `clawback#${chargeId}`,
   });
+  if (entry) await auditUser("clawback", userId, { usd, chargeId });
+  return entry;
 }
 
 // Used by the dev mock and by the initial checkout completion; renewals and
@@ -377,6 +393,11 @@ export async function applyMembership(
   const before = await userById(userId);
   await setMembership(userId, planId, renewsAt ?? now + renewMs, interval);
   await recordPlanStart(before, userId, planId, interval);
+  await audit("membership_started", {
+    email: before?.email ?? null,
+    account: userId,
+    props: { plan: planId, interval, from: before?.membership ?? null },
+  });
   // Subscribing again undoes a previous cancellation.
   await setCancelAtPeriodEnd(userId, false);
   await grantPeriodCredits(userId, planId);

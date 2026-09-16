@@ -5,6 +5,7 @@ import { createUser, userByEmail } from "@/lib/db";
 import { hashPassword, session } from "@/lib/auth";
 import { grantSignupCredits } from "@/lib/grants";
 import { record } from "@/lib/events";
+import { audit } from "@/lib/audit";
 import { MIN_PASSWORD_CHARS } from "@/lib/config";
 
 const Body = z.object({
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
   }
   const user = await createUser(email, await hashPassword(password));
   await record("account_created", user.id, { auth: "builtin" });
+  await audit("account_created", { email, account: user.id, props: { auth: "builtin" } });
   // The free allocation, so a new account can make something immediately.
   await grantSignupCredits(user.id);
   const s = await session();

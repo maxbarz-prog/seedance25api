@@ -1,3 +1,4 @@
+import { audit } from "./audit";
 import { CREDIT_USD, REFUND_UNSPENT_SHARE } from "./config";
 import { addLedger, balance, ledgerFor, setSystem, User } from "./db";
 import { stripeClient, stripeEnabled } from "./billing";
@@ -72,6 +73,11 @@ export async function refundUnspentCredits(user: User, by: string): Promise<Unsp
       REFUND_UNSPENT_SHARE * 100
     )}% of value)`,
     externalId: `refund-out#${user.id}#${Date.now()}`,
+  });
+  await audit("refund", {
+    email: user.email,
+    account: user.id,
+    props: { credits, usd: refundedUsd, by, charges: refunds.length, unplacedUsd: remaining },
   });
   return { credits, usd: refundedUsd, refunds, unplacedUsd: remaining };
 }

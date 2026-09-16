@@ -1,3 +1,4 @@
+import { auditUser } from "./audit";
 import {
   CREDIT_USD,
   MODELS,
@@ -104,10 +105,14 @@ export async function accountFrozen(userId: string): Promise<Freeze | null> {
 export async function freezeAccount(userId: string, reason: string, detail?: string): Promise<void> {
   await setSystem(FREEZE_PREFIX + userId, JSON.stringify({ reason, detail, at: Date.now() } satisfies Freeze));
   console.error(`ACCOUNT FROZEN ${userId}: ${reason}${detail ? ` — ${detail}` : ""}`);
+  // The reason only. `detail` can carry a fragment of a rejected prompt, and
+  // the diary does not hold content.
+  await auditUser("account_frozen", userId, { reason });
 }
 
 export async function unfreezeAccount(userId: string): Promise<void> {
   await setSystem(FREEZE_PREFIX + userId, null);
+  await auditUser("account_unfrozen", userId);
 }
 
 export async function frozenAccounts(): Promise<{ userId: string; freeze: Freeze }[]> {
@@ -251,6 +256,7 @@ export async function setStrikesEnabled(on: boolean): Promise<void> {
 export async function recordContentStrike(userId: string, detail: string): Promise<number> {
   if (!(await strikesEnabled())) return 0;
   const strikes = await addSystemCounter(`strikes#${userId}#${dayKey()}`, 1);
+  await auditUser("content_strike", userId, { strikesToday: strikes });
   if (strikes >= CONTENT_STRIKES_PER_DAY && !(await accountFrozen(userId))) {
     await freezeAccount(userId, "content policy", `${strikes} moderation rejections today; last: ${detail.slice(0, 120)}`);
   }
