@@ -28,10 +28,10 @@ on:
         type: choice
         options: ["show", "apply"]
         default: show
-      repos:
-        description: "Repositories to trust, space separated, as owner/name"
+      subs:
+        description: "Sub patterns to trust, space separated (repo:owner/name:* or repo:owner@id/name@id:*)"
         type: string
-        default: "maxbarz-prog/remerged maxbarz-prog/seedance25api"
+        default: "repo:maxbarz-prog/remerged:* repo:maxbarz-prog@268589738/remerged@1372467146:* repo:maxbarz-prog@268589738/seedance25api@1357961617:*"
       confirm:
         description: 'For apply: type "apply" to confirm.'
         type: string
@@ -73,25 +73,27 @@ jobs:
           jq -r '.Statement[].Condition.StringLike."token.actions.githubusercontent.com:sub"
                  | if type == "array" then .[] else . end' /tmp/trust.json | sed 's/^/    /'
 
-      - name: Trust the repositories named
+      - name: Trust the subs named
         if: inputs.mode == 'apply'
         env:
-          REPOS: ${{ inputs.repos }}
-          GH_TOKEN: ${{ github.token }}
+          SUBS: ${{ inputs.subs }}
         run: |
           set -euo pipefail
-          # Both spellings per repository. The id form needs the numeric ids,
-          # which come from the GitHub API rather than being typed in — a
-          # transposed digit here is a locked-out account.
+          # The patterns are given rather than looked up. This job's token is
+          # scoped to the repository it runs in, so it cannot see a private
+          # one being migrated TO — and a 404 there would silently drop the
+          # very repository this is meant to authorise. What is applied is
+          # exactly what was typed, which is also what makes it auditable.
           subs=()
-          for r in $REPOS; do
-            owner=${r%%/*}
-            meta=$(gh api "repos/$r" --jq '{oid: .owner.id, rid: .id}')
-            oid=$(printf '%s' "$meta" | jq -r .oid)
-            rid=$(printf '%s' "$meta" | jq -r .rid)
-            echo "  $r  ->  owner $oid, repo $rid"
-            subs+=("repo:${r}:*" "repo:${owner}@${oid}/${r#*/}@${rid}:*")
+          for sub in $SUBS; do
+            case "$sub" in
+              repo:*) ;;
+              *) echo "Not a sub pattern: $sub"; exit 1 ;;
+            esac
+            echo "  trusting  $sub"
+            subs+=("$sub")
           done
+          if [ ${#subs[@]} -eq 0 ]; then echo "No subs given."; exit 1; fi
 
           list=$(printf '%s\n' "${subs[@]}" | jq -R . | jq -s .)
           cat > /tmp/new-trust.json <<JSON
