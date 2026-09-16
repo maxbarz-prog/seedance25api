@@ -1,0 +1,135 @@
+name: OIDC trust
+
+# Who is allowed to assume the deploy role.
+#
+# The role is trusted by GitHub's OIDC `sub` claim, and the claim names the
+# repository — so moving the code to a different repository breaks every
+# deploy until this is updated. The trust is pinned by NUMERIC ids as well as
+# names (`owner@id/repo@id`), which is deliberate: a repository name that is
+# released and re-registered by someone else does not inherit the trust. It
+# also means a rename or a move is never silent; it fails closed.
+#
+# This has to run from a repository that is ALREADY trusted. That is the whole
+# trick of the migration: the old repository still holds the access, so it is
+# what grants the new one.
+#
+# `show` prints the live policy. `apply` replaces it with the list below,
+# which accepts both spellings of the claim (with and without the ids) for
+# each repository named, because which form GitHub issues depends on the
+# repository's own settings and guessing wrong locks everyone out.
+#
+# FREE. One IAM read, and on apply one IAM write.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "show = print the live trust. apply = replace it."
+        type: choice
+        options: ["show", "apply"]
+        default: show
+      repos:
+        description: "Repositories to trust, space separated, as owner/name"
+        type: string
+        default: "maxbarz-prog/remerged maxbarz-prog/seedance25api"
+      confirm:
+        description: 'For apply: type "apply" to confirm.'
+        type: string
+        default: ""
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ROLE_NAME: remerge-github-deploy
+
+jobs:
+  trust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check the confirmation
+        if: inputs.mode == 'apply'
+        run: |
+          if [ "${{ inputs.confirm }}" != "apply" ]; then
+            echo 'Not confirmed — type "apply" in the confirm box.'
+            exit 1
+          fi
+
+      - name: Assume deploy role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::949228118688:role/remerge-github-deploy
+          aws-region: us-east-1
+
+      - name: What the role trusts now
+        run: |
+          set -euo pipefail
+          aws iam get-role --role-name "$ROLE_NAME" \
+            --query 'Role.AssumeRolePolicyDocument' --output json | tee /tmp/trust.json
+          echo
+          echo "  subs currently accepted:"
+          jq -r '.Statement[].Condition.StringLike."token.actions.githubusercontent.com:sub"
+                 | if type == "array" then .[] else . end' /tmp/trust.json | sed 's/^/    /'
+
+      - name: Trust the repositories named
+        if: inputs.mode == 'apply'
+        env:
+          REPOS: ${{ inputs.repos }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Both spellings per repository. The id form needs the numeric ids,
+          # which come from the GitHub API rather than being typed in — a
+          # transposed digit here is a locked-out account.
+          subs=()
+          for r in $REPOS; do
+            owner=${r%%/*}
+            meta=$(gh api "repos/$r" --jq '{oid: .owner.id, rid: .id}')
+            oid=$(printf '%s' "$meta" | jq -r .oid)
+            rid=$(printf '%s' "$meta" | jq -r .rid)
+            echo "  $r  ->  owner $oid, repo $rid"
+            subs+=("repo:${r}:*" "repo:${owner}@${oid}/${r#*/}@${rid}:*")
+          done
+
+          list=$(printf '%s\n' "${subs[@]}" | jq -R . | jq -s .)
+          cat > /tmp/new-trust.json <<JSON
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Federated": "arn:aws:iam::949228118688:oidc-provider/token.actions.githubusercontent.com"
+                },
+                "Action": "sts:AssumeRoleWithWebIdentity",
+                "Condition": {
+                  "StringEquals": {
+                    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+                  },
+                  "StringLike": {
+                    "token.actions.githubusercontent.com:sub": $list
+                  }
+                }
+              }
+            ]
+          }
+          JSON
+          echo "  applying:"; jq . /tmp/new-trust.json | sed 's/^/    /'
+          aws iam update-assume-role-policy --role-name "$ROLE_NAME" \
+            --policy-document file:///tmp/new-trust.json
+          echo "  done."
+
+      - name: What it trusts after
+        if: inputs.mode == 'apply'
+        run: |
+          set -euo pipefail
+          sleep 5
+          aws iam get-role --role-name "$ROLE_NAME" \
+            --query 'Role.AssumeRolePolicyDocument.Statement[].Condition.StringLike' --output json \
+            | sed 's/^/    /'
+          echo
+          echo "NOTE: the CloudFormation stack in infra/github-oidc.yaml still has the"
+          echo "old value. Update its GitHubRepo parameter before any stack update, or"
+          echo "the next one will revert this and lock the new repository out."
