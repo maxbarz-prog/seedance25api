@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import AuthShell, { Field, isEmail, Primary, Title } from "./AuthShell";
 import { flushEvents, track } from "@/lib/track-client";
+import { MIN_PASSWORD_CHARS } from "@/lib/config";
 
 // The built-in email-and-password auth, for local development without
 // Clerk. Same screens as the Clerk flows so the product looks the same
@@ -123,7 +124,7 @@ export default function BuiltinAuth({ kind }: { kind: "login" | "signup" }) {
             autoComplete={kind === "signup" ? "new-password" : "current-password"}
             autoFocus
             required
-            minLength={8}
+            minLength={MIN_PASSWORD_CHARS}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -133,7 +134,7 @@ export default function BuiltinAuth({ kind }: { kind: "login" | "signup" }) {
               type="password"
               autoComplete="new-password"
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_CHARS}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
             />

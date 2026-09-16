@@ -636,6 +636,13 @@ export function qualitiesForModel(model: ModelId): Quality[] {
 // the route it can take is the one that video is: cheapest model, lowest
 // quality, shortest length, no upscale. Everything else needs a plan, and is
 // refused by the API rather than merely hidden by the page.
+// The shortest password we accept. One number, used by every form and every
+// route that takes one, because two places disagreeing means somebody is told
+// their password is fine and then told it is not. Clerk holds the same number
+// on its side for the accounts it manages (.github/workflows/clerk-password.yml),
+// and this is the copy the built-in auth path enforces.
+export const MIN_PASSWORD_CHARS = 12;
+
 export const FREE_MODEL = "seedance-2.0-mini";
 export const FREE_QUALITY = "480p";
 export const FREE_MAX_DURATION_S = 4;
