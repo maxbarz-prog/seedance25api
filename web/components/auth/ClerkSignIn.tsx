@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useSignIn } from "@clerk/nextjs/legacy";
 import { fetchMe } from "@/lib/me-client";
+import { MIN_PASSWORD_CHARS } from "@/lib/config";
 import AuthShell, { Field, GoogleMark, isEmail, Or, Primary, Secondary, Title } from "./AuthShell";
 
 // Sign-in on Clerk, drawn by us. Email, then password; or Google. A
@@ -136,8 +137,8 @@ export default function ClerkSignIn() {
   async function submitReset(e: React.FormEvent) {
     e.preventDefault();
     if (!isLoaded) return;
-    if (password.length < 8) {
-      setError("Use at least 8 characters.");
+    if (password.length < MIN_PASSWORD_CHARS) {
+      setError(`Use at least ${MIN_PASSWORD_CHARS} characters.`);
       return;
     }
     setBusy(true);
@@ -234,7 +235,7 @@ export default function ClerkSignIn() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
+            minLength={MIN_PASSWORD_CHARS}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />

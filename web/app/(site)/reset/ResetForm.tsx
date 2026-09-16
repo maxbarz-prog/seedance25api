@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { MIN_PASSWORD_CHARS } from "@/lib/config";
 
 export default function ResetForm() {
   const params = useSearchParams();
@@ -38,7 +39,7 @@ export default function ResetForm() {
         <input
           type="password"
           required
-          minLength={8}
+          minLength={MIN_PASSWORD_CHARS}
           placeholder="New password (8+ characters)"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

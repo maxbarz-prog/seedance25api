@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { useSignUp } from "@clerk/nextjs/legacy";
 import AuthShell, { Field, GoogleMark, isEmail, Or, Primary, Secondary, Title } from "./AuthShell";
 import { flushEvents, track } from "@/lib/track-client";
+import { MIN_PASSWORD_CHARS } from "@/lib/config";
 
 // Sign-up on Clerk, drawn by us: one question per screen. Email, then a
 // password, then the code Clerk emails to prove the address is theirs. Google
@@ -81,8 +82,8 @@ export default function ClerkSignUp() {
   async function submitContinue(e: React.FormEvent) {
     e.preventDefault();
     if (!isLoaded) return;
-    if (password.length < 8) {
-      setError("Use at least 8 characters.");
+    if (password.length < MIN_PASSWORD_CHARS) {
+      setError(`Use at least ${MIN_PASSWORD_CHARS} characters.`);
       return;
     }
     if (password !== confirm) {
@@ -173,8 +174,8 @@ export default function ClerkSignUp() {
   async function submitPassword(e: React.FormEvent) {
     e.preventDefault();
     if (!isLoaded) return;
-    if (password.length < 8) {
-      setError("Use at least 8 characters.");
+    if (password.length < MIN_PASSWORD_CHARS) {
+      setError(`Use at least ${MIN_PASSWORD_CHARS} characters.`);
       return;
     }
     if (password !== confirm) {
@@ -258,7 +259,7 @@ export default function ClerkSignUp() {
             autoComplete="new-password"
             autoFocus
             required
-            minLength={8}
+            minLength={MIN_PASSWORD_CHARS}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
@@ -267,7 +268,7 @@ export default function ClerkSignUp() {
             type="password"
             autoComplete="new-password"
             required
-            minLength={8}
+            minLength={MIN_PASSWORD_CHARS}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
           />
@@ -330,7 +331,7 @@ export default function ClerkSignUp() {
               autoComplete="new-password"
               autoFocus
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_CHARS}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
@@ -339,7 +340,7 @@ export default function ClerkSignUp() {
               type="password"
               autoComplete="new-password"
               required
-              minLength={8}
+              minLength={MIN_PASSWORD_CHARS}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
             />

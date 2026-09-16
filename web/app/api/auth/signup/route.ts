@@ -5,10 +5,11 @@ import { createUser, userByEmail } from "@/lib/db";
 import { hashPassword, session } from "@/lib/auth";
 import { grantSignupCredits } from "@/lib/grants";
 import { record } from "@/lib/events";
+import { MIN_PASSWORD_CHARS } from "@/lib/config";
 
 const Body = z.object({
   email: z.string().email(),
-  password: z.string().min(8).max(200),
+  password: z.string().min(MIN_PASSWORD_CHARS).max(200),
 });
 
 export async function POST(req: NextRequest) {
@@ -20,7 +21,7 @@ export async function POST(req: NextRequest) {
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Enter a valid email and a password of at least 8 characters." },
+      { error: `Enter a valid email and a password of at least ${MIN_PASSWORD_CHARS} characters.` },
       { status: 400 }
     );
   }
