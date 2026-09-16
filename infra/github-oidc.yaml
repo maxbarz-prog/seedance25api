@@ -1,16 +1,30 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Remerge bootstrap: lets GitHub Actions in maxbarz-prog/seedance25api deploy
-  to this AWS account via OIDC. No long-lived AWS keys exist anywhere.
+  Remerge bootstrap: lets GitHub Actions in maxbarz-prog/remerged deploy to
+  this AWS account via OIDC. No long-lived AWS keys exist anywhere.
 
 Parameters:
-  GitHubRepo:
-    Type: String
+  AllowedSubs:
+    Type: CommaDelimitedList
     # GitHub's OIDC sub claim embeds owner and repo numeric ids
-    # (owner@id/repo@id), which pins trust to this exact repo even if the
-    # name is ever released and re-registered by someone else.
-    Default: maxbarz-prog@268589738/seedance25api@1357961617
-    Description: GitHub repository (owner@id/name@id) allowed to assume the deploy role.
+    # (owner@id/repo@id), which pins trust to an exact repository even if the
+    # name is ever released and re-registered by someone else. That also means
+    # moving the code to another repository fails closed, which is why this is
+    # a list: during a move both are trusted, and the old one is dropped once
+    # the new one has deployed.
+    #
+    # Both spellings are listed per repository. Which form GitHub issues
+    # depends on the repository's settings, and trusting only the wrong one
+    # locks the account out of its own deploys.
+    #
+    # .github/workflows/oidc-trust.yml edits the live policy directly, so if
+    # this stack is ever updated, check that this default still matches what
+    # that workflow last applied.
+    Default: >-
+      repo:maxbarz-prog/remerged:*,
+      repo:maxbarz-prog@268589738/remerged@1372467146:*,
+      repo:maxbarz-prog@268589738/seedance25api@1357961617:*
+    Description: OIDC sub patterns allowed to assume the deploy role.
 
 Resources:
   GitHubOidcProvider:
@@ -40,7 +54,7 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubRepo}:*
+                token.actions.githubusercontent.com:sub: !Ref AllowedSubs
       # Broad to start (same call as the console admin user we replaced);
       # scoped down to the deployed stacks' resources once they exist.
       ManagedPolicyArns:
